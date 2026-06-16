@@ -32,148 +32,15 @@ const c = @cImport({
     @cInclude("entity.h");
 });
 
-// Shared component property parser, ported from md4x-props.h. The C header is a
-// `static` header-only function that translate-c cannot import cleanly, so the
-// parser is reimplemented here with byte-for-byte identical behavior. Only the
-// pieces consumed by the ANSI renderer (string props) are used.
-const MD_MAX_PROPS = 32;
-const MD_CLASS_BUF_SIZE = 512;
+// Shared component property parser, from the shared md4x-props.zig module
+// (previously reimplemented inline here). The ANSI renderer only consumes the
+// string props (to resolve ::alert{type="..."} colors). Local aliases preserve
+// the original call-site names used below.
 
-const MD_PROP_STRING: c_int = 0; // key="value", key='value', or key=value
-const MD_PROP_BOOLEAN: c_int = 1; // bare word (no value)
-const MD_PROP_BIND: c_int = 2; // :key='value' (JSON passthrough)
+const props = @import("md4x-props.zig");
 
-const MD_PROP = struct {
-    type: c_int,
-    key: [*c]const c.MD_CHAR,
-    key_size: c.MD_SIZE,
-    value: [*c]const c.MD_CHAR,
-    value_size: c.MD_SIZE,
-};
-
-const MD_PARSED_PROPS = struct {
-    props: [MD_MAX_PROPS]MD_PROP,
-    n_props: c_int,
-    class_buf: [MD_CLASS_BUF_SIZE]c.MD_CHAR,
-    class_len: c.MD_SIZE,
-    id: [*c]const c.MD_CHAR,
-    id_size: c.MD_SIZE,
-};
-
-fn md_parse_props(raw: [*c]const c.MD_CHAR, size: c.MD_SIZE, out: *MD_PARSED_PROPS) void {
-    @memset(std.mem.asBytes(out), 0);
-
-    if (raw == null or size == 0)
-        return;
-
-    const r: [*]const u8 = @ptrCast(raw);
-    var i: c.MD_OFFSET = 0;
-
-    while (i < size) {
-        // Skip whitespace.
-        while (i < size and (r[i] == ' ' or r[i] == '\t'))
-            i += 1;
-        if (i >= size)
-            break;
-
-        if (r[i] == '#') {
-            // #id shorthand → store as id (last wins).
-            i += 1;
-            const start = i;
-            while (i < size and r[i] != ' ' and r[i] != '\t' and r[i] != '}')
-                i += 1;
-            if (i > start) {
-                out.id = raw + start;
-                out.id_size = i - start;
-            }
-        } else if (r[i] == '.') {
-            // .class shorthand → append to merged class buffer.
-            i += 1;
-            const start = i;
-            while (i < size and r[i] != ' ' and r[i] != '\t' and r[i] != '}' and r[i] != '.')
-                i += 1;
-            if (i > start) {
-                const len = i - start;
-                if (out.class_len > 0 and out.class_len + 1 < MD_CLASS_BUF_SIZE) {
-                    out.class_buf[out.class_len] = ' ';
-                    out.class_len += 1;
-                }
-                if (out.class_len + len < MD_CLASS_BUF_SIZE) {
-                    @memcpy(@as([*]u8, @ptrCast(&out.class_buf))[out.class_len .. out.class_len + len], r[start .. start + len]);
-                    out.class_len += len;
-                }
-            }
-        } else {
-            // key="value", key='value', key=value, :key='json', or bare boolean.
-            var key_start = i;
-            var is_bind = false;
-
-            if (r[i] == ':') {
-                is_bind = true;
-                i += 1;
-                key_start = i;
-            }
-
-            while (i < size and r[i] != '=' and r[i] != ' ' and r[i] != '\t' and r[i] != '}')
-                i += 1;
-
-            if (i > key_start and i < size and r[i] == '=') {
-                // key=...
-                const key_end = i;
-                i += 1; // skip '='
-
-                if (i < size and (r[i] == '"' or r[i] == '\'')) {
-                    // Quoted value.
-                    const quote = r[i];
-                    i += 1;
-                    const val_start = i;
-                    while (i < size and r[i] != quote)
-                        i += 1;
-
-                    if (out.n_props < MD_MAX_PROPS) {
-                        const p = &out.props[@intCast(out.n_props)];
-                        out.n_props += 1;
-                        p.type = if (is_bind) MD_PROP_BIND else MD_PROP_STRING;
-                        p.key = raw + key_start;
-                        p.key_size = key_end - key_start;
-                        p.value = raw + val_start;
-                        p.value_size = i - val_start;
-                    }
-                    if (i < size) i += 1; // skip closing quote
-                } else {
-                    // Unquoted value.
-                    const val_start = i;
-                    while (i < size and r[i] != ' ' and r[i] != '\t' and r[i] != '}')
-                        i += 1;
-
-                    if (out.n_props < MD_MAX_PROPS) {
-                        const p = &out.props[@intCast(out.n_props)];
-                        out.n_props += 1;
-                        p.type = if (is_bind) MD_PROP_BIND else MD_PROP_STRING;
-                        p.key = raw + key_start;
-                        p.key_size = key_end - key_start;
-                        p.value = raw + val_start;
-                        p.value_size = i - val_start;
-                    }
-                }
-            } else if (i > key_start) {
-                // Bare word → boolean prop.
-                if (out.n_props < MD_MAX_PROPS) {
-                    const p = &out.props[@intCast(out.n_props)];
-                    out.n_props += 1;
-                    p.type = MD_PROP_BOOLEAN;
-                    p.key = raw + key_start;
-                    p.key_size = i - key_start;
-                    p.value = null;
-                    p.value_size = 0;
-                }
-            } else {
-                // Skip unrecognized character to avoid infinite loop.
-                i += 1;
-            }
-        }
-    }
-}
+const MD_PARSED_PROPS = props.MD_PARSED_PROPS;
+const md_parse_props = props.md_parse_props;
 
 const c_allocator = std.heap.c_allocator;
 
@@ -776,7 +643,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
                 var pi: c_int = 0;
                 while (pi < parsed.n_props) : (pi += 1) {
                     const prop = &parsed.props[@intCast(pi)];
-                    if (prop.type == MD_PROP_STRING and ci_eq(prop.key, prop.key_size, "type")) {
+                    if (prop.type == .string and ci_eq(prop.key, prop.key_size, "type")) {
                         color = alert_type_color(prop.value, prop.value_size);
                         if (comp.title == null or comp.title_size == 0) {
                             title = prop.value;
