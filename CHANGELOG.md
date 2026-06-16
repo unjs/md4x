@@ -11,6 +11,12 @@
 - **WASM**: New `md4x_heal` export
 - **NAPI**: New `heal` binding
 
+### Internal
+
+- **C → Zig migration**: The entire library implementation (parser, all renderers, entity table, and wasm/napi glue) was ported from C to Zig for memory safety. The C ABI and all output are byte-for-byte unchanged; the public ABI headers and the CLI driver remain C.
+- Extracted the shared component-property parser and JSON writer / YAML-to-JSON helpers into reusable Zig modules (`md4x-props.zig`, `md4x-json.zig`).
+- Fixed a pre-existing parser bug that produced nondeterministic output on orphaned block-component (`::`) and setext edge cases.
+
 ## v0.0.11
 
 ### Breaking Changes

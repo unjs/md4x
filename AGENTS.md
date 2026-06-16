@@ -3,46 +3,49 @@
 > **Always keep this file (`AGENTS.md`) and referenced `docs/*.md` files updated when making changes to the project.**
 > **Always update `CHANGELOG.md` when adding removing user-facing features, APIs, build targets, CLI options, or library behavior.**
 
-> C Markdown parser library (fork of [mity/md4c](https://github.com/mity/md4c))
+> Markdown parser library (Zig port of [mity/md4c](https://github.com/mity/md4c))
 
 - **Version:** 0.5.2 (next: 0.5.3 WIP)
 - **License:** MIT
-- **Language:** C (C89/C99 compatible)
+- **Language:** Zig (port of the original C parser, with a stable C ABI; ABI headers + CLI driver remain C)
 - **Spec:** CommonMark 0.31.2
 - **Build:** Zig (`zig build`)
 - **JS Runtime:** Bun (do **not** use npm, pnpm, yarn, or npx — use `bun`/`bunx` exclusively)
 - **Formatting:** Always run `bun fmt` after finishing code changes
 
+> **Implementation note:** The entire library (parser, all renderers, entity table, and wasm/napi glue) was migrated from C to Zig for memory safety. The C ABI is preserved unchanged and output is byte-for-byte identical to the original C implementation. The public ABI headers (`.h` files) and the CLI driver (`src/cli/*.c`) intentionally remain C.
+
 ## Project Structure
 
 ```
 src/
-  md4x.c              # Core parser (~6500 LoC)
-  md4x.h              # Parser public API
-  entity.c             # HTML entity lookup table (generated)
-  entity.h             # Entity header
-  md4x-wasm.c          # WASM exports (alloc/free + renderer wrappers)
-  md4x-napi.c          # Node.js NAPI addon (module registration + renderer wrappers)
+  md4x.zig            # Core parser (Zig port of md4c)
+  md4x.h              # Parser public API (C ABI header, retained)
+  unicode_tables.zig  # Generated Unicode tables (case folding, punct, whitespace)
+  entity.zig           # HTML entity lookup table (generated)
+  entity.h             # Entity header (C ABI, retained)
+  md4x-wasm.zig        # WASM exports (alloc/free + renderer wrappers)
+  md4x-napi.zig        # Node.js NAPI addon (module registration + renderer wrappers)
   renderers/
-    md4x-props.h       # Shared component property parser (header-only)
-    md4x-json.h        # Shared JSON writer + YAML-to-JSON helpers (header-only)
-    md4x-html.c        # HTML renderer library (~500 LoC)
-    md4x-html.h        # HTML renderer public API
-    md4x-ast.c        # AST renderer library (~530 LoC)
-    md4x-ast.h        # AST renderer public API
-    md4x-ansi.c        # ANSI terminal renderer library (~450 LoC)
-    md4x-ansi.h        # ANSI renderer public API
-    md4x-meta.c        # Meta renderer library (~300 LoC)
-    md4x-meta.h        # Meta renderer public API
-    md4x-text.c        # Plain text renderer library (~350 LoC)
-    md4x-text.h        # Plain text renderer public API
-    md4x-markdown.c    # Markdown renderer library (~820 LoC)
-    md4x-markdown.h    # Markdown renderer public API
-    md4x-heal.c        # Markdown heal/completion utility (~600 LoC)
-    md4x-heal.h        # Heal utility public API
+    md4x-props.zig     # Shared component property parser (Zig module)
+    md4x-json.zig      # Shared JSON writer + YAML-to-JSON helpers (Zig module)
+    md4x-html.zig      # HTML renderer library
+    md4x-html.h        # HTML renderer public API (C ABI, retained)
+    md4x-ast.zig      # AST renderer library
+    md4x-ast.h        # AST renderer public API (C ABI, retained)
+    md4x-ansi.zig      # ANSI terminal renderer library
+    md4x-ansi.h        # ANSI renderer public API (C ABI, retained)
+    md4x-meta.zig      # Meta renderer library
+    md4x-meta.h        # Meta renderer public API (C ABI, retained)
+    md4x-text.zig      # Plain text renderer library
+    md4x-text.h        # Plain text renderer public API (C ABI, retained)
+    md4x-markdown.zig  # Markdown renderer library
+    md4x-markdown.h    # Markdown renderer public API (C ABI, retained)
+    md4x-heal.zig      # Markdown heal/completion utility
+    md4x-heal.h        # Heal utility public API (C ABI, retained)
   cli/
-    md4x-cli.c           # CLI utility (multi-format: html, text, json, ansi, markdown, heal)
-    cmdline.c            # Command-line parser (from c-reusables)
+    md4x-cli.c           # CLI utility driver (C, multi-format: html, text, json, ansi, markdown, heal)
+    cmdline.c            # Command-line parser (C, from c-reusables)
     cmdline.h            # Command-line parser API
     md4x.1               # Man page
 packages/md4x/           # npm package
@@ -84,6 +87,8 @@ scripts/
   build-punct-map.ts      # Punctuation character map generator
   build-whitespace-map.ts # Whitespace classification generator
   _unicode-map.ts         # Shared helper for punct/whitespace map generators
+  _gen-tables-zig.py      # Generates src/unicode_tables.zig (case folding/punct/whitespace tables)
+  _gen-entity-zig.py      # Generates src/entity.zig from the WHATWG entity data
   coverity.sh             # Coverity Scan integration
   unicode/                # Unicode data files (CaseFolding.txt, DerivedGeneralCategory.txt)
 website/                 # Docs + playground (Vite + Vue)
@@ -125,7 +130,9 @@ Outputs to `zig-out/` (`bin/md4x`, `lib/libmd4x*.a`, `include/md4x*.h`).
 
 The project can also be consumed as a Zig package dependency via `build.zig.zon`.
 
-Produces four static libraries, one executable, and optional WASM/NAPI targets:
+`build.zig` compiles each Zig unit (parser, renderers, entity table) as a static library via the `addParserLib`/`addEntityLib`/`addZigRenderer` helpers, then links them into the CLI executable, the WASM target, and the NAPI targets. The CLI driver and command-line parser are still compiled from C (`src/cli/*.c`), and the WASM and NAPI roots are the Zig glue files (`src/md4x-wasm.zig`, `src/md4x-napi.zig`). The WASM JS loader (`packages/md4x/lib/wasm/common.mjs`) provides no-op `args_`/`environ_` WASI import stubs that Zig's `wasm32-wasi` startup references.
+
+Produces a set of static libraries, one executable, and optional WASM/NAPI targets:
 
 - **libmd4x** — Parser library (compiled with `-DMD4X_USE_UTF8`)
 - **libmd4x-html** — HTML renderer (links against libmd4x)
@@ -225,7 +232,7 @@ All extensions are enabled by default (`MD_DIALECT_ALL`). No dialect preset flag
 
 ## Code Generation Scripts
 
-The `scripts/` directory contains TypeScript generators for lookup tables compiled into `md4x.c`:
+The `scripts/` directory contains generators for lookup tables compiled into the parser. The TypeScript generators below produce the legacy C tables; the Python generators (`_gen-tables-zig.py`, `_gen-entity-zig.py`) produce the Zig sources (`src/unicode_tables.zig`, `src/entity.zig`) used by the current build:
 
 - `build-entity-map.ts` — Fetches [WHATWG entities.json](https://html.spec.whatwg.org/entities.json), generates `entity.c`
 - `build-folding-map.ts` — Unicode case folding from `scripts/unicode/CaseFolding.txt`
