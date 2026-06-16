@@ -26,6 +26,10 @@ export function _getExports() {
 
 export const _imports = {
   wasi_snapshot_preview1: {
+    args_get: () => 0,
+    args_sizes_get: () => 0,
+    environ_get: () => 0,
+    environ_sizes_get: () => 0,
     fd_close: () => 0,
     fd_filestat_get: () => 0,
     fd_pwrite: () => 0,

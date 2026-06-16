@@ -11,8 +11,8 @@ const version = std.SemanticVersion.parse(zon.version) catch unreachable;
 // sources remain shared across all artifacts, so this base is empty.
 const renderer_sources = [_][]const u8{};
 const cli_sources = renderer_sources ++ .{ "src/cli/md4x-cli.c", "src/cli/cmdline.c" };
-const wasm_sources = renderer_sources ++ .{"src/md4x-wasm.c"};
-const napi_sources = renderer_sources ++ .{"src/md4x-napi.c"};
+// WASM/NAPI glue are now Zig (src/md4x-wasm.zig, src/md4x-napi.zig). They are the
+// root source of their respective artifacts; no C glue sources remain.
 
 // Renderers/utilities ported from C to Zig. Each is compiled as a static lib
 // from src/renderers/<name>.zig (via addZigRenderer) and linked into every
@@ -31,7 +31,6 @@ const c_flags: []const []const u8 = &.{
     "-Wdeclaration-after-statement",
     "-O2",
 };
-const napi_c_flags = c_flags ++ &[_][]const u8{"-DNODE_GYP_MODULE_NAME=md4x"};
 
 const libyaml_c_flags: []const []const u8 = &.{
     "-DYAML_DECLARE_STATIC",
@@ -176,6 +175,7 @@ fn addWasm(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
     const md4x_wasm = b.addExecutable(.{
         .name = "md4x",
         .root_module = b.createModule(.{
+            .root_source_file = b.path("src/md4x-wasm.zig"),
             .target = wasm_target,
             .optimize = opts.optimize,
             .link_libc = true,
@@ -183,7 +183,6 @@ fn addWasm(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
         }),
     });
     md4x_wasm.rdynamic = true;
-    md4x_wasm.root_module.addCSourceFiles(.{ .files = &wasm_sources, .flags = c_flags });
     md4x_wasm.root_module.addCSourceFiles(opts.libyaml_src);
     for (opts.include_paths) |p| md4x_wasm.root_module.addIncludePath(p);
     md4x_wasm.root_module.linkLibrary(addParserLib(b, wasm_target, opts.optimize, opts.strip, opts.include_paths));
@@ -253,16 +252,23 @@ fn addNapi(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
             .linkage = .dynamic,
             .name = "md4x",
             .root_module = b.createModule(.{
+                .root_source_file = b.path("src/md4x-napi.zig"),
                 .target = cross_target,
                 .optimize = opts.optimize,
                 .link_libc = true,
                 .strip = opts.strip,
             }),
         });
-        napi_lib.root_module.addCSourceFiles(.{ .files = &napi_sources, .flags = napi_c_flags });
         napi_lib.root_module.addCSourceFiles(opts.libyaml_src);
         for (opts.include_paths) |p| napi_lib.root_module.addIncludePath(p);
-        napi_lib.root_module.addIncludePath(.{ .cwd_relative = napi_include });
+        // node_api.h lives outside the project tree (node_modules). Resolve to an
+        // absolute path so the root Zig module's @cImport translate-c step finds
+        // it regardless of the sub-process working directory.
+        const napi_include_abs = if (std.fs.path.isAbsolute(napi_include))
+            napi_include
+        else
+            b.pathFromRoot(napi_include);
+        napi_lib.root_module.addIncludePath(.{ .cwd_relative = napi_include_abs });
         napi_lib.root_module.linkLibrary(addParserLib(b, cross_target, opts.optimize, opts.strip, opts.include_paths));
         napi_lib.root_module.linkLibrary(addEntityLib(b, cross_target, opts.optimize, opts.strip, opts.include_paths));
         for (zig_renderers) |name| napi_lib.root_module.linkLibrary(addZigRenderer(b, name, cross_target, opts.optimize, opts.strip, opts.include_paths));
