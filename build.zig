@@ -5,11 +5,19 @@ const version = std.SemanticVersion.parse(zon.version) catch unreachable;
 
 // --- Source files ---
 
-const parser_source = "src/md4x.c";
-const renderer_sources = [_][]const u8{ "src/renderers/md4x-html.c", "src/renderers/md4x-ast.c", "src/renderers/md4x-ansi.c", "src/renderers/md4x-meta.c", "src/renderers/md4x-text.c", "src/renderers/md4x-markdown.c", "src/renderers/md4x-heal.c", "src/entity.c" };
+// Parser is now src/md4x.zig (ported from src/md4x.c), linked as its own static
+// lib (addParserLib) into every artifact, exporting the md4x.h C ABI (md_parse).
+// Entity table is now src/entity.zig (linked as its own static lib). No C
+// sources remain shared across all artifacts, so this base is empty.
+const renderer_sources = [_][]const u8{};
 const cli_sources = renderer_sources ++ .{ "src/cli/md4x-cli.c", "src/cli/cmdline.c" };
 const wasm_sources = renderer_sources ++ .{"src/md4x-wasm.c"};
 const napi_sources = renderer_sources ++ .{"src/md4x-napi.c"};
+
+// Renderers/utilities ported from C to Zig. Each is compiled as a static lib
+// from src/renderers/<name>.zig (via addZigRenderer) and linked into every
+// artifact (CLI exe, WASM, NAPI). Add a name here as each unit is migrated.
+const zig_renderers = [_][]const u8{ "md4x-heal", "md4x-text", "md4x-markdown", "md4x-ansi", "md4x-meta", "md4x-ast", "md4x-html" };
 
 // --- Compiler flags ---
 
@@ -23,7 +31,6 @@ const c_flags: []const []const u8 = &.{
     "-Wdeclaration-after-statement",
     "-O2",
 };
-const c_flags_utf8 = c_flags ++ &[_][]const u8{"-DMD4X_USE_UTF8"};
 const napi_c_flags = c_flags ++ &[_][]const u8{"-DNODE_GYP_MODULE_NAME=md4x"};
 
 const libyaml_c_flags: []const []const u8 = &.{
@@ -73,10 +80,12 @@ pub fn build(b: *std.Build) void {
         .name = "md4x",
         .root_module = b.createModule(mod_opts),
     });
-    exe.root_module.addCSourceFile(.{ .file = b.path(parser_source), .flags = c_flags_utf8 });
     exe.root_module.addCSourceFiles(.{ .files = &cli_sources, .flags = c_flags });
     exe.root_module.addCSourceFiles(libyaml_src);
     for (include_paths) |p| exe.root_module.addIncludePath(p);
+    exe.root_module.linkLibrary(addParserLib(b, target, optimize, strip, include_paths));
+    exe.root_module.linkLibrary(addEntityLib(b, target, optimize, strip, include_paths));
+    for (zig_renderers) |name| exe.root_module.linkLibrary(addZigRenderer(b, name, target, optimize, strip, include_paths));
     b.installArtifact(exe);
 
     // --- Fuzzer targets ---
@@ -96,6 +105,68 @@ pub fn build(b: *std.Build) void {
     _ = addNapi(b, pkg_opts);
 }
 
+/// Compile a Zig-ported renderer/utility (src/renderers/<name>.zig) as a static
+/// library. Returns the compile step so callers can `linkLibrary` it into their
+/// artifact. The project include paths (src, src/renderers, libyaml/include) are
+/// added so any `@cImport` of md4x.h / entity.h / yaml.h resolves. Mirrors the
+/// per-artifact target/optimize/strip so ABI/codegen match.
+fn addZigRenderer(b: *std.Build, name: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, strip: bool, include_paths: []const std.Build.LazyPath) *std.Build.Step.Compile {
+    const lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = name,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(b.fmt("src/renderers/{s}.zig", .{name})),
+            .target = target,
+            .optimize = optimize,
+            .strip = strip,
+            .link_libc = true,
+        }),
+    });
+    for (include_paths) |p| lib.root_module.addIncludePath(p);
+    return lib;
+}
+
+/// Compile the parser (src/md4x.zig, ported from src/md4x.c) as a static library
+/// exporting the md4x.h C ABI (md_parse). Linked into every artifact (CLI exe,
+/// WASM, NAPI). The project include paths (src, src/renderers, libyaml/include)
+/// are added so its `@cImport` of md4x.h / entity.h resolves. Mirrors the
+/// per-artifact target/optimize/strip so ABI/codegen match.
+fn addParserLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, strip: bool, include_paths: []const std.Build.LazyPath) *std.Build.Step.Compile {
+    const lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "md4x",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/md4x.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = strip,
+            .link_libc = true,
+        }),
+    });
+    for (include_paths) |p| lib.root_module.addIncludePath(p);
+    return lib;
+}
+
+/// Compile the HTML entity table (src/entity.zig, ported from src/entity.c) as a
+/// static library exporting the entity.h C ABI (entity_lookup). Linked into every
+/// artifact so both the C parser (md4x.c) and the Zig renderers (@cImport entity.h)
+/// resolve their entity references. Mirrors target/optimize/strip for ABI match.
+fn addEntityLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, strip: bool, include_paths: []const std.Build.LazyPath) *std.Build.Step.Compile {
+    const lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "entity",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/entity.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = strip,
+            .link_libc = true,
+        }),
+    });
+    for (include_paths) |p| lib.root_module.addIncludePath(p);
+    return lib;
+}
+
 fn addWasm(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
@@ -112,10 +183,12 @@ fn addWasm(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
         }),
     });
     md4x_wasm.rdynamic = true;
-    md4x_wasm.root_module.addCSourceFile(.{ .file = b.path(parser_source), .flags = c_flags_utf8 });
     md4x_wasm.root_module.addCSourceFiles(.{ .files = &wasm_sources, .flags = c_flags });
     md4x_wasm.root_module.addCSourceFiles(opts.libyaml_src);
     for (opts.include_paths) |p| md4x_wasm.root_module.addIncludePath(p);
+    md4x_wasm.root_module.linkLibrary(addParserLib(b, wasm_target, opts.optimize, opts.strip, opts.include_paths));
+    md4x_wasm.root_module.linkLibrary(addEntityLib(b, wasm_target, opts.optimize, opts.strip, opts.include_paths));
+    for (zig_renderers) |name| md4x_wasm.root_module.linkLibrary(addZigRenderer(b, name, wasm_target, opts.optimize, opts.strip, opts.include_paths));
     md4x_wasm.root_module.export_symbol_names = &.{
         "md4x_alloc",
         "md4x_free",
@@ -186,11 +259,13 @@ fn addNapi(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
                 .strip = opts.strip,
             }),
         });
-        napi_lib.root_module.addCSourceFile(.{ .file = b.path(parser_source), .flags = c_flags_utf8 });
         napi_lib.root_module.addCSourceFiles(.{ .files = &napi_sources, .flags = napi_c_flags });
         napi_lib.root_module.addCSourceFiles(opts.libyaml_src);
         for (opts.include_paths) |p| napi_lib.root_module.addIncludePath(p);
         napi_lib.root_module.addIncludePath(.{ .cwd_relative = napi_include });
+        napi_lib.root_module.linkLibrary(addParserLib(b, cross_target, opts.optimize, opts.strip, opts.include_paths));
+        napi_lib.root_module.linkLibrary(addEntityLib(b, cross_target, opts.optimize, opts.strip, opts.include_paths));
+        for (zig_renderers) |name| napi_lib.root_module.linkLibrary(addZigRenderer(b, name, cross_target, opts.optimize, opts.strip, opts.include_paths));
 
         if (nt.dlltool_machine) |machine| {
             const dlltool = b.addSystemCommand(&.{
