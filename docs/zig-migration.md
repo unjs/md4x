@@ -16,18 +16,18 @@ for byte-parity, then independently validated for memory-safety/bugs by a backgr
 
 ## Order (leaf → core; renderers before parser)
 
-| #   | Unit                                                           | File                                 | Status                    |
-| --- | -------------------------------------------------------------- | ------------------------------------ | ------------------------- |
-| 1   | heal (standalone, no deps)                                     | `src/renderers/md4x-heal.c` → `.zig` | ✅ DONE (validated clean) |
-| 2   | text renderer                                                  | `src/renderers/md4x-text.c`          | ✅ DONE (validated clean) |
-| 3   | meta renderer (+libyaml interop)                               | `src/renderers/md4x-meta.c`          | ✅ DONE (validated clean) |
-| 4   | ast renderer (tagged-union safety win)                         | `src/renderers/md4x-ast.c`           | ✅ DONE (validated clean) |
-| 5   | ansi renderer                                                  | `src/renderers/md4x-ansi.c`          | ✅ DONE (validated clean) |
-| 6   | markdown renderer                                              | `src/renderers/md4x-markdown.c`      | ✅ DONE (validated clean) |
-| 7   | html renderer                                                  | `src/renderers/md4x-html.c`          | ✅ DONE (validated clean) |
-| 8   | shared utils (props.h / json.h)                                | `src/renderers/*.h`                  | ⬜                        |
-| 9   | entity table (comptime-generated)                              | `src/entity.c`                       | ✅ DONE (value-identical, 19.5k diff + spec) |
-| 10  | **core parser** (8047 LoC → `md4x.zig` 7453 LoC)               | `src/md4x.c`                         | ✅ MIGRATED & INTEGRATED · 🔬 validating (A–E all 0-diff; gate green; 972k-cmp differential 0 div) |
+| #   | Unit                                             | File                                 | Status                                                                                             |
+| --- | ------------------------------------------------ | ------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| 1   | heal (standalone, no deps)                       | `src/renderers/md4x-heal.c` → `.zig` | ✅ DONE (validated clean)                                                                          |
+| 2   | text renderer                                    | `src/renderers/md4x-text.c`          | ✅ DONE (validated clean)                                                                          |
+| 3   | meta renderer (+libyaml interop)                 | `src/renderers/md4x-meta.c`          | ✅ DONE (validated clean)                                                                          |
+| 4   | ast renderer (tagged-union safety win)           | `src/renderers/md4x-ast.c`           | ✅ DONE (validated clean)                                                                          |
+| 5   | ansi renderer                                    | `src/renderers/md4x-ansi.c`          | ✅ DONE (validated clean)                                                                          |
+| 6   | markdown renderer                                | `src/renderers/md4x-markdown.c`      | ✅ DONE (validated clean)                                                                          |
+| 7   | html renderer                                    | `src/renderers/md4x-html.c`          | ✅ DONE (validated clean)                                                                          |
+| 8   | shared utils (props.h / json.h)                  | `src/renderers/*.h`                  | ⬜                                                                                                 |
+| 9   | entity table (comptime-generated)                | `src/entity.c`                       | ✅ DONE (value-identical, 19.5k diff + spec)                                                       |
+| 10  | **core parser** (8047 LoC → `md4x.zig` 7453 LoC) | `src/md4x.c`                         | ✅ MIGRATED & INTEGRATED · 🔬 validating (A–E all 0-diff; gate green; 972k-cmp differential 0 div) |
 
 ## Per-step protocol
 
@@ -62,6 +62,6 @@ for byte-parity, then independently validated for memory-safety/bugs by a backgr
 - **Parser strategy = multi-pass full port** (user choice): build `src/md4x.zig` across several subagent passes in dependency order (A foundation → B ref-defs/links → C inline engine → D block analysis → E block processing + wire+full-gate). Build stays on C parser until the final pass. Handoff/plan tracked in `wt-parser/PARSER-PORT.md`. Pass A (foundation: MD_CTX, char-class/UTF-8 helpers, buffers, entity hook, attributes; wires verified `unicode_tables.zig`) launched.
 - **markdown VALIDATED CLEAN** (line-by-line review, Debug+valgrind over ~83k inputs, 0 leaks/UB; divergences all traced to the parser UB above, not the renderer).
 - **ast integrated** (1774 LoC, the hardest). zig_renderers now `[heal,text,markdown,ansi,meta,ast]`; only html.c + entity.c remain as C renderers. Full gate green. Byte-parity ~100k cases. The dangerous C `detail` union is now a **flat Zig struct** → structurally kills the union-type-confusion bug class (AGENTS #3) while preserving `tag_is_dynamic`-first dispatch + byte-identical output. Self-ported props/json/yaml writers (no static-header cImport).
-- ⚠️ **Parser UB flagged for step 10:** original `md4x.c` has codegen-dependent UB on malformed nested components (`::::name … :::`, closer with fewer colons than opener) — gcc vs `zig cc` produce different trailing-text output. Renderers are byte-identical against a `zig cc`-built reference; this is a *parser* latent bug to fix/lock down when migrating the core. (Validators must compile their C reference with `zig cc`, not gcc, to avoid a false-positive divergence here.)
+- ⚠️ **Parser UB flagged for step 10:** original `md4x.c` has codegen-dependent UB on malformed nested components (`::::name … :::`, closer with fewer colons than opener) — gcc vs `zig cc` produce different trailing-text output. Renderers are byte-identical against a `zig cc`-built reference; this is a _parser_ latent bug to fix/lock down when migrating the core. (Validators must compile their C reference with `zig cc`, not gcc, to avoid a false-positive divergence here.)
 - **WASM linkage trap (important for future shared-util migrations):** `@cImport`-ing header-only `static` helpers (`md4x-json.h`, `md4x-props.h`) links natively but becomes an unresolvable `env` import in WASM. Fix used by meta/ansi: don't cImport those — call real external symbols (libyaml) or reimplement the helper in Zig. Implies step 8 (props.h/json.h) should become external-linkage compiled units or full Zig ports.
 - **Parallel renderer batch**: meta, ast, ansi, markdown, html each migrating in its own seeded worktree (`wt-<name>`, off main, with heal+text already applied). Each produces only its `md4x-<name>.zig` (self-verifies build + run-tests + differential fuzz vs original C). **Integration is serialized by me on main:** collect all `.zig` files, then rewrite `build.zig` once to a generic `addZigRenderer(name)` helper + renderer list, then run the full gate, then spawn per-renderer validators. (CLI has no `meta` format → meta agent uses a direct harness.)

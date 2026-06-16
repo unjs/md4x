@@ -292,12 +292,12 @@ tables were verified over all 1,114,113 codepoints.
     (emphasis/strong/mod-3/crossing, code spans incl. multiline + 32-cap overflow, entities, inline/ref/shortcut/
     collapsed/nested links + images, `<...>`/permissive url/www/email autolinks incl. balanced parens, raw HTML
     tag/comment/PI, strikethrough/latex/wiki, inline components with content+props, `{attrs}` on emph/code/span/
-    link, hard/soft breaks, escapes, whitespace) × 6 flag sets (DIALECT*ALL `0xf7f0c`, COMMONMARK `0`,
+    link, hard/soft breaks, escapes, whitespace) × 6 flag sets (DIALECT\*ALL `0xf7f0c`, COMMONMARK `0`,
     ALL+COLLAPSE `0xf7f0d`, COLLAPSE-only `0x1`, ALERTS-only `0x80000`, COMPONENTS+ATTRIBUTES `0x60000`); plus
     1000 randomized fuzz inputs (mark-char-biased alphabet) and 10 pathological inputs (200 backticks, 300
     asterisks, 100 nested brackets, code-cap overflow, `\**~`×100, `[a](b)`×50, 100 `$`, autolink/wiki/comp spam) ×
-4 flag sets. The Zig oracle is **valgrind-clean** (no UAF/double-free/leak) on the link-title `ptr_stack`,
-component, and `{attrs}` paths — verifying the AGENTS-flagged double-free/realloc/union risks don't recur
+    4 flag sets. The Zig oracle is **valgrind-clean** (no UAF/double-free/leak) on the link-title `ptr_stack`,
+    component, and `{attrs}` paths — verifying the AGENTS-flagged double-free/realloc/union risks don't recur
     (the only "leak" valgrind found was the harness's own input buffer, in oracle_zig.zig main, not the parser).
 
   **Compile-only (not unit-diffed), validated end-to-end at Pass E:** nothing in subsystem C is compile-only —
