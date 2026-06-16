@@ -19,8 +19,15 @@
 
 ```
 src/
-  md4x.zig            # Core parser (Zig port of md4c)
+  md4x.zig            # Parser root (exports md_parse; imports src/parser/ modules)
   md4x.h              # Parser public API (C ABI header, retained)
+  parser/             # Parser implementation, split from the monolithic md4x.zig
+    types.zig         # MD_CTX + internal structs, enums, shared @cImport
+    util.zig          # char/UTF-8/unicode helpers, buffers, entity recognizers, attributes
+    refdefs.zig       # ref-def dictionary + link/autolink/wiki recognizers
+    inlines.zig       # inline mark engine (emphasis mod-3) + span/text emission
+    blocks.zig        # line classification + container/block analysis
+    process.zig       # block-content processing + md_process_doc
   unicode_tables.zig  # Generated Unicode tables (case folding, punct, whitespace)
   entity.zig           # HTML entity lookup table (generated)
   entity.h             # Entity header (C ABI, retained)
