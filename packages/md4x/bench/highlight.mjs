@@ -47,8 +47,12 @@ if (md4xOut !== markdownItOut) {
     if (md4xOut[i] !== markdownItOut[i]) {
       const ctx = 30;
       console.log(`  at pos ${i}:`);
-      console.log(`    - ...${md4xOut.slice(Math.max(0, i - ctx), i + ctx)}...`);
-      console.log(`    + ...${markdownItOut.slice(Math.max(0, i - ctx), i + ctx)}...`);
+      console.log(
+        `    - ...${md4xOut.slice(Math.max(0, i - ctx), i + ctx)}...`,
+      );
+      console.log(
+        `    + ...${markdownItOut.slice(Math.max(0, i - ctx), i + ctx)}...`,
+      );
       // Skip ahead past this diff region
       while (i < md4xOut.length && md4xOut[i] !== markdownItOut[i]) i++;
       if (++shown >= maxDiffs) {
