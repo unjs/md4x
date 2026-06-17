@@ -569,8 +569,7 @@ pub inline fn md_is_link_destination(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end
 // Faithful port of md_is_link_title (md4x.c ~2144).
 pub fn md_is_link_title(
     ctx: *MD_CTX,
-    lines: [*c]const MD_LINE,
-    n_lines: MD_SIZE,
+    lines: []const MD_LINE,
     beg: OFF,
     p_end: *OFF,
     p_beg_line_index: *MD_SIZE,
@@ -587,7 +586,7 @@ pub fn md_is_link_title(
         off += 1;
     if (off >= lines[line_index].end) {
         line_index += 1;
-        if (line_index >= n_lines)
+        if (line_index >= lines.len)
             return FALSE;
         off = lines[line_index].beg;
     }
@@ -607,7 +606,7 @@ pub fn md_is_link_title(
 
     p_contents_beg.* = off;
 
-    while (line_index < n_lines) {
+    while (line_index < lines.len) {
         const line_end = lines[line_index].end;
 
         while (off < line_end) {
@@ -677,7 +676,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n
         return FALSE;
 
     // (Optional) title. Only a title if nothing more follows on its last line.
-    if (md_is_link_title(ctx, lines + line_index, n_lines - line_index, off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) != 0 and
+    if (md_is_link_title(ctx, lines[line_index..n_lines], off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) != 0 and
         off >= lines[line_index + tmp_line_index].end)
     {
         title_is_multiline = (tmp_line_index != title_contents_line_index);
@@ -839,7 +838,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: M
         return FALSE;
 
     // (Optional) title.
-    if (md_is_link_title(ctx, lines + line_index, n_lines - line_index, off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) != 0) {
+    if (md_is_link_title(ctx, lines[line_index..n_lines], off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) != 0) {
         title_is_multiline = (tmp_line_index != title_contents_line_index);
         title_contents_line_index += line_index;
         line_index += tmp_line_index;
