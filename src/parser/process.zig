@@ -413,7 +413,6 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
     var beg: OFF = fence_line.beg;
     var end: OFF = fence_line.end;
     const fence_ch: CHAR = CH(ctx, fence_line.beg);
-    var ret: c_int = 0;
 
     // Skip the fence itself.
     while (beg < ctx.size and CH(ctx, beg) == fence_ch) beg += 1;
@@ -423,14 +422,12 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
     while (end > beg and CH(ctx, end - 1) == ' ') end -= 1;
 
     // Build info string attribute (full info string).
-    ret = md_build_attribute(ctx, STR(ctx, beg), end - beg, 0, &det.info, info_build);
-    if (ret < 0) return ret;
+    md_build_attribute(ctx, STR(ctx, beg), end - beg, 0, &det.info, info_build) catch return -1;
 
     // Build lang attribute (first word of info string).
     var lang_end: OFF = beg;
     while (lang_end < end and !ISWHITESPACE(ctx, lang_end)) lang_end += 1;
-    ret = md_build_attribute(ctx, STR(ctx, beg), lang_end - beg, 0, &det.lang, lang_build);
-    if (ret < 0) return ret;
+    md_build_attribute(ctx, STR(ctx, beg), lang_end - beg, 0, &det.lang, lang_build) catch return -1;
 
     det.fence_char = fence_ch;
 
@@ -496,8 +493,7 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
 
         // Build filename attribute (handling backslash escapes).
         if (has_filename != 0 and fn_end > fn_beg) {
-            ret = md_build_attribute(ctx, STR(ctx, fn_beg), fn_end - fn_beg, 0, &det.filename, filename_build);
-            if (ret < 0) return ret;
+            md_build_attribute(ctx, STR(ctx, fn_beg), fn_end - fn_beg, 0, &det.filename, filename_build) catch return -1;
         }
 
         // Parse highlights into expanded integer array.
@@ -561,7 +557,7 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
         }
     }
 
-    return ret;
+    return 0;
 }
 
 // md4x.c ~5714.
@@ -725,11 +721,10 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     const t_end = info.title_end;
 
                     comp_name_build = .{};
-                    ret = md_build_attribute(ctx, STR(ctx, name_beg), name_end - name_beg, 0, &det.component.tag_name, &comp_name_build);
-                    if (ret < 0) {
+                    md_build_attribute(ctx, STR(ctx, name_beg), name_end - name_beg, 0, &det.component.tag_name, &comp_name_build) catch {
                         md_free_attribute(ctx, &comp_name_build);
-                        return ret;
-                    }
+                        return -1;
+                    };
                     clean_component_detail = true;
 
                     if (props_beg > 0 and props_end > props_beg) {
@@ -750,11 +745,10 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     const name_end = info.name_end;
 
                     comp_name_build = .{};
-                    ret = md_build_attribute(ctx, STR(ctx, name_beg), name_end - name_beg, 0, &det.tmpl.name, &comp_name_build);
-                    if (ret < 0) {
+                    md_build_attribute(ctx, STR(ctx, name_beg), name_end - name_beg, 0, &det.tmpl.name, &comp_name_build) catch {
                         md_free_attribute(ctx, &comp_name_build);
-                        return ret;
-                    }
+                        return -1;
+                    };
                     clean_component_detail = true;
                 }
             },
@@ -766,11 +760,10 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     const type_end = info.type_end;
 
                     comp_name_build = .{};
-                    ret = md_build_attribute(ctx, STR(ctx, type_beg), type_end - type_beg, 0, &det.alert.type_name, &comp_name_build);
-                    if (ret < 0) {
+                    md_build_attribute(ctx, STR(ctx, type_beg), type_end - type_beg, 0, &det.alert.type_name, &comp_name_build) catch {
                         md_free_attribute(ctx, &comp_name_build);
-                        return ret;
-                    }
+                        return -1;
+                    };
                     clean_component_detail = true;
                 }
             },

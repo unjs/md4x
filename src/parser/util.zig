@@ -572,7 +572,7 @@ pub const MD_ATTRIBUTE_BUILD = struct {
 
 pub const MD_BUILD_ATTR_NO_ESCAPES: c_uint = 0x0001;
 
-pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, ttype: c.MD_TEXTTYPE, off: OFF) c_int {
+pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, ttype: c.MD_TEXTTYPE, off: OFF) error{OutOfMemory}!void {
     if (build.substr_count >= build.substr_alloc) {
         build.substr_alloc = if (build.substr_alloc > 0)
             build.substr_alloc + @divTrunc(build.substr_alloc, 2)
@@ -585,7 +585,7 @@ pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, tty
         const new_types = c_realloc_array(c.MD_TEXTTYPE, build.substr_types, alloc_u);
         if (new_types == null) {
             md_log(ctx, "realloc() failed.");
-            return -1;
+            return error.OutOfMemory;
         }
         build.substr_types = new_types;
 
@@ -593,7 +593,7 @@ pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, tty
         const new_offsets = c_realloc_array(OFF, build.substr_offsets, alloc_u + 1);
         if (new_offsets == null) {
             md_log(ctx, "realloc() failed.");
-            return -1;
+            return error.OutOfMemory;
         }
         build.substr_offsets = new_offsets;
     }
@@ -601,7 +601,6 @@ pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, tty
     build.substr_types[@intCast(build.substr_count)] = ttype;
     build.substr_offsets[@intCast(build.substr_count)] = off;
     build.substr_count += 1;
-    return 0;
 }
 
 pub fn md_free_attribute(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD) void {
@@ -621,11 +620,9 @@ pub fn md_free_attribute(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD) void {
     }
 }
 
-pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, flags: c_uint, attr: *c.MD_ATTRIBUTE, build: *MD_ATTRIBUTE_BUILD) c_int {
+pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, flags: c_uint, attr: *c.MD_ATTRIBUTE, build: *MD_ATTRIBUTE_BUILD) error{OutOfMemory}!void {
     var raw_off: OFF = 0;
     var off: OFF = 0;
-    var ret: c_int = 0;
-    _ = &ret;
 
     // C: memset(build, 0, sizeof(MD_ATTRIBUTE_BUILD)). Use zeroes to match the
     // byte-level zero-init exactly (defaults could leave padding uninitialized).
@@ -656,7 +653,7 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
         if (buf == null) {
             md_log(ctx, "malloc() failed.");
             md_free_attribute(ctx, build);
-            return -1;
+            return error.OutOfMemory;
         }
         build.text = buf;
 
@@ -665,10 +662,10 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
 
         while (raw_off < raw_size) {
             if (raw_text[raw_off] == 0) {
-                if (md_build_attr_append_substr(ctx, build, c.MD_TEXT_NULLCHAR, off) < 0) {
+                md_build_attr_append_substr(ctx, build, c.MD_TEXT_NULLCHAR, off) catch {
                     md_free_attribute(ctx, build);
-                    return -1;
-                }
+                    return error.OutOfMemory;
+                };
                 @memcpy(@as([*]u8, @ptrCast(build.text + off))[0..1], @as([*]const u8, @ptrCast(raw_text + raw_off))[0..1]);
                 off += 1;
                 raw_off += 1;
@@ -678,10 +675,10 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
             if (raw_text[raw_off] == '&') {
                 var ent_end: OFF = undefined;
                 if (md_is_entity_str(ctx, raw_text, raw_off, raw_size, &ent_end)) {
-                    if (md_build_attr_append_substr(ctx, build, c.MD_TEXT_ENTITY, off) < 0) {
+                    md_build_attr_append_substr(ctx, build, c.MD_TEXT_ENTITY, off) catch {
                         md_free_attribute(ctx, build);
-                        return -1;
-                    }
+                        return error.OutOfMemory;
+                    };
                     const n: usize = @intCast(ent_end - raw_off);
                     @memcpy(@as([*]u8, @ptrCast(build.text + off))[0..n], @as([*]const u8, @ptrCast(raw_text + raw_off))[0..n]);
                     off += ent_end - raw_off;
@@ -691,10 +688,10 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
             }
 
             if (build.substr_count == 0 or build.substr_types[@intCast(build.substr_count - 1)] != c.MD_TEXT_NORMAL) {
-                if (md_build_attr_append_substr(ctx, build, c.MD_TEXT_NORMAL, off) < 0) {
+                md_build_attr_append_substr(ctx, build, c.MD_TEXT_NORMAL, off) catch {
                     md_free_attribute(ctx, build);
-                    return -1;
-                }
+                    return error.OutOfMemory;
+                };
             }
 
             if ((flags & MD_BUILD_ATTR_NO_ESCAPES) == 0 and
@@ -715,7 +712,6 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
     attr.size = off;
     attr.substr_offsets = build.substr_offsets;
     attr.substr_types = build.substr_types;
-    return 0;
 }
 
 // ============================================================================

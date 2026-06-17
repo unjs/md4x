@@ -1841,9 +1841,13 @@ pub fn md_enter_leave_span_a(ctx: *MD_CTX, enter: c_int, ty: c.MD_SPANTYPE, dest
     var det: c.MD_SPAN_A_DETAIL = std.mem.zeroes(c.MD_SPAN_A_DETAIL);
     var ret: c_int = 0;
 
-    ret = md_build_attribute(ctx, dest, dest_size, if (is_autolink != 0) MD_BUILD_ATTR_NO_ESCAPES else 0, &det.href, &href_build);
+    md_build_attribute(ctx, dest, dest_size, if (is_autolink != 0) MD_BUILD_ATTR_NO_ESCAPES else 0, &det.href, &href_build) catch {
+        ret = -1;
+    };
     if (ret == 0) {
-        ret = md_build_attribute(ctx, title, title_size, 0, &det.title, &title_build);
+        md_build_attribute(ctx, title, title_size, 0, &det.title, &title_build) catch {
+            ret = -1;
+        };
     }
     if (ret == 0) {
         det.is_autolink = is_autolink;
@@ -1861,7 +1865,9 @@ pub fn md_enter_leave_span_wikilink(ctx: *MD_CTX, enter: c_int, target: [*c]cons
     var det: c.MD_SPAN_WIKILINK_DETAIL = std.mem.zeroes(c.MD_SPAN_WIKILINK_DETAIL);
     var ret: c_int = 0;
 
-    ret = md_build_attribute(ctx, target, target_size, 0, &det.target, &target_build);
+    md_build_attribute(ctx, target, target_size, 0, &det.target, &target_build) catch {
+        ret = -1;
+    };
     if (ret == 0) {
         ret = if (enter != 0) mdEnterSpan(ctx, c.MD_SPAN_WIKILINK, &det) else mdLeaveSpan(ctx, c.MD_SPAN_WIKILINK, &det);
     }
@@ -1876,7 +1882,9 @@ pub fn md_enter_leave_span_component(ctx: *MD_CTX, enter: c_int, tag: [*c]const 
     var det: c.MD_SPAN_COMPONENT_DETAIL = std.mem.zeroes(c.MD_SPAN_COMPONENT_DETAIL);
     var ret: c_int = 0;
 
-    ret = md_build_attribute(ctx, tag, tag_size, 0, &det.tag_name, &tag_build);
+    md_build_attribute(ctx, tag, tag_size, 0, &det.tag_name, &tag_build) catch {
+        ret = -1;
+    };
     if (ret == 0) {
         det.raw_props = raw_props;
         det.raw_props_size = raw_props_size;
@@ -1894,9 +1902,13 @@ pub fn md_enter_leave_span_a_with_attrs(ctx: *MD_CTX, enter: c_int, ty: c.MD_SPA
     var det: c.MD_SPAN_A_DETAIL = std.mem.zeroes(c.MD_SPAN_A_DETAIL);
     var ret: c_int = 0;
 
-    ret = md_build_attribute(ctx, dest, dest_size, if (is_autolink != 0) MD_BUILD_ATTR_NO_ESCAPES else 0, &det.href, &href_build);
+    md_build_attribute(ctx, dest, dest_size, if (is_autolink != 0) MD_BUILD_ATTR_NO_ESCAPES else 0, &det.href, &href_build) catch {
+        ret = -1;
+    };
     if (ret == 0) {
-        ret = md_build_attribute(ctx, title, title_size, 0, &det.title, &title_build);
+        md_build_attribute(ctx, title, title_size, 0, &det.title, &title_build) catch {
+            ret = -1;
+        };
     }
     if (ret == 0) {
         det.is_autolink = is_autolink;
