@@ -112,7 +112,9 @@ pub const MD_BLOCK = extern struct {
 // fields since only the *values* matter (containers live in ctx.containers, a
 // distinct MD_CONTAINER[] array, not in block_bytes — so exact bit packing is
 // irrelevant, mirroring the MD_REF_DEF bitfield decision in Pass B).
-pub const MD_CONTAINER = extern struct {
+// Internal-only (never crosses the C ABI, never stored in block_bytes); drop
+// `extern` so the compiler may lay out / pad the fields optimally.
+pub const MD_CONTAINER = struct {
     ch: CHAR = 0,
     is_loose: u8 = 0,
     is_task: u8 = 0,
