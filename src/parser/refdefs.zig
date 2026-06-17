@@ -385,7 +385,7 @@ pub fn md_free_ref_defs(ctx: *MD_CTX) void {
         if (def.title_needs_free)
             std.c.free(def.title);
     }
-    ctx.ref_defs.deinit(c_allocator);
+    ctx.ref_defs.deinit(ctx.alloc);
 }
 
 // ============================================================================
@@ -687,7 +687,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
     // So, it _is_ a reference definition. Remember it.
     // Reserve (but do not yet commit) one slot: the abort paths below must not
     // leave a half-filled committed entry, so we only bump items.len on success.
-    ctx.ref_defs.ensureUnusedCapacity(c_allocator, 1) catch {
+    ctx.ref_defs.ensureUnusedCapacity(ctx.alloc, 1) catch {
         ctx.log("realloc() failed.");
         // ret stays 0 → abort.
         return md_is_link_reference_definition_abort(def, ret);

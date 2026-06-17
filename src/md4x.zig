@@ -282,13 +282,13 @@ pub export fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PA
     md_free_ref_defs(&ctx);
     md_free_ref_def_hashtable(&ctx);
     std.c.free(ctx.buffer);
-    ctx.marks.deinit(c_allocator);
+    ctx.marks.deinit(ctx.alloc);
     std.c.free(ctx.block_bytes);
-    ctx.containers.deinit(c_allocator);
-    ctx.block_component_info.deinit(c_allocator);
-    ctx.slot_info.deinit(c_allocator);
-    ctx.block_alert_info.deinit(c_allocator);
-    ctx.inline_attrs.deinit(c_allocator);
+    ctx.containers.deinit(ctx.alloc);
+    ctx.block_component_info.deinit(ctx.alloc);
+    ctx.slot_info.deinit(ctx.alloc);
+    ctx.block_alert_info.deinit(ctx.alloc);
+    ctx.inline_attrs.deinit(ctx.alloc);
 
     return ret;
 }
@@ -406,8 +406,8 @@ fn _test_run_inline(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ) 
     md_free_ref_defs(&ctx);
     md_free_ref_def_hashtable(&ctx);
     std.c.free(ctx.buffer);
-    ctx.marks.deinit(c_allocator);
-    ctx.inline_attrs.deinit(c_allocator);
+    ctx.marks.deinit(ctx.alloc);
+    ctx.inline_attrs.deinit(ctx.alloc);
     return ret;
 }
 
@@ -617,15 +617,15 @@ fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ,
 
     // Cleanup.
     std.c.free(ctx.block_bytes);
-    ctx.containers.deinit(c_allocator);
-    ctx.block_component_info.deinit(c_allocator);
-    ctx.slot_info.deinit(c_allocator);
-    ctx.block_alert_info.deinit(c_allocator);
+    ctx.containers.deinit(ctx.alloc);
+    ctx.block_component_info.deinit(ctx.alloc);
+    ctx.slot_info.deinit(ctx.alloc);
+    ctx.block_alert_info.deinit(ctx.alloc);
     md_free_ref_defs(&ctx);
     md_free_ref_def_hashtable(&ctx);
     std.c.free(ctx.buffer);
-    ctx.marks.deinit(c_allocator);
-    ctx.inline_attrs.deinit(c_allocator);
+    ctx.marks.deinit(ctx.alloc);
+    ctx.inline_attrs.deinit(ctx.alloc);
     return ret;
 }
 
@@ -858,4 +858,35 @@ test "growArray: 1.5x growth schedule + data survives realloc" {
     // Data written before the realloc must survive it.
     try std.testing.expectEqual(@as(u32, 100), arr[0]);
     try std.testing.expectEqual(@as(u32, 7), arr[7]);
+}
+
+// PLAN 8.5: the typed MD_CTX growable arrays now allocate through ctx.alloc, so
+// a std.testing.FailingAllocator can drive the OOM paths that fuzzing can't
+// reach (the libc-malloc build never injects allocation failure).
+test "OOM: ctx array pushes return error.OutOfMemory and stay empty" {
+    var fa = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    var ctx: MD_CTX = .{ .alloc = fa.allocator() };
+    // The first push needs an allocation; with fail_index 0 it must fail
+    // gracefully (ctx.log is a no-op since parser.debug_log is null).
+    try std.testing.expectError(error.OutOfMemory, inlines.md_add_mark(&ctx));
+    try std.testing.expectEqual(@as(usize, 0), ctx.marks.items.len);
+    try std.testing.expectError(error.OutOfMemory, blocks.md_push_slot_info(&ctx, 0, 1));
+    try std.testing.expectEqual(@as(usize, 0), ctx.slot_info.items.len);
+    // deinit on never-grown lists is a no-op and must not crash.
+    ctx.marks.deinit(ctx.alloc);
+    ctx.slot_info.deinit(ctx.alloc);
+}
+
+test "OOM: deinit frees all array storage (no leak)" {
+    // std.testing.allocator flags leaks at test end; passing here proves the
+    // ArrayList migration's .deinit releases everything the pushes grew.
+    var ctx: MD_CTX = .{ .alloc = std.testing.allocator };
+    _ = try inlines.md_add_mark(&ctx);
+    _ = try inlines.md_add_mark(&ctx);
+    _ = try blocks.md_push_slot_info(&ctx, 1, 2);
+    _ = try blocks.md_push_block_alert_info(&ctx, 3, 4);
+    try std.testing.expect(ctx.marks.items.len == 2 and ctx.slot_info.items.len == 1);
+    ctx.marks.deinit(ctx.alloc);
+    ctx.slot_info.deinit(ctx.alloc);
+    ctx.block_alert_info.deinit(ctx.alloc);
 }

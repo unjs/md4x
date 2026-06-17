@@ -24,7 +24,7 @@ build with live bounds-checks). Summary:
 | **2.2** error unions                      | ◑ partial             | **All OOM-only fns done** (attribute builders, every `md_push_*`/`md_add_mark`). **Emission-path split declined** — see leftovers §8.2                                               |
 | **2.3** `bool` predicates                 | ◑ partial             | entity recognizers → `bool`. Tri-state + hot/test-coupled predicates left — see §8.3                                                                                                 |
 | **2.4** `[*c]`→slices                     | ✅ done (line arrays) | every line-array param (`md_lookup_line`, `md_merge_lines`, recognizers, full inline/link pipeline) is now `[]const MD_LINE`. Other `[*c]` remain — see §8.4                         |
-| **2.5** native tests                      | ✅ done               | `growArray`, `md_decode_utf8`, **abort-code matrix** (see §8.2). Failing-allocator test NOT added (libc-malloc path can't inject) — see §8.5                                         |
+| **2.5** native tests                      | ✅ done               | `growArray`, `md_decode_utf8`, **abort-code matrix** (see §8.2), **FailingAllocator OOM tests** over the ctx ArrayLists (§8.5, unblocked by §8.1). `zig build test` = 12/12          |
 | **3.1** naming                            | ⏭️ skipped (owner)    | reduces grep-ability vs upstream `md4x.c ~NNNN` cross-refs — see §8.6                                                                                                                |
 | **3.2** methods/namespacing               | ◑ partial             | `CH/STR/md_log` → `ctx.ch/str/log`; `ISxxx(ctx,off)` → `ctx.isXxx(off)` methods (§8.7). Constant-namespacing left — see §8.7                                                         |
 | **3.3** drop `extern` on internal structs | ✅ done               | `MD_CONTAINER` → plain struct (others already plain or must stay extern); `MD_LINETYPE` dropped its `c_int` backing (§8.8). Internal-enum member rename deferred — see §8.8          |
@@ -563,11 +563,22 @@ Line arrays are done. Still `[*c]`:
 
 ### 8.5 Failing-allocator native test (rest of 2.5)
 
-2.5's failing-allocator test (`std.testing.FailingAllocator` over the grow helper /
-`md_build_attribute`) was **not** added: those paths use libc `malloc`/`realloc`
-directly, so a Zig allocator can't be injected. If §8.1 moves them onto a
-`std.mem.Allocator`, a `FailingAllocator` test becomes possible and would lock down
-the OOM-cleanup paths that fuzzing can't reach (no allocation-failure injection).
+~~2.5's failing-allocator test … was not added: those paths use libc
+`malloc`/`realloc` directly, so a Zig allocator can't be injected.~~ **Done
+(unblocked by §8.1).** `MD_CTX` now carries an injectable `alloc:
+std.mem.Allocator = c_allocator` field, and the seven ArrayList arrays grow /
+free through `ctx.alloc` (production still uses the `c_allocator` default —
+corpus parity is byte-identical). Two native tests in `md4x.zig` drive the OOM
+paths a `std.testing.FailingAllocator` can now reach: one asserts the push
+helpers (`md_add_mark`, `md_push_slot_info`) return `error.OutOfMemory` and
+leave the list empty when allocation is denied (and `ctx.log` stays a safe
+no-op); the other uses `std.testing.allocator` (leak-checked) to prove `.deinit`
+releases everything the pushes grew. `zig build test` = 12/12.
+
+- Still **not** injectable (would need more plumbing): the raw `std.c.malloc`
+  buffers — `block_bytes`, the `MD_REF_DEF_LIST` buckets, `ref_def_hashtable`,
+  and `md_build_attribute`'s buffers. A fuller OOM matrix could route those
+  through `ctx.alloc` too, but that is a larger change for the byte arena.
 
 ### 8.6 Naming (3.1) — intentionally deferred
 

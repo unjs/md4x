@@ -792,7 +792,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                         @intFromBool(TRUE != 0);
                     // Reuse phase: capacity already covers the max nesting from the
                     // block-parse pass, so this append never actually reallocs.
-                    ctx.containers.append(c_allocator, .{ .is_loose = is_loose }) catch {
+                    ctx.containers.append(ctx.alloc, .{ .is_loose = is_loose }) catch {
                         if (clean_component_detail) md_free_attribute(ctx, &comp_name_build);
                         return -1;
                     };

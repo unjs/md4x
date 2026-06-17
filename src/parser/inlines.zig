@@ -274,7 +274,7 @@ pub fn md_opener_stack(ctx: *MD_CTX, mark_index: c_int) *MD_MARKSTACK {
 // md4x.c ~2651. Grow ctx.marks and return a pointer to the new slot, or
 // error.OutOfMemory on allocation failure (the returned pointer is never null).
 pub fn md_add_mark(ctx: *MD_CTX) error{OutOfMemory}![*c]MD_MARK {
-    ctx.marks.ensureUnusedCapacity(c_allocator, 1) catch {
+    ctx.marks.ensureUnusedCapacity(ctx.alloc, 1) catch {
         ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
@@ -1673,7 +1673,7 @@ pub fn md_analyze_marks(ctx: *MD_CTX, lines: []const MD_LINE, mark_beg: c_int, m
 
 // md4x.c ~4410.
 pub fn md_push_inline_attr(ctx: *MD_CTX, closer_index: c_int, attrs_beg: OFF, attrs_end: OFF) error{OutOfMemory}!void {
-    ctx.inline_attrs.append(c_allocator, .{
+    ctx.inline_attrs.append(ctx.alloc, .{
         .closer_index = closer_index,
         .attrs_beg = attrs_beg,
         .attrs_end = attrs_end,

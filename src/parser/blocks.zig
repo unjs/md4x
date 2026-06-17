@@ -247,7 +247,7 @@ pub fn md_push_container_bytes(ctx: *MD_CTX, ty: c.MD_BLOCKTYPE, start: c_uint, 
 
 pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg: OFF, name_end: OFF, props_beg: OFF, props_end: OFF, title_beg: OFF, title_end: OFF) error{OutOfMemory}!c_int {
     const idx: c_int = @intCast(ctx.block_component_info.items.len);
-    ctx.block_component_info.append(c_allocator, .{
+    ctx.block_component_info.append(ctx.alloc, .{
         .colon_count = colon_count,
         .name_beg = name_beg,
         .name_end = name_end,
@@ -264,7 +264,7 @@ pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg:
 
 pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) error{OutOfMemory}!c_int {
     const idx: c_int = @intCast(ctx.slot_info.items.len);
-    ctx.slot_info.append(c_allocator, .{ .name_beg = name_beg, .name_end = name_end }) catch {
+    ctx.slot_info.append(ctx.alloc, .{ .name_beg = name_beg, .name_end = name_end }) catch {
         ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
@@ -273,7 +273,7 @@ pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) error{OutOf
 
 pub fn md_push_block_alert_info(ctx: *MD_CTX, type_beg: OFF, type_end: OFF) error{OutOfMemory}!c_int {
     const idx: c_int = @intCast(ctx.block_alert_info.items.len);
-    ctx.block_alert_info.append(c_allocator, .{ .type_beg = type_beg, .type_end = type_end }) catch {
+    ctx.block_alert_info.append(ctx.alloc, .{ .type_beg = type_beg, .type_end = type_end }) catch {
         ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
@@ -794,7 +794,7 @@ pub fn md_is_container_compatible(pivot_p: [*c]const MD_CONTAINER, container_p: 
 }
 
 pub fn md_push_container(ctx: *MD_CTX, container: *const MD_CONTAINER) error{OutOfMemory}!void {
-    ctx.containers.append(c_allocator, container.*) catch {
+    ctx.containers.append(ctx.alloc, container.*) catch {
         ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };

@@ -225,6 +225,11 @@ pub const MD_INLINE_ATTR_INFO = struct {
 // Context propagated through all the parsing. Internal struct — no C ABI needed.
 // Field order/comments mirror struct MD_CTX_tag in md4x.c exactly.
 pub const MD_CTX = struct {
+    // Allocator for the typed growable arrays (PLAN 8.1/8.5). Defaults to the
+    // libc-backed c_allocator (production); native tests can inject a
+    // std.testing.FailingAllocator to exercise the OOM-cleanup paths.
+    alloc: std.mem.Allocator = c_allocator,
+
     // Immutable stuff (parameters of md_parse()).
     text: [*c]const CHAR = null,
     size: SZ = 0,
