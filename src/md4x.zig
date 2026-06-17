@@ -284,7 +284,7 @@ pub export fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PA
     std.c.free(ctx.buffer);
     std.c.free(ctx.marks);
     std.c.free(ctx.block_bytes);
-    std.c.free(@ptrCast(ctx.containers));
+    ctx.containers.deinit(c_allocator);
     ctx.block_component_info.deinit(c_allocator);
     ctx.slot_info.deinit(c_allocator);
     ctx.block_alert_info.deinit(c_allocator);
@@ -590,15 +590,15 @@ fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ,
             @intFromEnum(line.type),                        line.data,
             line.enforce_new_block,                         line.beg,
             line.end,                                       line.indent,
-            ctx.n_containers,                               ctx.block_component_nesting,
+            ctx.nContainers(),                               ctx.block_component_nesting,
             ctx.frontmatter_state,                          ctx.last_line_has_list_loosening_effect,
             ctx.last_list_item_starts_with_two_blank_lines, ctx.n_block_bytes,
             @as(c_int, @intCast(ctx.block_component_info.items.len)), @as(c_int, @intCast(ctx.slot_info.items.len)),
             @as(c_int, @intCast(ctx.block_alert_info.items.len)),
         }, out_fn, out_ud);
         var i: c_int = 0;
-        while (i < ctx.n_containers) : (i += 1) {
-            const co = &ctx.containers[@intCast(i)];
+        while (i < ctx.nContainers()) : (i += 1) {
+            const co = &ctx.containers.items[@intCast(i)];
             emit(&fbuf, "  C[{d}] ch={d} loose={d} task={d} alert={d} start={d} mi={d} ci={d} bbo={d} tmo={d} cc={d} cfm={d}\n", .{
                 i,                 uval(co.ch),      co.is_loose,    co.is_task,
                 co.is_alert,       co.start,         co.mark_indent, co.contents_indent,
@@ -617,7 +617,7 @@ fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ,
 
     // Cleanup.
     std.c.free(ctx.block_bytes);
-    std.c.free(@ptrCast(ctx.containers));
+    ctx.containers.deinit(c_allocator);
     ctx.block_component_info.deinit(c_allocator);
     ctx.slot_info.deinit(c_allocator);
     ctx.block_alert_info.deinit(c_allocator);

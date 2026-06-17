@@ -794,21 +794,18 @@ pub fn md_is_container_compatible(pivot_p: [*c]const MD_CONTAINER, container_p: 
 }
 
 pub fn md_push_container(ctx: *MD_CTX, container: *const MD_CONTAINER) error{OutOfMemory}!void {
-    util.growArray(MD_CONTAINER, &ctx.containers, &ctx.alloc_containers, ctx.n_containers, 16) catch {
+    ctx.containers.append(c_allocator, container.*) catch {
         ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
-
-    ctx.containers[@intCast(ctx.n_containers)] = container.*;
-    ctx.n_containers += 1;
 }
 
 pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
     var ret: c_int = 0;
 
-    var i: c_int = ctx.n_containers - n_children;
-    while (i < ctx.n_containers) : (i += 1) {
-        const cont = &ctx.containers[@intCast(i)];
+    var i: c_int = ctx.nContainers() - n_children;
+    while (i < ctx.nContainers()) : (i += 1) {
+        const cont = &ctx.containers.items[@intCast(i)];
         var is_ordered_list: c_int = FALSE;
 
         switch (cont.ch) {
@@ -858,8 +855,8 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
 pub fn md_leave_child_containers(ctx: *MD_CTX, n_keep: c_int) c_int {
     var ret: c_int = 0;
 
-    while (ctx.n_containers > n_keep) {
-        const cont = &ctx.containers[@intCast(ctx.n_containers - 1)];
+    while (ctx.nContainers() > n_keep) {
+        const cont = &ctx.containers.items[@intCast(ctx.nContainers() - 1)];
         var is_ordered_list: c_int = FALSE;
 
         switch (cont.ch) {
@@ -895,7 +892,7 @@ pub fn md_leave_child_containers(ctx: *MD_CTX, n_keep: c_int) c_int {
             else => unreachable,
         }
 
-        ctx.n_containers -= 1;
+        ctx.containers.items.len -= 1;
     }
 
     return ret;
@@ -996,8 +993,8 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
     // Given the indentation and block quote marks '>', determine how many of
     // the current containers are our parents.
-    while (n_parents < ctx.n_containers) {
-        const cont = &ctx.containers[@intCast(n_parents)];
+    while (n_parents < ctx.nContainers()) {
+        const cont = &ctx.containers.items[@intCast(n_parents)];
 
         if (cont.ch == '>' and line.indent < ctx.code_indent_offset and
             off < ctx.size and ctx.ch(off) == '>')
@@ -1037,9 +1034,9 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         // Blank line does not need any real indentation to be nested inside a
         // list, block component, or template slot.
         if (n_brothers + n_children == 0) {
-            while (n_parents < ctx.n_containers and ctx.containers[@intCast(n_parents)].ch != '>' and
-                ctx.containers[@intCast(n_parents)].ch != ':' and
-                ctx.containers[@intCast(n_parents)].ch != '#')
+            while (n_parents < ctx.nContainers() and ctx.containers.items[@intCast(n_parents)].ch != '>' and
+                ctx.containers.items[@intCast(n_parents)].ch != ':' and
+                ctx.containers.items[@intCast(n_parents)].ch != '#')
                 n_parents += 1;
         }
     }
@@ -1064,10 +1061,10 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                         line.type = .MD_LINE_BLANK;
                         if (pivot_line.data == 2) {
                             // Component frontmatter: mark container as done.
-                            var i: c_int = ctx.n_containers - 1;
+                            var i: c_int = ctx.nContainers() - 1;
                             while (i >= 0) : (i -= 1) {
-                                if (ctx.containers[@intCast(i)].ch == ':') {
-                                    ctx.containers[@intCast(i)].comp_fm_state = 2;
+                                if (ctx.containers.items[@intCast(i)].ch == ':') {
+                                    ctx.containers.items[@intCast(i)].comp_fm_state = 2;
                                     break;
                                 }
                             }
@@ -1081,7 +1078,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
             line.type = .MD_LINE_FRONTMATTER;
             line.data = pivot_line.data;
-            n_parents = ctx.n_containers;
+            n_parents = ctx.nContainers();
             break :classify;
         }
 
@@ -1099,7 +1096,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             }
 
             // Change indentation accordingly to the initial code fence.
-            if (n_parents == ctx.n_containers) {
+            if (n_parents == ctx.nContainers()) {
                 if (line.indent > pivot_line.indent)
                     line.indent -= pivot_line.indent
                 else
@@ -1112,7 +1109,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
         // Check whether we are HTML block continuation.
         if (pivot_line.type == .MD_LINE_HTML and ctx.html_block_type > 0) {
-            if (n_parents < ctx.n_containers) {
+            if (n_parents < ctx.nContainers()) {
                 // HTML block ends implicitly when enclosing container ends.
                 ctx.html_block_type = 0;
             } else {
@@ -1130,7 +1127,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 }
 
                 line.type = .MD_LINE_HTML;
-                n_parents = ctx.n_containers;
+                n_parents = ctx.nContainers();
                 break :classify;
             }
         }
@@ -1143,10 +1140,10 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             const closer_colons = md_is_block_component_closer(ctx, off, &tmp);
             if (closer_colons > 0) {
                 // Find the innermost open block component with matching colon count.
-                var i: c_int = ctx.n_containers - 1;
+                var i: c_int = ctx.nContainers() - 1;
                 var matched: c_int = 0;
                 while (i >= 0) : (i -= 1) {
-                    if (ctx.containers[@intCast(i)].ch == ':' and ctx.containers[@intCast(i)].colon_count <= closer_colons) {
+                    if (ctx.containers.items[@intCast(i)].ch == ':' and ctx.containers.items[@intCast(i)].colon_count <= closer_colons) {
                         // Close this component and everything inside it.
                         if (n_children == 0) {
                             ret = md_leave_child_containers(ctx, i);
@@ -1185,9 +1182,9 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
                 // Close any existing template container within the component.
                 {
-                    var i: c_int = ctx.n_containers - 1;
+                    var i: c_int = ctx.nContainers() - 1;
                     while (i >= 0) : (i -= 1) {
-                        if (ctx.containers[@intCast(i)].ch == '#') {
+                        if (ctx.containers.items[@intCast(i)].ch == '#') {
                             if (n_children == 0) {
                                 ret = md_leave_child_containers(ctx, i);
                                 if (ret < 0) return ret;
@@ -1195,7 +1192,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                             break;
                         }
                         // Stop at component boundary.
-                        if (ctx.containers[@intCast(i)].ch == ':')
+                        if (ctx.containers.items[@intCast(i)].ch == ':')
                             break;
                     }
                 }
@@ -1226,7 +1223,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
         // Check for blank line.
         if (off >= ctx.size or ctx.isNewline(off)) {
-            if (pivot_line.type == .MD_LINE_INDENTEDCODE and n_parents == ctx.n_containers) {
+            if (pivot_line.type == .MD_LINE_INDENTEDCODE and n_parents == ctx.nContainers()) {
                 line.type = .MD_LINE_INDENTEDCODE;
                 if (line.indent > ctx.code_indent_offset)
                     line.indent -= ctx.code_indent_offset
@@ -1237,11 +1234,11 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 line.type = .MD_LINE_BLANK;
                 ctx.last_line_has_list_loosening_effect = @intFromBool(n_parents > 0 and
                     n_brothers + n_children == 0 and
-                    ctx.containers[@intCast(n_parents - 1)].ch != '>');
+                    ctx.containers.items[@intCast(n_parents - 1)].ch != '>');
 
                 // See https://github.com/mity/md4c/issues/6 — empty list item
                 // not on its first line forces list end on next non-blank line.
-                if (n_parents > 0 and ctx.containers[@intCast(n_parents - 1)].ch != '>' and
+                if (n_parents > 0 and ctx.containers.items[@intCast(n_parents - 1)].ch != '>' and
                     n_brothers + n_children == 0 and ctx.current_block == null and
                     ctx.n_block_bytes > @as(c_int, @sizeOf(MD_BLOCK)))
                 {
@@ -1254,8 +1251,8 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         } else {
             // 2nd half of the hack: 2nd blank line at list item start forces end.
             if (ctx.last_list_item_starts_with_two_blank_lines != 0) {
-                if (n_parents > 0 and n_parents == ctx.n_containers and
-                    ctx.containers[@intCast(n_parents - 1)].ch != '>' and
+                if (n_parents > 0 and n_parents == ctx.nContainers() and
+                    ctx.containers.items[@intCast(n_parents - 1)].ch != '>' and
                     n_brothers + n_children == 0 and ctx.current_block == null and
                     ctx.n_block_bytes > @as(c_int, @sizeOf(MD_BLOCK)))
                 {
@@ -1265,7 +1262,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
                         line.indent = total_indent;
                         if (n_parents > 0)
-                            line.indent -= MIN_u(line.indent, ctx.containers[@intCast(n_parents - 1)].contents_indent);
+                            line.indent -= MIN_u(line.indent, ctx.containers.items[@intCast(n_parents - 1)].contents_indent);
                     }
                 }
 
@@ -1279,9 +1276,9 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             line.indent < ctx.code_indent_offset and
             off < ctx.size and ctx.ch(off) == '[')
         {
-            const last_cont: c_int = ctx.n_containers - 1;
-            if (last_cont >= 0 and ctx.containers[@intCast(last_cont)].ch == '>' and
-                ctx.containers[@intCast(last_cont)].is_alert == 0)
+            const last_cont: c_int = ctx.nContainers() - 1;
+            if (last_cont >= 0 and ctx.containers.items[@intCast(last_cont)].ch == '>' and
+                ctx.containers.items[@intCast(last_cont)].is_alert == 0)
             {
                 var tmp: OFF = off + 1;
                 if (tmp < ctx.size and ctx.ch(tmp) == '!') {
@@ -1299,8 +1296,8 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                                 ret = -1;
                                 return ret;
                             };
-                            ctx.containers[@intCast(last_cont)].is_alert = TRUE;
-                            ctx.containers[@intCast(last_cont)].start = @intCast(alert_idx);
+                            ctx.containers.items[@intCast(last_cont)].is_alert = TRUE;
+                            ctx.containers.items[@intCast(last_cont)].start = @intCast(alert_idx);
                             line.type = .MD_LINE_BLANK;
                             break :classify;
                         }
@@ -1312,7 +1309,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         // Check whether we are Setext underline.
         if (line.indent < ctx.code_indent_offset and pivot_line.type == .MD_LINE_TEXT and
             off < ctx.size and ctx.isAnyOf2(off, '=', '-') and
-            (n_parents == ctx.n_containers))
+            (n_parents == ctx.nContainers()))
         {
             var level: c_uint = undefined;
 
@@ -1357,12 +1354,12 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             ctx.block_component_nesting > 0)
         {
             // Find the innermost component container.
-            var comp_i: c_int = ctx.n_containers - 1;
+            var comp_i: c_int = ctx.nContainers() - 1;
             while (comp_i >= 0) : (comp_i -= 1) {
-                if (ctx.containers[@intCast(comp_i)].ch == ':')
+                if (ctx.containers.items[@intCast(comp_i)].ch == ':')
                     break;
             }
-            if (comp_i >= 0 and ctx.containers[@intCast(comp_i)].comp_fm_state == 0) {
+            if (comp_i >= 0 and ctx.containers.items[@intCast(comp_i)].comp_fm_state == 0) {
                 var found_opener: c_int = FALSE;
                 if (line.indent < ctx.code_indent_offset and
                     off < ctx.size and ctx.ch(off) == '-')
@@ -1374,7 +1371,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                         while (tmp < ctx.size and ctx.ch(tmp) == ' ')
                             tmp += 1;
                         if (tmp >= ctx.size or ctx.isNewline(tmp)) {
-                            ctx.containers[@intCast(comp_i)].comp_fm_state = 1;
+                            ctx.containers.items[@intCast(comp_i)].comp_fm_state = 1;
                             line.type = .MD_LINE_FRONTMATTER;
                             line.data = 2; // 2 = component frontmatter
                             line.enforce_new_block = TRUE;
@@ -1385,7 +1382,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 if (found_opener != 0)
                     break :classify;
                 // First non-blank line is not ---; disable component frontmatter.
-                ctx.containers[@intCast(comp_i)].comp_fm_state = 2;
+                ctx.containers.items[@intCast(comp_i)].comp_fm_state = 2;
             }
         }
 
@@ -1401,11 +1398,11 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         }
 
         // Check for "brother" container (another list item in started list).
-        if (n_parents < ctx.n_containers and n_brothers + n_children == 0) {
+        if (n_parents < ctx.nContainers() and n_brothers + n_children == 0) {
             var tmp: OFF = undefined;
 
             if (md_is_container_mark(ctx, line.indent, off, &tmp, &container) != 0 and
-                md_is_container_compatible(&ctx.containers[@intCast(n_parents)], &container) != 0)
+                md_is_container_compatible(&ctx.containers.items[@intCast(n_parents)], &container) != 0)
             {
                 pivot_line = &md_dummy_blank_line;
 
@@ -1427,8 +1424,8 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                     line.indent -= 1;
                 }
 
-                ctx.containers[@intCast(n_parents)].mark_indent = container.mark_indent;
-                ctx.containers[@intCast(n_parents)].contents_indent = container.contents_indent;
+                ctx.containers.items[@intCast(n_parents)].mark_indent = container.mark_indent;
+                ctx.containers.items[@intCast(n_parents)].contents_indent = container.contents_indent;
 
                 n_brothers += 1;
                 continue :classify;
@@ -1494,11 +1491,11 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         if (line.indent < ctx.code_indent_offset and
             md_is_container_mark(ctx, line.indent, off, &off, &container) != 0)
         {
-            if (pivot_line.type == .MD_LINE_TEXT and n_parents == ctx.n_containers and
+            if (pivot_line.type == .MD_LINE_TEXT and n_parents == ctx.nContainers() and
                 (off >= ctx.size or ctx.isNewline(off)) and container.ch != '>')
             {
                 // Noop. List mark + blank line cannot interrupt a paragraph.
-            } else if (pivot_line.type == .MD_LINE_TEXT and n_parents == ctx.n_containers and
+            } else if (pivot_line.type == .MD_LINE_TEXT and n_parents == ctx.nContainers() and
                 ISANYOF2_(container.ch, '.', ')') and container.start != 1)
             {
                 // Noop. Ordered list interrupts a paragraph only when start == 1.
@@ -1536,7 +1533,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         }
 
         // Check whether we are table continuation.
-        if (pivot_line.type == .MD_LINE_TABLE and n_parents == ctx.n_containers) {
+        if (pivot_line.type == .MD_LINE_TABLE and n_parents == ctx.nContainers()) {
             line.type = .MD_LINE_TABLE;
             break :classify;
         }
@@ -1591,7 +1588,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         // Check for table underline.
         if ((ctx.parser.flags & c.MD_FLAG_TABLES != 0) and pivot_line.type == .MD_LINE_TEXT and
             off < ctx.size and ctx.isAnyOf3(off, '|', '-', ':') and
-            n_parents == ctx.n_containers)
+            n_parents == ctx.nContainers())
         {
             var col_count: c_uint = undefined;
 
@@ -1608,12 +1605,12 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         line.type = .MD_LINE_TEXT;
         if (pivot_line.type == .MD_LINE_TEXT and n_brothers + n_children == 0) {
             // Lazy continuation.
-            n_parents = ctx.n_containers;
+            n_parents = ctx.nContainers();
         }
 
         // Check for task mark.
         if ((ctx.parser.flags & c.MD_FLAG_TASKLISTS != 0) and n_brothers + n_children > 0 and
-            ISANYOF_(ctx.containers[@intCast(ctx.n_containers - 1)].ch, "-+*.)"))
+            ISANYOF_(ctx.containers.items[@intCast(ctx.nContainers() - 1)].ch, "-+*.)"))
         {
             var tmp: OFF = off;
 
@@ -1623,7 +1620,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 ctx.isAnyOf(tmp + 1, "xX ") and ctx.ch(tmp + 2) == ']' and
                 (tmp + 3 == ctx.size or ctx.isBlank(tmp + 3) or ctx.isNewline(tmp + 3)))
             {
-                const task_container = if (n_children > 0) &ctx.containers[@intCast(ctx.n_containers - 1)] else &container;
+                const task_container = if (n_children > 0) &ctx.containers.items[@intCast(ctx.nContainers() - 1)] else &container;
                 task_container.is_task = TRUE;
                 task_container.task_mark_off = tmp + 1;
                 off = tmp + 3;
@@ -1686,7 +1683,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
     // If we belong to a list after seeing a blank line, the list is loose.
     if (prev_line_has_list_loosening_effect != 0 and line.type != .MD_LINE_BLANK and n_parents + n_brothers > 0) {
-        const cont = &ctx.containers[@intCast(n_parents + n_brothers - 1)];
+        const cont = &ctx.containers.items[@intCast(n_parents + n_brothers - 1)];
         if (cont.ch != '>') {
             const block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + cont.block_byte_off));
             block.bits.flags |= @as(u8, @truncate(MD_BLOCK_LOOSE_LIST));
@@ -1694,7 +1691,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     }
 
     // Leave any containers we are not part of anymore.
-    if (n_children == 0 and n_parents + n_brothers < ctx.n_containers) {
+    if (n_children == 0 and n_parents + n_brothers < ctx.nContainers()) {
         ret = md_leave_child_containers(ctx, n_parents + n_brothers);
         if (ret < 0) return ret;
     }
@@ -1702,12 +1699,12 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     // Enter any container we found a mark for.
     if (n_brothers > 0) {
         // MD_ASSERT(n_brothers == 1);
-        ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, ctx.containers[@intCast(n_parents)].task_mark_off, if (ctx.containers[@intCast(n_parents)].is_task != 0) @intCast(uval(ctx.ch(ctx.containers[@intCast(n_parents)].task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
+        ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, ctx.containers.items[@intCast(n_parents)].task_mark_off, if (ctx.containers.items[@intCast(n_parents)].is_task != 0) @intCast(uval(ctx.ch(ctx.containers.items[@intCast(n_parents)].task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
         if (ret < 0) return ret;
         ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, container.task_mark_off, if (container.is_task != 0) @intCast(uval(ctx.ch(container.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
         if (ret < 0) return ret;
-        ctx.containers[@intCast(n_parents)].is_task = container.is_task;
-        ctx.containers[@intCast(n_parents)].task_mark_off = container.task_mark_off;
+        ctx.containers.items[@intCast(n_parents)].is_task = container.is_task;
+        ctx.containers.items[@intCast(n_parents)].task_mark_off = container.task_mark_off;
     }
 
     if (n_children > 0) {

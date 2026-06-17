@@ -290,9 +290,10 @@ pub const MD_CTX = struct {
     alloc_block_bytes: c_int = 0,
 
     // For container block analysis.
-    containers: [*c]MD_CONTAINER = null,
-    n_containers: c_int = 0,
-    alloc_containers: c_int = 0,
+    // Container stack (PLAN 8.1: ArrayListUnmanaged). `nContainers()` returns the
+    // depth as a c_int; pushes are `.append`, pops `.items.len -= 1`, and the
+    // serialize-phase reuse resets via `clearRetainingCapacity()`.
+    containers: std.ArrayListUnmanaged(MD_CONTAINER) = .empty,
 
     // Minimal indentation to call the block "indented code block".
     code_indent_offset: c_uint = 0,
@@ -335,6 +336,12 @@ pub const MD_CTX = struct {
     // delegate to the pure `IS*_(ch)` / md_is_unicode_* helpers in util.zig.
     // The `IS*_` helpers stay free functions taking a raw CHAR — they mirror
     // md4c's macros and are kept for upstream cross-reference (PLAN 8.6).
+    // Container-stack depth as a c_int (PLAN 8.1: ctx.containers is now an
+    // ArrayListUnmanaged; this replaces the old n_containers field on reads).
+    pub inline fn nContainers(self: *const MD_CTX) c_int {
+        return @intCast(self.containers.items.len);
+    }
+
     pub inline fn isAnyOf(self: *const MD_CTX, off: OFF, palette: [*:0]const u8) bool {
         return util.ISANYOF_(self.ch(off), palette);
     }

@@ -20,6 +20,7 @@ const MD_SIZE = types.MD_SIZE;
 const TRUE = types.TRUE;
 const FALSE = types.FALSE;
 const MD_CTX = types.MD_CTX;
+const c_allocator = types.c_allocator;
 const MD_LINE = types.MD_LINE;
 const MD_LINE_ANALYSIS = types.MD_LINE_ANALYSIS;
 const MD_VERBATIMLINE = types.MD_VERBATIMLINE;
@@ -568,10 +569,10 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
     var clean_fence_code_detail: bool = false;
     var ret: c_int = 0;
 
-    if (ctx.n_containers == 0)
+    if (ctx.nContainers() == 0)
         is_in_tight_list = false
     else
-        is_in_tight_list = (ctx.containers[@intCast(ctx.n_containers - 1)].is_loose == 0);
+        is_in_tight_list = (ctx.containers.items[@intCast(ctx.nContainers() - 1)].is_loose == 0);
 
     const btype = block.getType();
     const block_lines: [*]const MD_BLOCK = @ptrCast(block);
@@ -672,7 +673,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
     var clean_component_detail: bool = false;
 
     // ctx.containers now is reused for tracking loose/tight lists.
-    ctx.n_containers = 0;
+    ctx.containers.clearRetainingCapacity();
 
     while (byte_off < ctx.n_block_bytes) {
         const block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + @as(usize, @intCast(byte_off))));
@@ -772,7 +773,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                 }
 
                 if (btype == c.MD_BLOCK_UL or btype == c.MD_BLOCK_OL or btype == c.MD_BLOCK_QUOTE or btype == c.MD_BLOCK_COMPONENT or btype == c.MD_BLOCK_TEMPLATE or btype == c.MD_BLOCK_ALERT)
-                    ctx.n_containers -= 1;
+                    ctx.containers.items.len -= 1;
             }
 
             if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER_OPENER))) != 0) {
@@ -782,18 +783,19 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     return ret;
                 }
 
-                if (btype == c.MD_BLOCK_UL or btype == c.MD_BLOCK_OL) {
-                    ctx.containers[@intCast(ctx.n_containers)].is_loose = @intCast(block.bits.flags & @as(u8, @truncate(MD_BLOCK_LOOSE_LIST)));
-                    ctx.n_containers += 1;
-                } else if (btype == c.MD_BLOCK_QUOTE or btype == c.MD_BLOCK_ALERT) {
-                    ctx.containers[@intCast(ctx.n_containers)].is_loose = @intFromBool(TRUE != 0);
-                    ctx.n_containers += 1;
-                } else if (btype == c.MD_BLOCK_COMPONENT) {
-                    ctx.containers[@intCast(ctx.n_containers)].is_loose = @intFromBool(TRUE != 0);
-                    ctx.n_containers += 1;
-                } else if (btype == c.MD_BLOCK_TEMPLATE) {
-                    ctx.containers[@intCast(ctx.n_containers)].is_loose = @intFromBool(TRUE != 0);
-                    ctx.n_containers += 1;
+                if (btype == c.MD_BLOCK_UL or btype == c.MD_BLOCK_OL or btype == c.MD_BLOCK_QUOTE or
+                    btype == c.MD_BLOCK_COMPONENT or btype == c.MD_BLOCK_TEMPLATE or btype == c.MD_BLOCK_ALERT)
+                {
+                    const is_loose: u8 = if (btype == c.MD_BLOCK_UL or btype == c.MD_BLOCK_OL)
+                        @intCast(block.bits.flags & @as(u8, @truncate(MD_BLOCK_LOOSE_LIST)))
+                    else
+                        @intFromBool(TRUE != 0);
+                    // Reuse phase: capacity already covers the max nesting from the
+                    // block-parse pass, so this append never actually reallocs.
+                    ctx.containers.append(c_allocator, .{ .is_loose = is_loose }) catch {
+                        if (clean_component_detail) md_free_attribute(ctx, &comp_name_build);
+                        return -1;
+                    };
                 }
             }
         } else {

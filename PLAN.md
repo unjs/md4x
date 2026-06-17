@@ -456,9 +456,20 @@ stale-pointer risk):
   cached pointer); the per-pass reset (`n_inline_attrs = 0`) became
   `clearRetainingCapacity()` (reuses the buffer across blocks, as before).
   Verified incl. html+ast libFuzzers (ASan/UBSan, 0 crash/leak).
-- ⏳ remaining: `containers`, `ref_defs`, `marks` (roughly easiest → hardest;
-  `marks` last — it has the cached-`&marks[i]` stale-pointer hazard called out
-  below).
+- ✅ **`containers`** — the container stack; most invasive so far. The
+  heavily-mutated `n_containers` counter is gone: push → `.append`, the two pops
+  → `.items.len -= 1`, the serialize-phase reset → `clearRetainingCapacity()`,
+  and the reuse-phase indexed writes → `.append` (capacity already covers the
+  max nesting, so it never actually reallocs). Reads go through a new
+  `ctx.nContainers()` helper (`@intCast(items.len)`); `&ctx.containers.items[i]`
+  pointers in `md_{enter,leave}_child_containers` are held only across
+  `md_push_container_bytes` (which grows `block_bytes`, not `containers`) — same
+  invariant as the old `[*c]` code. Verified incl. the ReleaseSafe Zig-native
+  fuzz smoke (live bounds-checks) + html+ast libFuzzers (ASan/UBSan, 0
+  crash/leak).
+- ⏳ remaining: `ref_defs`, `marks` (`ref_defs` interacts with the hashtable +
+  qsort/bsearch and the `MD_REF_DEF_LIST` flexible-array caveat; `marks` last —
+  the cached-`&marks[i]` stale-pointer hazard below).
 
 - **Caveats (unchanged from §2.1):** `block_bytes` is a heterogeneous byte arena
   (interleaved packed `MD_BLOCK`/`MD_LINE`/`MD_VERBATIMLINE` by raw offset) — at
