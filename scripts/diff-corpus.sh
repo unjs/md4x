@@ -21,10 +21,13 @@ if [ ! -x "$MD4X" ]; then
 fi
 
 # Corpus: spec/extension/regression suites + fuzzer seed corpus.
+# Only git-TRACKED files are hashed: a fuzzing run drops many gitignored inputs
+# into test/fuzzers/seed-corpus/, and globbing those would make the hash set
+# non-reproducible. `git ls-files` excludes them by construction.
 corpus=()
-for f in test/*.txt test/fuzzers/seed-corpus/*; do
+while IFS= read -r f; do
   [ -f "$f" ] && corpus+=("$f")
-done
+done < <(git ls-files 'test/*.txt' 'test/fuzzers/seed-corpus/*.md')
 
 for fmt in html text json ansi markdown heal; do
   for f in "${corpus[@]}"; do

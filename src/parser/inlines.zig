@@ -286,18 +286,10 @@ pub fn md_opener_stack(ctx: *MD_CTX, mark_index: c_int) *MD_MARKSTACK {
 
 // md4x.c ~2651. Grow ctx.marks and return a pointer to the new slot, or null on OOM.
 pub fn md_add_mark(ctx: *MD_CTX) [*c]MD_MARK {
-    if (ctx.n_marks >= ctx.alloc_marks) {
-        ctx.alloc_marks = if (ctx.alloc_marks > 0)
-            ctx.alloc_marks + @divTrunc(ctx.alloc_marks, 2)
-        else
-            64;
-        const new_marks = c_realloc_array(MD_MARK, ctx.marks, @intCast(ctx.alloc_marks));
-        if (new_marks == null) {
-            md_log(ctx, "realloc() failed.");
-            return null;
-        }
-        ctx.marks = new_marks;
-    }
+    util.growArray(MD_MARK, &ctx.marks, &ctx.alloc_marks, ctx.n_marks, 64) catch {
+        md_log(ctx, "realloc() failed.");
+        return null;
+    };
     const slot = &ctx.marks[@intCast(ctx.n_marks)];
     ctx.n_marks += 1;
     return slot;
@@ -1694,19 +1686,10 @@ pub fn md_analyze_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
 
 // md4x.c ~4410.
 pub fn md_push_inline_attr(ctx: *MD_CTX, closer_index: c_int, attrs_beg: OFF, attrs_end: OFF) c_int {
-    if (ctx.n_inline_attrs >= ctx.alloc_inline_attrs) {
-        const new_alloc: c_int = if (ctx.alloc_inline_attrs > 0)
-            ctx.alloc_inline_attrs + @divTrunc(ctx.alloc_inline_attrs, 2)
-        else
-            8;
-        const new_arr = c_realloc_array(MD_INLINE_ATTR_INFO, ctx.inline_attrs, @intCast(new_alloc));
-        if (new_arr == null) {
-            md_log(ctx, "realloc() failed.");
-            return -1;
-        }
-        ctx.inline_attrs = new_arr;
-        ctx.alloc_inline_attrs = new_alloc;
-    }
+    util.growArray(MD_INLINE_ATTR_INFO, &ctx.inline_attrs, &ctx.alloc_inline_attrs, ctx.n_inline_attrs, 8) catch {
+        md_log(ctx, "realloc() failed.");
+        return -1;
+    };
     ctx.inline_attrs[@intCast(ctx.n_inline_attrs)] = .{
         .closer_index = closer_index,
         .attrs_beg = attrs_beg,

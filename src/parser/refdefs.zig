@@ -696,19 +696,11 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n
         return FALSE;
 
     // So, it _is_ a reference definition. Remember it.
-    if (ctx.n_ref_defs >= ctx.alloc_ref_defs) {
-        ctx.alloc_ref_defs = if (ctx.alloc_ref_defs > 0)
-            ctx.alloc_ref_defs + @divTrunc(ctx.alloc_ref_defs, 2)
-        else
-            16;
-        const new_defs: [*c]MD_REF_DEF = @ptrCast(@alignCast(std.c.realloc(ctx.ref_defs, @as(usize, @intCast(ctx.alloc_ref_defs)) * @sizeOf(MD_REF_DEF))));
-        if (new_defs == null) {
-            md_log(ctx, "realloc() failed.");
-            // ret stays 0 → abort.
-            return md_is_link_reference_definition_abort(def, ret);
-        }
-        ctx.ref_defs = new_defs;
-    }
+    util.growArray(MD_REF_DEF, &ctx.ref_defs, &ctx.alloc_ref_defs, ctx.n_ref_defs, 16) catch {
+        md_log(ctx, "realloc() failed.");
+        // ret stays 0 → abort.
+        return md_is_link_reference_definition_abort(def, ret);
+    };
     def = @as(*MD_REF_DEF, @ptrCast(&ctx.ref_defs[@intCast(ctx.n_ref_defs)]));
     @memset(std.mem.asBytes(def.?), 0);
 

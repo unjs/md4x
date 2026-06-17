@@ -259,19 +259,10 @@ pub fn md_push_container_bytes(ctx: *MD_CTX, ty: c.MD_BLOCKTYPE, start: c_uint, 
 // --- component / slot / alert info arrays ------------------------------------
 
 pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg: OFF, name_end: OFF, props_beg: OFF, props_end: OFF, title_beg: OFF, title_end: OFF) c_int {
-    if (ctx.n_block_components >= ctx.alloc_block_components) {
-        const new_alloc: c_int = if (ctx.alloc_block_components > 0)
-            ctx.alloc_block_components + @divTrunc(ctx.alloc_block_components, 2)
-        else
-            16;
-        const new_arr = c_realloc_array(MD_BLOCK_COMPONENT_INFO, ctx.block_component_info, @intCast(new_alloc));
-        if (new_arr == null) {
-            md_log(ctx, "realloc() failed.");
-            return -1;
-        }
-        ctx.block_component_info = new_arr;
-        ctx.alloc_block_components = new_alloc;
-    }
+    util.growArray(MD_BLOCK_COMPONENT_INFO, &ctx.block_component_info, &ctx.alloc_block_components, ctx.n_block_components, 16) catch {
+        md_log(ctx, "realloc() failed.");
+        return -1;
+    };
 
     const idx = ctx.n_block_components;
     ctx.n_block_components += 1;
@@ -287,19 +278,10 @@ pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg:
 }
 
 pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) c_int {
-    if (ctx.n_slots >= ctx.alloc_slots) {
-        const new_alloc: c_int = if (ctx.alloc_slots > 0)
-            ctx.alloc_slots + @divTrunc(ctx.alloc_slots, 2)
-        else
-            16;
-        const new_arr = c_realloc_array(MD_SLOT_INFO, ctx.slot_info, @intCast(new_alloc));
-        if (new_arr == null) {
-            md_log(ctx, "realloc() failed.");
-            return -1;
-        }
-        ctx.slot_info = new_arr;
-        ctx.alloc_slots = new_alloc;
-    }
+    util.growArray(MD_SLOT_INFO, &ctx.slot_info, &ctx.alloc_slots, ctx.n_slots, 16) catch {
+        md_log(ctx, "realloc() failed.");
+        return -1;
+    };
 
     const idx = ctx.n_slots;
     ctx.n_slots += 1;
@@ -309,19 +291,10 @@ pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) c_int {
 }
 
 pub fn md_push_block_alert_info(ctx: *MD_CTX, type_beg: OFF, type_end: OFF) c_int {
-    if (ctx.n_block_alerts >= ctx.alloc_block_alerts) {
-        const new_alloc: c_int = if (ctx.alloc_block_alerts > 0)
-            ctx.alloc_block_alerts + @divTrunc(ctx.alloc_block_alerts, 2)
-        else
-            16;
-        const new_arr = c_realloc_array(MD_BLOCK_ALERT_INFO, ctx.block_alert_info, @intCast(new_alloc));
-        if (new_arr == null) {
-            md_log(ctx, "realloc() failed.");
-            return -1;
-        }
-        ctx.block_alert_info = new_arr;
-        ctx.alloc_block_alerts = new_alloc;
-    }
+    util.growArray(MD_BLOCK_ALERT_INFO, &ctx.block_alert_info, &ctx.alloc_block_alerts, ctx.n_block_alerts, 16) catch {
+        md_log(ctx, "realloc() failed.");
+        return -1;
+    };
 
     const idx = ctx.n_block_alerts;
     ctx.n_block_alerts += 1;
@@ -844,18 +817,10 @@ pub fn md_is_container_compatible(pivot_p: [*c]const MD_CONTAINER, container_p: 
 }
 
 pub fn md_push_container(ctx: *MD_CTX, container: *const MD_CONTAINER) c_int {
-    if (ctx.n_containers >= ctx.alloc_containers) {
-        ctx.alloc_containers = if (ctx.alloc_containers > 0)
-            ctx.alloc_containers + @divTrunc(ctx.alloc_containers, 2)
-        else
-            16;
-        const new_containers = c_realloc_array(MD_CONTAINER, ctx.containers, @intCast(ctx.alloc_containers));
-        if (new_containers == null) {
-            md_log(ctx, "realloc() failed.");
-            return -1;
-        }
-        ctx.containers = new_containers;
-    }
+    util.growArray(MD_CONTAINER, &ctx.containers, &ctx.alloc_containers, ctx.n_containers, 16) catch {
+        md_log(ctx, "realloc() failed.");
+        return -1;
+    };
 
     ctx.containers[@intCast(ctx.n_containers)] = container.*;
     ctx.n_containers += 1;

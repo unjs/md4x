@@ -782,3 +782,24 @@ pub fn c_malloc_array(comptime T: type, count: usize) [*c]T {
 pub fn c_realloc_array(comptime T: type, old: [*c]T, count: usize) [*c]T {
     return @ptrCast(@alignCast(std.c.realloc(old, count * @sizeOf(T))));
 }
+
+// Grow a `[*c]T` array using the duplicated `n >= alloc` realloc-grow idiom that
+// appears on several MD_CTX growable arrays (marks, containers, block/slot/alert
+// info, inline attrs, ref defs). `n` is the live element count and `alloc.*` the
+// current capacity; when full, capacity grows by 1.5x (or to `min_alloc` from
+// empty) via libc realloc. On success `ptr.*`/`alloc.*` are updated together; on
+// realloc failure both are left unchanged and error.OutOfMemory is returned (the
+// caller logs + maps to its own abort contract). The growth schedule, the
+// `n >= alloc` trigger, and the realloc ABI are byte-identical to the hand-written
+// blocks this replaces — only the duplication is removed.
+pub fn growArray(comptime T: type, ptr: *[*c]T, alloc: *c_int, n: c_int, min_alloc: c_int) error{OutOfMemory}!void {
+    if (n < alloc.*) return;
+    const new_alloc: c_int = if (alloc.* > 0)
+        alloc.* + @divTrunc(alloc.*, 2)
+    else
+        min_alloc;
+    const new_arr = c_realloc_array(T, ptr.*, @intCast(new_alloc));
+    if (new_arr == null) return error.OutOfMemory;
+    ptr.* = new_arr;
+    alloc.* = new_alloc;
+}
