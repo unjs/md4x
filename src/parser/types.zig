@@ -304,10 +304,8 @@ pub const MD_CTX = struct {
     last_line_has_list_loosening_effect: c_int = 0,
     last_list_item_starts_with_two_blank_lines: c_int = 0,
 
-    // Block component info array.
-    block_component_info: [*c]MD_BLOCK_COMPONENT_INFO = null,
-    n_block_components: c_int = 0,
-    alloc_block_components: c_int = 0,
+    // Block component info array. (PLAN 8.1: ArrayListUnmanaged.)
+    block_component_info: std.ArrayListUnmanaged(MD_BLOCK_COMPONENT_INFO) = .empty,
     block_component_nesting: c_int = 0,
 
     // Slot info array within block components. (PLAN 8.1: ArrayListUnmanaged.)

@@ -704,8 +704,8 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
             },
             c.MD_BLOCK_COMPONENT => {
                 const comp_idx: c_int = @intCast(block.bits.data);
-                if (comp_idx >= 0 and comp_idx < ctx.n_block_components) {
-                    const info = &ctx.block_component_info[@intCast(comp_idx)];
+                if (comp_idx >= 0 and comp_idx < @as(c_int, @intCast(ctx.block_component_info.items.len))) {
+                    const info = &ctx.block_component_info.items[@intCast(comp_idx)];
                     const name_beg = info.name_beg;
                     const name_end = info.name_end;
                     const props_beg = info.props_beg;

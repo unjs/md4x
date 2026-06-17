@@ -449,9 +449,12 @@ stale-pointer risk):
 - ✅ **`slot_info`** — same shape as the pilot (append-only, index-returning
   push, immediate field-copy read, `.deinit` at the two cleanup sites). Verified
   incl. html+ast libFuzzers (ASan/UBSan, 0 crash/leak).
-- ⏳ remaining: `block_component_info`, `inline_attrs`, `containers`,
-  `ref_defs`, `marks` (roughly easiest → hardest; `marks` last — it has the
-  cached-`&marks[i]` stale-pointer hazard called out below).
+- ✅ **`block_component_info`** — same shape (append a fully-constructed 7-field
+  struct; the read copies all offsets into locals before any further call).
+  Verified incl. html+ast libFuzzers (ASan/UBSan, 0 crash/leak).
+- ⏳ remaining: `inline_attrs`, `containers`, `ref_defs`, `marks` (roughly
+  easiest → hardest; `marks` last — it has the cached-`&marks[i]` stale-pointer
+  hazard called out below).
 
 - **Caveats (unchanged from §2.1):** `block_bytes` is a heterogeneous byte arena
   (interleaved packed `MD_BLOCK`/`MD_LINE`/`MD_VERBATIMLINE` by raw offset) — at

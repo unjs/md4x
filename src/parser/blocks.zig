@@ -246,21 +246,19 @@ pub fn md_push_container_bytes(ctx: *MD_CTX, ty: c.MD_BLOCKTYPE, start: c_uint, 
 // --- component / slot / alert info arrays ------------------------------------
 
 pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg: OFF, name_end: OFF, props_beg: OFF, props_end: OFF, title_beg: OFF, title_end: OFF) error{OutOfMemory}!c_int {
-    util.growArray(MD_BLOCK_COMPONENT_INFO, &ctx.block_component_info, &ctx.alloc_block_components, ctx.n_block_components, 16) catch {
+    const idx: c_int = @intCast(ctx.block_component_info.items.len);
+    ctx.block_component_info.append(c_allocator, .{
+        .colon_count = colon_count,
+        .name_beg = name_beg,
+        .name_end = name_end,
+        .props_beg = props_beg,
+        .props_end = props_end,
+        .title_beg = title_beg,
+        .title_end = title_end,
+    }) catch {
         ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
-
-    const idx = ctx.n_block_components;
-    ctx.n_block_components += 1;
-    const e = &ctx.block_component_info[@intCast(idx)];
-    e.colon_count = colon_count;
-    e.name_beg = name_beg;
-    e.name_end = name_end;
-    e.props_beg = props_beg;
-    e.props_end = props_end;
-    e.title_beg = title_beg;
-    e.title_end = title_end;
     return idx;
 }
 
