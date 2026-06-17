@@ -610,6 +610,14 @@ pub fn md_free_attribute(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD) void {
         if (build.text != null) std.c.free(build.text);
         if (build.substr_types != null) std.c.free(build.substr_types);
         if (build.substr_offsets != null) std.c.free(build.substr_offsets);
+        // Reset so a second call is a safe no-op. md_build_attribute() frees the
+        // build itself on an OOM mid-build and returns -1; callers then also free
+        // it in their error cleanup, which would otherwise double-free. (Idempotent
+        // free; only reachable under heap-allocation failure. Original C lacked this.)
+        build.text = null;
+        build.substr_types = null;
+        build.substr_offsets = null;
+        build.substr_alloc = 0;
     }
 }
 
