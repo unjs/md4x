@@ -803,3 +803,52 @@ test "link label hash + cmp: whitespace & case-fold equivalence" {
     const ss = "STRASSE";
     try std.testing.expectEqual(@as(c_int, 0), md_link_label_cmp(sharp.ptr, sharp.len, ss.ptr, ss.len));
 }
+
+test "decode_utf8: 1/2/3/4-byte sequences + truncation fallback" {
+    var sz: SZ = 0;
+    const one = "A";
+    try std.testing.expectEqual(@as(c_uint, 0x41), md_decode_utf8(one.ptr, 1, &sz));
+    try std.testing.expectEqual(@as(SZ, 1), sz);
+    const two = "\xc3\xa9"; // é U+00E9
+    try std.testing.expectEqual(@as(c_uint, 0xe9), md_decode_utf8(two.ptr, 2, &sz));
+    try std.testing.expectEqual(@as(SZ, 2), sz);
+    const three = "\xe2\x82\xac"; // € U+20AC
+    try std.testing.expectEqual(@as(c_uint, 0x20ac), md_decode_utf8(three.ptr, 3, &sz));
+    try std.testing.expectEqual(@as(SZ, 3), sz);
+    const four = "\xf0\x9f\x98\x80"; // 😀 U+1F600
+    try std.testing.expectEqual(@as(c_uint, 0x1f600), md_decode_utf8(four.ptr, 4, &sz));
+    try std.testing.expectEqual(@as(SZ, 4), sz);
+    // A multibyte lead with insufficient bytes decodes as a lone byte (size 1).
+    // CHAR is signed, and the fallback returns uval(str[0]) verbatim, so a high
+    // byte sign-extends exactly as C's (unsigned)(signed char) would (ABI parity).
+    try std.testing.expectEqual(@as(c_uint, 0xffffffc3), md_decode_utf8(two.ptr, 1, &sz));
+    try std.testing.expectEqual(@as(SZ, 1), sz);
+}
+
+test "growArray: 1.5x growth schedule + data survives realloc" {
+    var arr: [*c]u32 = null;
+    var alloc: c_int = 0;
+    var n: c_int = 0;
+    defer std.c.free(arr);
+
+    // First push from empty grows to min_alloc.
+    try util.growArray(u32, &arr, &alloc, n, 8);
+    try std.testing.expectEqual(@as(c_int, 8), alloc);
+    arr[@intCast(n)] = 100;
+    n += 1;
+
+    // No realloc until n reaches capacity.
+    while (n < 8) : (n += 1) {
+        try util.growArray(u32, &arr, &alloc, n, 8);
+        try std.testing.expectEqual(@as(c_int, 8), alloc);
+        arr[@intCast(n)] = @intCast(n);
+    }
+
+    // n == alloc == 8 → grow by 1.5x to 12.
+    try util.growArray(u32, &arr, &alloc, n, 8);
+    try std.testing.expectEqual(@as(c_int, 12), alloc);
+
+    // Data written before the realloc must survive it.
+    try std.testing.expectEqual(@as(u32, 100), arr[0]);
+    try std.testing.expectEqual(@as(u32, 7), arr[7]);
+}
