@@ -28,6 +28,7 @@ const MD_CONTAINER = types.MD_CONTAINER;
 const MD_BLOCK_COMPONENT_INFO = types.MD_BLOCK_COMPONENT_INFO;
 const MD_SLOT_INFO = types.MD_SLOT_INFO;
 const MD_BLOCK_ALERT_INFO = types.MD_BLOCK_ALERT_INFO;
+const c_allocator = types.c_allocator;
 const MD_BLOCK_CONTAINER_OPENER = types.MD_BLOCK_CONTAINER_OPENER;
 const MD_BLOCK_CONTAINER_CLOSER = types.MD_BLOCK_CONTAINER_CLOSER;
 const MD_BLOCK_LOOSE_LIST = types.MD_BLOCK_LOOSE_LIST;
@@ -277,15 +278,11 @@ pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) error{OutOf
 }
 
 pub fn md_push_block_alert_info(ctx: *MD_CTX, type_beg: OFF, type_end: OFF) error{OutOfMemory}!c_int {
-    util.growArray(MD_BLOCK_ALERT_INFO, &ctx.block_alert_info, &ctx.alloc_block_alerts, ctx.n_block_alerts, 16) catch {
+    const idx: c_int = @intCast(ctx.block_alert_info.items.len);
+    ctx.block_alert_info.append(c_allocator, .{ .type_beg = type_beg, .type_end = type_end }) catch {
         ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
-
-    const idx = ctx.n_block_alerts;
-    ctx.n_block_alerts += 1;
-    ctx.block_alert_info[@intCast(idx)].type_beg = type_beg;
-    ctx.block_alert_info[@intCast(idx)].type_end = type_end;
     return idx;
 }
 

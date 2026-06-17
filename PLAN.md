@@ -20,7 +20,7 @@ build with live bounds-checks). Summary:
 | **1.1** `single_threaded=true`            | ✅ done               | native codegen wins; WASM already single-threaded (size unchanged)                                                                                                           |
 | **1.2** SIMD HTML escape scan             | ✅ done               | `@Vector(16,u8)`; ~1.22× over C on the medium bench. URL-escape scan left scalar (its "escape set" is the _complement_ of a small set, so positive-match SIMD doesn't apply) |
 | **1.3** batch callback granularity        | ⏭️ skipped            | `out_buf` already amortizes; bench showed no call-overhead win                                                                                                               |
-| **2.1** one grow helper                   | ✅ done (Approach A)  | `util.growArray`; the 8 dup'd realloc blocks unified. **Approach B (ArrayListUnmanaged) NOT done** — see leftovers §8.1                                                      |
+| **2.1** one grow helper                   | ✅ done (Approach A)  | `util.growArray`; the 8 dup'd realloc blocks unified. **Approach B (ArrayListUnmanaged) in progress** — `block_alert_info` migrated (pilot), rest one-at-a-time; see §8.1    |
 | **2.2** error unions                      | ◑ partial             | **All OOM-only fns done** (attribute builders, every `md_push_*`/`md_add_mark`). **Emission-path split declined** — see leftovers §8.2                                       |
 | **2.3** `bool` predicates                 | ◑ partial             | entity recognizers → `bool`. Tri-state + hot/test-coupled predicates left — see §8.3                                                                                         |
 | **2.4** `[*c]`→slices                     | ✅ done (line arrays) | every line-array param (`md_lookup_line`, `md_merge_lines`, recognizers, full inline/link pipeline) is now `[]const MD_LINE`. Other `[*c]` remain — see §8.4                 |
@@ -430,14 +430,25 @@ ABI, generated files off-limits) and must clear the §5 gate.
 ### 8.1 `MD_CTX` growable arrays → `std.ArrayListUnmanaged(T)` (Approach B) — biggest remaining de-C item
 
 2.1 landed the _minimal_ Approach A (`util.growArray` over the existing
-`[*c]T` + `n_*`/`alloc_*` triplets). The preferred Approach B was **not** done:
-migrate `ctx.marks`, `ctx.containers`, `ctx.ref_defs`, `ctx.block_component_info`,
-`ctx.slot_info`, `ctx.block_alert_info`, `ctx.inline_attrs` (and the attribute
-substr buffers) to `ArrayListUnmanaged(T)` backed by `c_allocator`. This removes
-~24 `n_*`/`alloc_*` bookkeeping fields from `MD_CTX` (`types.zig`), gives `.items`
-with Debug bounds-checks, and `defer list.deinit(alloc)` cleanup. It also retires
+`[*c]T` + `n_*`/`alloc_*` triplets). Approach B migrates `ctx.marks`,
+`ctx.containers`, `ctx.ref_defs`, `ctx.block_component_info`, `ctx.slot_info`,
+`ctx.block_alert_info`, `ctx.inline_attrs` (and the attribute substr buffers) to
+`ArrayListUnmanaged(T)` backed by `c_allocator`. This removes the
+`n_*`/`alloc_*` bookkeeping fields from `MD_CTX` (`types.zig`), gives `.items`
+with Debug bounds-checks, and `.deinit(c_allocator)` cleanup. It also retires
 the **two-allocator split** that still exists (`std.heap.c_allocator` vs raw
 `std.c.malloc`/`c_malloc_array`/`c_realloc_array`).
+
+**Being done incrementally, one array at a time** (each migration is its own
+corpus-parity + spec + native-test + fuzz-gated commit, to bound the
+stale-pointer risk):
+
+- ✅ **`block_alert_info`** (pilot) — append-only, index-returning push, read
+  after all pushes, `.deinit` at the two cleanup sites. Verified incl. html+ast
+  libFuzzers (ASan/UBSan, ~19M/~10M execs, 0 crash/leak).
+- ⏳ remaining: `slot_info`, `block_component_info`, `inline_attrs`, `containers`,
+  `ref_defs`, `marks` (roughly easiest → hardest; `marks` last — it has the
+  cached-`&marks[i]` stale-pointer hazard called out below).
 
 - **Caveats (unchanged from §2.1):** `block_bytes` is a heterogeneous byte arena
   (interleaved packed `MD_BLOCK`/`MD_LINE`/`MD_VERBATIMLINE` by raw offset) — at

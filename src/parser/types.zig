@@ -315,10 +315,9 @@ pub const MD_CTX = struct {
     n_slots: c_int = 0,
     alloc_slots: c_int = 0,
 
-    // Alert info array.
-    block_alert_info: [*c]MD_BLOCK_ALERT_INFO = null,
-    n_block_alerts: c_int = 0,
-    alloc_block_alerts: c_int = 0,
+    // Alert info array. (PLAN 8.1: migrated to ArrayListUnmanaged — the count is
+    // `.items.len`, growth/cleanup go through `c_allocator`.)
+    block_alert_info: std.ArrayListUnmanaged(MD_BLOCK_ALERT_INFO) = .empty,
 
     // Inline attribute info array.
     inline_attrs: [*c]MD_INLINE_ATTR_INFO = null,

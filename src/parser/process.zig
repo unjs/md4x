@@ -747,8 +747,8 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
             },
             c.MD_BLOCK_ALERT => {
                 const alert_idx: c_int = @intCast(block.bits.data);
-                if (alert_idx >= 0 and alert_idx < ctx.n_block_alerts) {
-                    const info = &ctx.block_alert_info[@intCast(alert_idx)];
+                if (alert_idx >= 0 and alert_idx < @as(c_int, @intCast(ctx.block_alert_info.items.len))) {
+                    const info = &ctx.block_alert_info.items[@intCast(alert_idx)];
                     const type_beg = info.type_beg;
                     const type_end = info.type_end;
 
