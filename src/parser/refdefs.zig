@@ -74,7 +74,7 @@ pub fn md_link_label_hash(label: [*c]const CHAR, size: SZ) c_uint {
     while (off < size) {
         var char_size: SZ = undefined;
         var codepoint = md_decode_unicode(label, off, size, &char_size);
-        const is_whitespace = (ISUNICODEWHITESPACE_(codepoint) != 0) or ISNEWLINE_(label[off]);
+        const is_whitespace = ISUNICODEWHITESPACE_(codepoint) or ISNEWLINE_(label[off]);
 
         if (is_whitespace) {
             codepoint = ' ';
@@ -107,7 +107,7 @@ pub fn md_link_label_cmp_load_fold_info(label: [*c]const CHAR, off_in: OFF, size
         var char_size: SZ = undefined;
         const codepoint = md_decode_unicode(label, off, size, &char_size);
         off += char_size;
-        if (ISUNICODEWHITESPACE_(codepoint) != 0) {
+        if (ISUNICODEWHITESPACE_(codepoint)) {
             // Treat all whitespace as equivalent.
             break :whitespace;
         }
@@ -458,7 +458,7 @@ pub fn md_is_link_label(
             } else {
                 var char_size: SZ = undefined;
                 const codepoint = md_decode_unicode(ctx.text, off, ctx.size, &char_size);
-                if (ISUNICODEWHITESPACE_(codepoint) == 0) {
+                if (!ISUNICODEWHITESPACE_(codepoint)) {
                     if (contents_end == 0) {
                         contents_beg = off;
                         p_beg_line_index.* = line_index;

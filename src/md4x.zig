@@ -669,13 +669,13 @@ fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ,
 
 test "unicode classifiers wired to tables" {
     // ASCII fast-path sanity.
-    try std.testing.expectEqual(@as(c_int, 1), md_is_unicode_whitespace(' '));
-    try std.testing.expectEqual(@as(c_int, 0), md_is_unicode_whitespace('a'));
-    try std.testing.expectEqual(@as(c_int, 1), md_is_unicode_punct('!'));
+    try std.testing.expect(md_is_unicode_whitespace(' '));
+    try std.testing.expect(!md_is_unicode_whitespace('a'));
+    try std.testing.expect(md_is_unicode_punct('!'));
     // Non-ASCII via tables.
-    try std.testing.expectEqual(@as(c_int, 1), md_is_unicode_whitespace(0x00a0)); // NBSP
-    try std.testing.expectEqual(@as(c_int, 1), md_is_unicode_punct(0x2010)); // hyphen
-    try std.testing.expectEqual(@as(c_int, 0), md_is_unicode_punct(0x0041)); // 'A' not punct
+    try std.testing.expect(md_is_unicode_whitespace(0x00a0)); // NBSP
+    try std.testing.expect(md_is_unicode_punct(0x2010)); // hyphen
+    try std.testing.expect(!md_is_unicode_punct(0x0041)); // 'A' not punct
 }
 
 test "fold info ascii + non-ascii" {

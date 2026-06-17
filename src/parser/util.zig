@@ -256,19 +256,19 @@ pub fn md_unicode_bsearch(codepoint: c_uint, map: []const c_uint) c_int {
     return -1;
 }
 
-pub fn md_is_unicode_whitespace(codepoint: c_uint) c_int {
+pub fn md_is_unicode_whitespace(codepoint: c_uint) bool {
     // ASCII fast path (also CommonMark few more in this range).
     if (codepoint <= 0x7f) {
-        return if (ISWHITESPACE_(@as(CHAR, @intCast(codepoint)))) TRUE else FALSE;
+        return ISWHITESPACE_(@as(CHAR, @intCast(codepoint)));
     }
-    return if (md_unicode_bsearch(codepoint, &utbl.WHITESPACE_MAP) >= 0) TRUE else FALSE;
+    return md_unicode_bsearch(codepoint, &utbl.WHITESPACE_MAP) >= 0;
 }
 
-pub fn md_is_unicode_punct(codepoint: c_uint) c_int {
+pub fn md_is_unicode_punct(codepoint: c_uint) bool {
     if (codepoint <= 0x7f) {
-        return if (ISPUNCT_(@as(CHAR, @intCast(codepoint)))) TRUE else FALSE;
+        return ISPUNCT_(@as(CHAR, @intCast(codepoint)));
     }
-    return if (md_unicode_bsearch(codepoint, &utbl.PUNCT_MAP) >= 0) TRUE else FALSE;
+    return md_unicode_bsearch(codepoint, &utbl.PUNCT_MAP) >= 0;
 }
 
 const FoldMapEntry = struct {
@@ -401,20 +401,20 @@ pub inline fn md_decode_unicode(str: [*c]const CHAR, off: OFF, str_size: SZ, p_c
 }
 
 // ISUNICODE* offset wrappers (UTF-8 build).
-pub inline fn ISUNICODEWHITESPACE_(codepoint: c_uint) c_int {
+pub inline fn ISUNICODEWHITESPACE_(codepoint: c_uint) bool {
     return md_is_unicode_whitespace(codepoint);
 }
 pub inline fn ISUNICODEWHITESPACE(ctx: *const MD_CTX, off: OFF) bool {
-    return md_is_unicode_whitespace(md_decode_utf8(ctx.str(off), ctx.size - off, null)) != 0;
+    return md_is_unicode_whitespace(md_decode_utf8(ctx.str(off), ctx.size - off, null));
 }
 pub inline fn ISUNICODEWHITESPACEBEFORE(ctx: *const MD_CTX, off: OFF) bool {
-    return md_is_unicode_whitespace(md_decode_utf8_before(ctx, off)) != 0;
+    return md_is_unicode_whitespace(md_decode_utf8_before(ctx, off));
 }
 pub inline fn ISUNICODEPUNCT(ctx: *const MD_CTX, off: OFF) bool {
-    return md_is_unicode_punct(md_decode_utf8(ctx.str(off), ctx.size - off, null)) != 0;
+    return md_is_unicode_punct(md_decode_utf8(ctx.str(off), ctx.size - off, null));
 }
 pub inline fn ISUNICODEPUNCTBEFORE(ctx: *const MD_CTX, off: OFF) bool {
-    return md_is_unicode_punct(md_decode_utf8_before(ctx, off)) != 0;
+    return md_is_unicode_punct(md_decode_utf8_before(ctx, off));
 }
 
 // ============================================================================
@@ -470,7 +470,7 @@ pub fn md_skip_unicode_whitespace(label: [*c]const CHAR, off_in: OFF, size: SZ) 
     while (off < size) {
         var char_size: SZ = undefined;
         const codepoint = md_decode_unicode(label, off, size, &char_size);
-        if (ISUNICODEWHITESPACE_(codepoint) == 0 and !ISNEWLINE_(label[off])) break;
+        if (!ISUNICODEWHITESPACE_(codepoint) and !ISNEWLINE_(label[off])) break;
         off += char_size;
     }
     return off;
