@@ -24,15 +24,12 @@ const MD_LINE = types.MD_LINE;
 const MD_LINE_ANALYSIS = types.MD_LINE_ANALYSIS;
 const MD_VERBATIMLINE = types.MD_VERBATIMLINE;
 const MD_BLOCK = types.MD_BLOCK;
-const md_log = types.md_log;
 const MD_BLOCK_CONTAINER = types.MD_BLOCK_CONTAINER;
 const MD_BLOCK_CONTAINER_OPENER = types.MD_BLOCK_CONTAINER_OPENER;
 const MD_BLOCK_CONTAINER_CLOSER = types.MD_BLOCK_CONTAINER_CLOSER;
 const MD_BLOCK_LOOSE_LIST = types.MD_BLOCK_LOOSE_LIST;
 const MD_BLOCK_SETEXT_HEADER = types.MD_BLOCK_SETEXT_HEADER;
 
-const CH = util.CH;
-const STR = util.STR;
 const ISWHITESPACE = util.ISWHITESPACE;
 const MD_ATTRIBUTE_BUILD = util.MD_ATTRIBUTE_BUILD;
 const md_build_attribute = util.md_build_attribute;
@@ -61,13 +58,13 @@ const md_start_new_block = blocks.md_start_new_block;
 // Block-level enter/leave helpers mirroring MD_ENTER_BLOCK / MD_LEAVE_BLOCK.
 pub inline fn mdEnterBlock(ctx: *MD_CTX, ty: c.MD_BLOCKTYPE, detail: ?*anyopaque) c_int {
     const ret = ctx.parser.enter_block.?(ty, detail, ctx.userdata);
-    if (ret != 0) md_log(ctx, "Aborted from enter_block() callback.");
+    if (ret != 0) ctx.log("Aborted from enter_block() callback.");
     return ret;
 }
 
 pub inline fn mdLeaveBlock(ctx: *MD_CTX, ty: c.MD_BLOCKTYPE, detail: ?*anyopaque) c_int {
     const ret = ctx.parser.leave_block.?(ty, detail, ctx.userdata);
-    if (ret != 0) md_log(ctx, "Aborted from leave_block() callback.");
+    if (ret != 0) ctx.log("Aborted from leave_block() callback.");
     return ret;
 }
 
@@ -76,7 +73,7 @@ pub inline fn mdTextInsecure(ctx: *MD_CTX, ty: c.MD_TEXTTYPE, str: [*c]const CHA
     if (size > 0) {
         const ret = md_text_with_null_replacement(ctx, ty, str, size);
         if (ret != 0) {
-            md_log(ctx, "Aborted from text() callback.");
+            ctx.log("Aborted from text() callback.");
             return ret;
         }
     }
@@ -93,10 +90,10 @@ pub fn md_analyze_table_alignment(ctx: *MD_CTX, beg: OFF, end: OFF, align_arr: [
     while (n_align > 0) {
         var index: usize = 0; // index into align_map[]
 
-        while (CH(ctx, off) != '-') off += 1;
-        if (off > beg and CH(ctx, off - 1) == ':') index |= 1;
-        while (off < end and CH(ctx, off) == '-') off += 1;
-        if (off < end and CH(ctx, off) == ':') index |= 2;
+        while (ctx.ch(off) != '-') off += 1;
+        if (off > beg and ctx.ch(off - 1) == ':') index |= 1;
+        while (off < end and ctx.ch(off) == '-') off += 1;
+        if (off < end and ctx.ch(off) == ':') index |= 2;
 
         align_arr[ai] = align_map[index];
         ai += 1;
@@ -148,7 +145,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
     const n: c_int = ctx.n_table_cell_boundaries + 2;
     pipe_offs = @ptrCast(@alignCast(std.c.malloc(@as(usize, @intCast(n)) * @sizeOf(OFF))));
     if (pipe_offs == null) {
-        md_log(ctx, "malloc() failed.");
+        ctx.log("malloc() failed.");
         ctx.table_cell_boundaries_head = -1;
         ctx.table_cell_boundaries_tail = -1;
         return -1;
@@ -217,7 +214,7 @@ pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: []
 
     align_arr = @ptrCast(@alignCast(std.c.malloc(@as(usize, @intCast(col_count)) * @sizeOf(c.MD_ALIGN))));
     if (align_arr == null) {
-        md_log(ctx, "malloc() failed.");
+        ctx.log("malloc() failed.");
         return -1;
     }
 
@@ -302,7 +299,7 @@ pub fn md_process_verbatim_block_contents(ctx: *MD_CTX, text_type: c.MD_TEXTTYPE
         }
 
         // Output the code line itself.
-        ret = mdTextInsecure(ctx, text_type, STR(ctx, line.beg), line.end - line.beg);
+        ret = mdTextInsecure(ctx, text_type, ctx.str(line.beg), line.end - line.beg);
         if (ret != 0) return ret;
 
         // Enforce end-of-line.
@@ -409,22 +406,22 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
     const fence_line: *const MD_VERBATIMLINE = @ptrCast(@alignCast(@as([*]const MD_BLOCK, @ptrCast(block)) + 1));
     var beg: OFF = fence_line.beg;
     var end: OFF = fence_line.end;
-    const fence_ch: CHAR = CH(ctx, fence_line.beg);
+    const fence_ch: CHAR = ctx.ch(fence_line.beg);
 
     // Skip the fence itself.
-    while (beg < ctx.size and CH(ctx, beg) == fence_ch) beg += 1;
+    while (beg < ctx.size and ctx.ch(beg) == fence_ch) beg += 1;
     // Trim initial spaces.
-    while (beg < ctx.size and CH(ctx, beg) == ' ') beg += 1;
+    while (beg < ctx.size and ctx.ch(beg) == ' ') beg += 1;
     // Trim trailing spaces.
-    while (end > beg and CH(ctx, end - 1) == ' ') end -= 1;
+    while (end > beg and ctx.ch(end - 1) == ' ') end -= 1;
 
     // Build info string attribute (full info string).
-    md_build_attribute(ctx, STR(ctx, beg), end - beg, 0, &det.info, info_build) catch return -1;
+    md_build_attribute(ctx, ctx.str(beg), end - beg, 0, &det.info, info_build) catch return -1;
 
     // Build lang attribute (first word of info string).
     var lang_end: OFF = beg;
     while (lang_end < end and !ISWHITESPACE(ctx, lang_end)) lang_end += 1;
-    md_build_attribute(ctx, STR(ctx, beg), lang_end - beg, 0, &det.lang, lang_build) catch return -1;
+    md_build_attribute(ctx, ctx.str(beg), lang_end - beg, 0, &det.lang, lang_build) catch return -1;
 
     det.fence_char = fence_ch;
 
@@ -448,13 +445,13 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
         {
             var i: OFF = rest_beg;
             while (i < end) : (i += 1) {
-                if (CH(ctx, i) == '[') {
+                if (ctx.ch(i) == '[') {
                     fn_open = i;
                     var jj: OFF = i + 1;
                     while (jj < end) : (jj += 1) {
-                        if (CH(ctx, jj) == '\\' and jj + 1 < end) {
+                        if (ctx.ch(jj) == '\\' and jj + 1 < end) {
                             jj += 1; // skip escaped char
-                        } else if (CH(ctx, jj) == ']') {
+                        } else if (ctx.ch(jj) == ']') {
                             fn_close = jj + 1;
                             fn_beg = i + 1;
                             fn_end = jj;
@@ -471,11 +468,11 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
         {
             var i: OFF = rest_beg;
             while (i < end) : (i += 1) {
-                if (CH(ctx, i) == '{') {
+                if (ctx.ch(i) == '{') {
                     hl_open = i;
                     var jj: OFF = i + 1;
                     while (jj < end) : (jj += 1) {
-                        if (CH(ctx, jj) == '}') {
+                        if (ctx.ch(jj) == '}') {
                             hl_close = jj + 1;
                             hl_beg = i + 1;
                             hl_end = jj;
@@ -490,12 +487,12 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
 
         // Build filename attribute (handling backslash escapes).
         if (has_filename != 0 and fn_end > fn_beg) {
-            md_build_attribute(ctx, STR(ctx, fn_beg), fn_end - fn_beg, 0, &det.filename, filename_build) catch return -1;
+            md_build_attribute(ctx, ctx.str(fn_beg), fn_end - fn_beg, 0, &det.filename, filename_build) catch return -1;
         }
 
         // Parse highlights into expanded integer array.
         if (has_highlights != 0 and hl_end > hl_beg) {
-            det.highlights = md_parse_highlights(STR(ctx, hl_beg), hl_end - hl_beg, &det.highlight_count);
+            det.highlights = md_parse_highlights(ctx.str(hl_beg), hl_end - hl_beg, &det.highlight_count);
         }
 
         // Build meta from remaining text (exclude [..] and {..} regions).
@@ -503,7 +500,7 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
             var meta_len: SZ = 0;
             const meta_buf: [*c]CHAR = @ptrCast(@alignCast(std.c.malloc(@as(usize, end - rest_beg + 1) * @sizeOf(CHAR))));
             if (meta_buf == null) {
-                md_log(ctx, "malloc() failed.");
+                ctx.log("malloc() failed.");
                 return -1;
             }
 
@@ -519,7 +516,7 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
                     pos = hl_close;
                     continue;
                 }
-                meta_buf[meta_len] = CH(ctx, pos);
+                meta_buf[meta_len] = ctx.ch(pos);
                 meta_len += 1;
                 pos += 1;
             }
@@ -541,7 +538,7 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
                 const meta_copy: [*c]CHAR = @ptrCast(@alignCast(std.c.malloc(@as(usize, meta_len + 1) * @sizeOf(CHAR))));
                 if (meta_copy == null) {
                     std.c.free(meta_buf);
-                    md_log(ctx, "malloc() failed.");
+                    ctx.log("malloc() failed.");
                     return -1;
                 }
                 @memcpy(meta_copy[0..meta_len], meta_buf[0..meta_len]);
@@ -718,18 +715,18 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     const t_end = info.title_end;
 
                     comp_name_build = .{};
-                    md_build_attribute(ctx, STR(ctx, name_beg), name_end - name_beg, 0, &det.component.tag_name, &comp_name_build) catch {
+                    md_build_attribute(ctx, ctx.str(name_beg), name_end - name_beg, 0, &det.component.tag_name, &comp_name_build) catch {
                         md_free_attribute(ctx, &comp_name_build);
                         return -1;
                     };
                     clean_component_detail = true;
 
                     if (props_beg > 0 and props_end > props_beg) {
-                        det.component.raw_props = STR(ctx, props_beg);
+                        det.component.raw_props = ctx.str(props_beg);
                         det.component.raw_props_size = props_end - props_beg;
                     }
                     if (t_beg > 0 and t_end > t_beg) {
-                        det.component.title = STR(ctx, t_beg);
+                        det.component.title = ctx.str(t_beg);
                         det.component.title_size = t_end - t_beg;
                     }
                 }
@@ -742,7 +739,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     const name_end = info.name_end;
 
                     comp_name_build = .{};
-                    md_build_attribute(ctx, STR(ctx, name_beg), name_end - name_beg, 0, &det.tmpl.name, &comp_name_build) catch {
+                    md_build_attribute(ctx, ctx.str(name_beg), name_end - name_beg, 0, &det.tmpl.name, &comp_name_build) catch {
                         md_free_attribute(ctx, &comp_name_build);
                         return -1;
                     };
@@ -757,7 +754,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     const type_end = info.type_end;
 
                     comp_name_build = .{};
-                    md_build_attribute(ctx, STR(ctx, type_beg), type_end - type_beg, 0, &det.alert.type_name, &comp_name_build) catch {
+                    md_build_attribute(ctx, ctx.str(type_beg), type_end - type_beg, 0, &det.alert.type_name, &comp_name_build) catch {
                         md_free_attribute(ctx, &comp_name_build);
                         return -1;
                     };

@@ -28,14 +28,11 @@ const MD_CONTAINER = types.MD_CONTAINER;
 const MD_BLOCK_COMPONENT_INFO = types.MD_BLOCK_COMPONENT_INFO;
 const MD_SLOT_INFO = types.MD_SLOT_INFO;
 const MD_BLOCK_ALERT_INFO = types.MD_BLOCK_ALERT_INFO;
-const md_log = types.md_log;
 const MD_BLOCK_CONTAINER_OPENER = types.MD_BLOCK_CONTAINER_OPENER;
 const MD_BLOCK_CONTAINER_CLOSER = types.MD_BLOCK_CONTAINER_CLOSER;
 const MD_BLOCK_LOOSE_LIST = types.MD_BLOCK_LOOSE_LIST;
 const MD_BLOCK_SETEXT_HEADER = types.MD_BLOCK_SETEXT_HEADER;
 
-const CH = util.CH;
-const STR = util.STR;
 const uval = util.uval;
 const ISALNUM = util.ISALNUM;
 const ISALPHA = util.ISALPHA;
@@ -93,7 +90,7 @@ pub fn md_push_block_bytes(ctx: *MD_CTX, n_bytes: c_int) ?*anyopaque {
             512;
         const new_block_bytes = std.c.realloc(ctx.block_bytes, @intCast(ctx.alloc_block_bytes));
         if (new_block_bytes == null) {
-            md_log(ctx, "realloc() failed.");
+            ctx.log("realloc() failed.");
             return null;
         }
 
@@ -185,7 +182,7 @@ pub fn md_end_current_block(ctx: *MD_CTX) c_int {
         (ctx.current_block.*.getType() == c.MD_BLOCK_H and (ctx.current_block.*.bits.flags & MD_BLOCK_SETEXT_HEADER != 0)))
     {
         const lines: [*c]MD_LINE = @ptrCast(@alignCast(ctx.current_block + 1));
-        if (lines[0].beg < ctx.size and CH(ctx, lines[0].beg) == '[') {
+        if (lines[0].beg < ctx.size and ctx.ch(lines[0].beg) == '[') {
             ret = md_consume_link_reference_definitions(ctx);
             if (ret < 0) return ret;
             if (ctx.current_block == null)
@@ -260,7 +257,7 @@ pub fn md_push_container_bytes(ctx: *MD_CTX, ty: c.MD_BLOCKTYPE, start: c_uint, 
 
 pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg: OFF, name_end: OFF, props_beg: OFF, props_end: OFF, title_beg: OFF, title_end: OFF) error{OutOfMemory}!c_int {
     util.growArray(MD_BLOCK_COMPONENT_INFO, &ctx.block_component_info, &ctx.alloc_block_components, ctx.n_block_components, 16) catch {
-        md_log(ctx, "realloc() failed.");
+        ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
 
@@ -279,7 +276,7 @@ pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg:
 
 pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) error{OutOfMemory}!c_int {
     util.growArray(MD_SLOT_INFO, &ctx.slot_info, &ctx.alloc_slots, ctx.n_slots, 16) catch {
-        md_log(ctx, "realloc() failed.");
+        ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
 
@@ -292,7 +289,7 @@ pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) error{OutOf
 
 pub fn md_push_block_alert_info(ctx: *MD_CTX, type_beg: OFF, type_end: OFF) error{OutOfMemory}!c_int {
     util.growArray(MD_BLOCK_ALERT_INFO, &ctx.block_alert_info, &ctx.alloc_block_alerts, ctx.n_block_alerts, 16) catch {
-        md_log(ctx, "realloc() failed.");
+        ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
 
@@ -309,8 +306,8 @@ pub fn md_is_hr_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_killer: *OFF) c_int 
     var off: OFF = beg + 1;
     var n: c_int = 1;
 
-    while (off < ctx.size and (CH(ctx, off) == CH(ctx, beg) or CH(ctx, off) == ' ' or CH(ctx, off) == '\t')) {
-        if (CH(ctx, off) == CH(ctx, beg))
+    while (off < ctx.size and (ctx.ch(off) == ctx.ch(beg) or ctx.ch(off) == ' ' or ctx.ch(off) == '\t')) {
+        if (ctx.ch(off) == ctx.ch(beg))
             n += 1;
         off += 1;
     }
@@ -333,7 +330,7 @@ pub fn md_is_hr_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_killer: *OFF) c_int 
 pub fn md_is_atxheader_line(ctx: *MD_CTX, beg: OFF, p_beg: *OFF, p_end: *OFF, p_level: *c_uint) c_int {
     var off: OFF = beg + 1;
 
-    while (off < ctx.size and CH(ctx, off) == '#' and off - beg < 7)
+    while (off < ctx.size and ctx.ch(off) == '#' and off - beg < 7)
         off += 1;
     const n: OFF = off - beg;
 
@@ -355,7 +352,7 @@ pub fn md_is_atxheader_line(ctx: *MD_CTX, beg: OFF, p_beg: *OFF, p_end: *OFF, p_
 pub fn md_is_setext_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_level: *c_uint) c_int {
     var off: OFF = beg + 1;
 
-    while (off < ctx.size and CH(ctx, off) == CH(ctx, beg))
+    while (off < ctx.size and ctx.ch(off) == ctx.ch(beg))
         off += 1;
 
     // Optionally, space(s) or tabs can follow.
@@ -366,7 +363,7 @@ pub fn md_is_setext_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_level: *c_u
     if (off < ctx.size and !ISNEWLINE(ctx, off))
         return FALSE;
 
-    p_level.* = if (CH(ctx, beg) == '=') 1 else 2;
+    p_level.* = if (ctx.ch(beg) == '=') 1 else 2;
     p_end.* = off;
     return TRUE;
 }
@@ -376,7 +373,7 @@ pub fn md_is_table_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_col_count: *
     var found_pipe: c_int = FALSE;
     var col_count: c_uint = 0;
 
-    if (off < ctx.size and CH(ctx, off) == '|') {
+    if (off < ctx.size and ctx.ch(off) == '|') {
         found_pipe = TRUE;
         off += 1;
         while (off < ctx.size and ISWHITESPACE(ctx, off))
@@ -387,25 +384,25 @@ pub fn md_is_table_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_col_count: *
         var delimited: c_int = FALSE;
 
         // Cell underline ("-----", ":----", "----:" or ":----:")
-        if (off < ctx.size and CH(ctx, off) == ':')
+        if (off < ctx.size and ctx.ch(off) == ':')
             off += 1;
-        if (off >= ctx.size or CH(ctx, off) != '-')
+        if (off >= ctx.size or ctx.ch(off) != '-')
             return FALSE;
-        while (off < ctx.size and CH(ctx, off) == '-')
+        while (off < ctx.size and ctx.ch(off) == '-')
             off += 1;
-        if (off < ctx.size and CH(ctx, off) == ':')
+        if (off < ctx.size and ctx.ch(off) == ':')
             off += 1;
 
         col_count += 1;
         if (col_count > TABLE_MAXCOLCOUNT) {
-            md_log(ctx, "Suppressing table (column_count > TABLE_MAXCOLCOUNT)");
+            ctx.log("Suppressing table (column_count > TABLE_MAXCOLCOUNT)");
             return FALSE;
         }
 
         // Pipe delimiter (optional at the end of line).
         while (off < ctx.size and ISWHITESPACE(ctx, off))
             off += 1;
-        if (off < ctx.size and CH(ctx, off) == '|') {
+        if (off < ctx.size and ctx.ch(off) == '|') {
             delimited = TRUE;
             found_pipe = TRUE;
             off += 1;
@@ -432,7 +429,7 @@ pub fn md_is_table_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_col_count: *
 pub fn md_is_opening_code_fence(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int {
     var off: OFF = beg;
 
-    while (off < ctx.size and CH(ctx, off) == CH(ctx, beg))
+    while (off < ctx.size and ctx.ch(off) == ctx.ch(beg))
         off += 1;
 
     // Fence must have at least three characters.
@@ -442,13 +439,13 @@ pub fn md_is_opening_code_fence(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int {
     ctx.code_fence_length = off - beg;
 
     // Optionally, space(s) can follow.
-    while (off < ctx.size and CH(ctx, off) == ' ')
+    while (off < ctx.size and ctx.ch(off) == ' ')
         off += 1;
 
     // Optionally, an info string can follow.
     while (off < ctx.size and !ISNEWLINE(ctx, off)) {
         // Backtick-based fence must not contain '`' in the info string.
-        if (CH(ctx, beg) == '`' and CH(ctx, off) == '`')
+        if (ctx.ch(beg) == '`' and ctx.ch(off) == '`')
             return FALSE;
         off += 1;
     }
@@ -462,7 +459,7 @@ pub fn md_is_closing_code_fence(ctx: *MD_CTX, ch: CHAR, beg: OFF, p_end: *OFF) c
     var ret: c_int = FALSE;
 
     // Closing fence must have at least the same length and use same char.
-    while (off < ctx.size and CH(ctx, off) == ch)
+    while (off < ctx.size and ctx.ch(off) == ch)
         off += 1;
     if (off - beg < ctx.code_fence_length) {
         // goto out;
@@ -471,7 +468,7 @@ pub fn md_is_closing_code_fence(ctx: *MD_CTX, ch: CHAR, beg: OFF, p_end: *OFF) c
     }
 
     // Optionally, space(s) can follow
-    while (off < ctx.size and CH(ctx, off) == ' ')
+    while (off < ctx.size and ctx.ch(off) == ' ')
         off += 1;
 
     // But nothing more is allowed on the line.
@@ -528,49 +525,49 @@ pub fn md_is_html_block_start_condition(ctx: *MD_CTX, beg: OFF) c_int {
     // Check for type 1: <script, <pre, or <style
     for (t1) |tag| {
         if (off + tag.len <= ctx.size) {
-            if (md_ascii_case_eq(STR(ctx, off), tag.name, tag.len) != 0)
+            if (md_ascii_case_eq(ctx.str(off), tag.name, tag.len) != 0)
                 return 1;
         }
     }
 
     // Check for type 2: <!--
-    if (off + 3 < ctx.size and CH(ctx, off) == '!' and CH(ctx, off + 1) == '-' and CH(ctx, off + 2) == '-')
+    if (off + 3 < ctx.size and ctx.ch(off) == '!' and ctx.ch(off + 1) == '-' and ctx.ch(off + 2) == '-')
         return 2;
 
     // Check for type 3: <?
-    if (off < ctx.size and CH(ctx, off) == '?')
+    if (off < ctx.size and ctx.ch(off) == '?')
         return 3;
 
     // Check for type 4 or 5: <!
-    if (off < ctx.size and CH(ctx, off) == '!') {
+    if (off < ctx.size and ctx.ch(off) == '!') {
         // Type 4: <! followed by uppercase letter (C tests ISASCII here).
         if (off + 1 < ctx.size and ISASCII(ctx, off + 1))
             return 4;
 
         // Type 5: <![CDATA[
         if (off + 8 < ctx.size) {
-            if (md_ascii_eq(STR(ctx, off), "![CDATA[", 8) != 0)
+            if (md_ascii_eq(ctx.str(off), "![CDATA[", 8) != 0)
                 return 5;
         }
     }
 
     // Check for type 6: Many possible starting tags.
-    if (off + 1 < ctx.size and (ISALPHA(ctx, off) or (CH(ctx, off) == '/' and ISALPHA(ctx, off + 1)))) {
-        if (CH(ctx, off) == '/')
+    if (off + 1 < ctx.size and (ISALPHA(ctx, off) or (ctx.ch(off) == '/' and ISALPHA(ctx, off + 1)))) {
+        if (ctx.ch(off) == '/')
             off += 1;
 
-        const slot: usize = if (ISUPPER(ctx, off)) @intCast(uval(CH(ctx, off)) - 'A') else @intCast(uval(CH(ctx, off)) - 'a');
+        const slot: usize = if (ISUPPER(ctx, off)) @intCast(uval(ctx.ch(off)) - 'A') else @intCast(uval(ctx.ch(off)) - 'a');
         const tags = map6[slot];
 
         for (tags) |tag| {
             if (off + tag.len <= ctx.size) {
-                if (md_ascii_case_eq(STR(ctx, off), tag.name, tag.len) != 0) {
+                if (md_ascii_case_eq(ctx.str(off), tag.name, tag.len) != 0) {
                     const tmp: OFF = off + tag.len;
                     if (tmp >= ctx.size)
                         return 6;
-                    if (ISBLANK(ctx, tmp) or ISNEWLINE(ctx, tmp) or CH(ctx, tmp) == '>')
+                    if (ISBLANK(ctx, tmp) or ISNEWLINE(ctx, tmp) or ctx.ch(tmp) == '>')
                         return 6;
-                    if (tmp + 1 < ctx.size and CH(ctx, tmp) == '/' and CH(ctx, tmp + 1) == '>')
+                    if (tmp + 1 < ctx.size and ctx.ch(tmp) == '/' and ctx.ch(tmp + 1) == '>')
                         return 6;
                     break;
                 }
@@ -600,7 +597,7 @@ pub fn md_line_contains(ctx: *MD_CTX, beg: OFF, what: [*c]const CHAR, what_len: 
     while (i + what_len < ctx.size) : (i += 1) {
         if (ISNEWLINE(ctx, i))
             break;
-        if (memcmp(STR(ctx, i), what, what_len) == 0) {
+        if (memcmp(ctx.str(i), what, what_len) == 0) {
             p_end.* = i + what_len;
             return TRUE;
         }
@@ -616,11 +613,11 @@ pub fn md_is_html_block_end_condition(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int
             var off: OFF = beg;
 
             while (off + 1 < ctx.size and !ISNEWLINE(ctx, off)) {
-                if (CH(ctx, off) == '<' and CH(ctx, off + 1) == '/') {
+                if (ctx.ch(off) == '<' and ctx.ch(off + 1) == '/') {
                     for (t1) |tag| {
                         if (off + 2 + tag.len < ctx.size) {
-                            if (md_ascii_case_eq(STR(ctx, off + 2), tag.name, tag.len) != 0 and
-                                CH(ctx, off + 2 + tag.len) == '>')
+                            if (md_ascii_case_eq(ctx.str(off + 2), tag.name, tag.len) != 0 and
+                                ctx.ch(off + 2 + tag.len) == '>')
                             {
                                 p_end.* = off + 2 + tag.len + 1;
                                 return TRUE;
@@ -660,7 +657,7 @@ pub fn md_is_block_component_opener(ctx: *MD_CTX, off_in: OFF, p_name_beg: *OFF,
     var off: OFF = off_in;
     const start: OFF = off;
 
-    while (off < ctx.size and CH(ctx, off) == ':')
+    while (off < ctx.size and ctx.ch(off) == ':')
         off += 1;
     const colon_count: c_uint = off - start;
     if (colon_count < 2)
@@ -675,7 +672,7 @@ pub fn md_is_block_component_opener(ctx: *MD_CTX, off_in: OFF, p_name_beg: *OFF,
         return 0;
 
     p_name_beg.* = off;
-    while (off < ctx.size and (ISALNUM(ctx, off) or CH(ctx, off) == '-'))
+    while (off < ctx.size and (ISALNUM(ctx, off) or ctx.ch(off) == '-'))
         off += 1;
     p_name_end.* = off;
 
@@ -692,12 +689,12 @@ pub fn md_is_block_component_opener(ctx: *MD_CTX, off_in: OFF, p_name_beg: *OFF,
         off += 1;
 
     // Check for {props} immediately after name.
-    if (off < ctx.size and CH(ctx, off) == '{') {
+    if (off < ctx.size and ctx.ch(off) == '{') {
         const brace_start: OFF = off + 1;
         var j: OFF = brace_start;
-        while (j < ctx.size and !ISNEWLINE(ctx, j) and CH(ctx, j) != '}')
+        while (j < ctx.size and !ISNEWLINE(ctx, j) and ctx.ch(j) != '}')
             j += 1;
-        if (j < ctx.size and CH(ctx, j) == '}') {
+        if (j < ctx.size and ctx.ch(j) == '}') {
             p_props_beg.* = brace_start;
             p_props_end.* = j;
             off = j + 1;
@@ -705,13 +702,13 @@ pub fn md_is_block_component_opener(ctx: *MD_CTX, off_in: OFF, p_name_beg: *OFF,
     } else if (off < ctx.size and !ISNEWLINE(ctx, off)) {
         // Title text: everything until '{' or end of line.
         const title_start: OFF = off;
-        while (off < ctx.size and !ISNEWLINE(ctx, off) and CH(ctx, off) != '{')
+        while (off < ctx.size and !ISNEWLINE(ctx, off) and ctx.ch(off) != '{')
             off += 1;
 
         // Trim trailing whitespace from title.
         {
             var title_end: OFF = off;
-            while (title_end > title_start and ISBLANK_(CH(ctx, title_end - 1)))
+            while (title_end > title_start and ISBLANK_(ctx.ch(title_end - 1)))
                 title_end -= 1;
             if (title_end > title_start) {
                 p_title_beg.* = title_start;
@@ -720,12 +717,12 @@ pub fn md_is_block_component_opener(ctx: *MD_CTX, off_in: OFF, p_name_beg: *OFF,
         }
 
         // Check for {props} after title.
-        if (off < ctx.size and CH(ctx, off) == '{') {
+        if (off < ctx.size and ctx.ch(off) == '{') {
             const brace_start: OFF = off + 1;
             var j: OFF = brace_start;
-            while (j < ctx.size and !ISNEWLINE(ctx, j) and CH(ctx, j) != '}')
+            while (j < ctx.size and !ISNEWLINE(ctx, j) and ctx.ch(j) != '}')
                 j += 1;
-            if (j < ctx.size and CH(ctx, j) == '}') {
+            if (j < ctx.size and ctx.ch(j) == '}') {
                 p_props_beg.* = brace_start;
                 p_props_end.* = j;
                 off = j + 1;
@@ -748,7 +745,7 @@ pub fn md_is_block_component_closer(ctx: *MD_CTX, off_in: OFF, p_end: *OFF) c_ui
     var off: OFF = off_in;
     const start: OFF = off;
 
-    while (off < ctx.size and CH(ctx, off) == ':')
+    while (off < ctx.size and ctx.ch(off) == ':')
         off += 1;
     const colon_count: c_uint = off - start;
     if (colon_count < 2)
@@ -772,7 +769,7 @@ pub fn md_is_block_component_closer(ctx: *MD_CTX, off_in: OFF, p_end: *OFF) c_ui
 pub fn md_is_slot_opener(ctx: *MD_CTX, off_in: OFF, p_name_beg: *OFF, p_name_end: *OFF, p_end: *OFF) c_int {
     var off: OFF = off_in;
 
-    if (off >= ctx.size or CH(ctx, off) != '#')
+    if (off >= ctx.size or ctx.ch(off) != '#')
         return 0;
     off += 1;
 
@@ -781,7 +778,7 @@ pub fn md_is_slot_opener(ctx: *MD_CTX, off_in: OFF, p_name_beg: *OFF, p_name_end
         return 0;
 
     p_name_beg.* = off;
-    while (off < ctx.size and (ISALNUM(ctx, off) or CH(ctx, off) == '-'))
+    while (off < ctx.size and (ISALNUM(ctx, off) or ctx.ch(off) == '-'))
         off += 1;
     p_name_end.* = off;
 
@@ -818,7 +815,7 @@ pub fn md_is_container_compatible(pivot_p: [*c]const MD_CONTAINER, container_p: 
 
 pub fn md_push_container(ctx: *MD_CTX, container: *const MD_CONTAINER) error{OutOfMemory}!void {
     util.growArray(MD_CONTAINER, &ctx.containers, &ctx.alloc_containers, ctx.n_containers, 16) catch {
-        md_log(ctx, "realloc() failed.");
+        ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
 
@@ -843,7 +840,7 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
 
                 ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.MD_BLOCK_OL else c.MD_BLOCK_UL, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(CH(ctx, cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
             },
             '-', '+', '*' => {
@@ -853,7 +850,7 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
 
                 ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.MD_BLOCK_OL else c.MD_BLOCK_UL, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(CH(ctx, cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
             },
             '>' => {
@@ -888,13 +885,13 @@ pub fn md_leave_child_containers(ctx: *MD_CTX, n_keep: c_int) c_int {
         switch (cont.ch) {
             ')', '.' => {
                 is_ordered_list = TRUE;
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(CH(ctx, cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
                 ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.MD_BLOCK_OL else c.MD_BLOCK_UL, 0, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
             },
             '-', '+', '*' => {
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(CH(ctx, cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
                 ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.MD_BLOCK_OL else c.MD_BLOCK_UL, 0, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
@@ -931,7 +928,7 @@ pub fn md_is_container_mark(ctx: *MD_CTX, indent: c_uint, beg: OFF, p_end: *OFF,
         return FALSE;
 
     // Check for block quote mark.
-    if (CH(ctx, off) == '>') {
+    if (ctx.ch(off) == '>') {
         off += 1;
         p_container.ch = '>';
         p_container.is_loose = FALSE;
@@ -944,7 +941,7 @@ pub fn md_is_container_mark(ctx: *MD_CTX, indent: c_uint, beg: OFF, p_end: *OFF,
 
     // Check for list item bullet mark.
     if (ISANYOF(ctx, off, "-+*") and (off + 1 >= ctx.size or ISBLANK(ctx, off + 1) or ISNEWLINE(ctx, off + 1))) {
-        p_container.ch = CH(ctx, off);
+        p_container.ch = ctx.ch(off);
         p_container.is_loose = FALSE;
         p_container.is_task = FALSE;
         p_container.mark_indent = indent;
@@ -959,15 +956,15 @@ pub fn md_is_container_mark(ctx: *MD_CTX, indent: c_uint, beg: OFF, p_end: *OFF,
         max_end = ctx.size;
     p_container.start = 0;
     while (off < max_end and ISDIGIT(ctx, off)) {
-        p_container.start = p_container.start * 10 + uval(CH(ctx, off)) - '0';
+        p_container.start = p_container.start * 10 + uval(ctx.ch(off)) - '0';
         off += 1;
     }
     if (off > beg and
         off < ctx.size and
-        (CH(ctx, off) == '.' or CH(ctx, off) == ')') and
+        (ctx.ch(off) == '.' or ctx.ch(off) == ')') and
         (off + 1 >= ctx.size or ISBLANK(ctx, off + 1) or ISNEWLINE(ctx, off + 1)))
     {
-        p_container.ch = CH(ctx, off);
+        p_container.ch = ctx.ch(off);
         p_container.is_loose = FALSE;
         p_container.is_task = FALSE;
         p_container.mark_indent = indent;
@@ -984,7 +981,7 @@ pub fn md_line_indentation(ctx: *MD_CTX, total_indent: c_uint, beg: OFF, p_end: 
     var indent: c_uint = total_indent;
 
     while (off < ctx.size and ISBLANK(ctx, off)) {
-        if (CH(ctx, off) == '\t')
+        if (ctx.ch(off) == '\t')
             indent = (indent + 4) & ~@as(c_uint, 3)
         else
             indent += 1;
@@ -1023,7 +1020,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         const cont = &ctx.containers[@intCast(n_parents)];
 
         if (cont.ch == '>' and line.indent < ctx.code_indent_offset and
-            off < ctx.size and CH(ctx, off) == '>')
+            off < ctx.size and ctx.ch(off) == '>')
         {
             // Block quote mark.
             off += 1;
@@ -1074,14 +1071,14 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
             // Check for closing --- fence.
             if (line.indent < ctx.code_indent_offset and
-                off < ctx.size and CH(ctx, off) == '-')
+                off < ctx.size and ctx.ch(off) == '-')
             {
                 var tmp: OFF = off;
-                while (tmp < ctx.size and CH(ctx, tmp) == '-')
+                while (tmp < ctx.size and ctx.ch(tmp) == '-')
                     tmp += 1;
                 if (tmp - off >= 3) {
                     // Only spaces allowed after the dashes.
-                    while (tmp < ctx.size and CH(ctx, tmp) == ' ')
+                    while (tmp < ctx.size and ctx.ch(tmp) == ' ')
                         tmp += 1;
                     if (tmp >= ctx.size or ISNEWLINE(ctx, tmp)) {
                         line.type = .MD_LINE_BLANK;
@@ -1114,7 +1111,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
             // Another MD_LINE_FENCEDCODE unless closing fence (→ MD_LINE_BLANK).
             if (line.indent < ctx.code_indent_offset) {
-                if (md_is_closing_code_fence(ctx, CH(ctx, pivot_line.beg), off, &off) != 0) {
+                if (md_is_closing_code_fence(ctx, ctx.ch(pivot_line.beg), off, &off) != 0) {
                     line.type = .MD_LINE_BLANK;
                     ctx.last_line_has_list_loosening_effect = FALSE;
                     break :classify;
@@ -1160,7 +1157,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
         // Check for block component closer (::).
         if ((ctx.parser.flags & c.MD_FLAG_COMPONENTS != 0) and ctx.block_component_nesting > 0 and
-            (line.indent < ctx.code_indent_offset or inside_component != 0) and off < ctx.size and CH(ctx, off) == ':')
+            (line.indent < ctx.code_indent_offset or inside_component != 0) and off < ctx.size and ctx.ch(off) == ':')
         {
             var tmp: OFF = undefined;
             const closer_colons = md_is_block_component_closer(ctx, off, &tmp);
@@ -1195,7 +1192,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         if ((ctx.parser.flags & c.MD_FLAG_COMPONENTS != 0) and ctx.block_component_nesting > 0 and
             (line.indent < ctx.code_indent_offset or inside_component != 0) and
             pivot_line.type != .MD_LINE_TEXT and
-            off < ctx.size and CH(ctx, off) == '#')
+            off < ctx.size and ctx.ch(off) == '#')
         {
             var name_beg: OFF = undefined;
             var name_end: OFF = undefined;
@@ -1300,20 +1297,20 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         // Check for alert syntax > [!TYPE] inside a newly opened blockquote.
         if ((ctx.parser.flags & c.MD_FLAG_ALERTS != 0) and n_children > 0 and
             line.indent < ctx.code_indent_offset and
-            off < ctx.size and CH(ctx, off) == '[')
+            off < ctx.size and ctx.ch(off) == '[')
         {
             const last_cont: c_int = ctx.n_containers - 1;
             if (last_cont >= 0 and ctx.containers[@intCast(last_cont)].ch == '>' and
                 ctx.containers[@intCast(last_cont)].is_alert == 0)
             {
                 var tmp: OFF = off + 1;
-                if (tmp < ctx.size and CH(ctx, tmp) == '!') {
+                if (tmp < ctx.size and ctx.ch(tmp) == '!') {
                     tmp += 1;
                     const type_beg: OFF = tmp;
-                    while (tmp < ctx.size and (ISALPHA(ctx, tmp) or ISDIGIT(ctx, tmp) or CH(ctx, tmp) == '-' or CH(ctx, tmp) == '_'))
+                    while (tmp < ctx.size and (ISALPHA(ctx, tmp) or ISDIGIT(ctx, tmp) or ctx.ch(tmp) == '-' or ctx.ch(tmp) == '_'))
                         tmp += 1;
                     const type_end: OFF = tmp;
-                    if (type_end > type_beg and tmp < ctx.size and CH(ctx, tmp) == ']') {
+                    if (type_end > type_beg and tmp < ctx.size and ctx.ch(tmp) == ']') {
                         tmp += 1;
                         while (tmp < ctx.size and ISBLANK(ctx, tmp))
                             tmp += 1;
@@ -1350,13 +1347,13 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         if ((ctx.parser.flags & c.MD_FLAG_FRONTMATTER != 0) and
             ctx.frontmatter_state == 0 and
             line.indent < ctx.code_indent_offset and n_parents == 0 and
-            off < ctx.size and CH(ctx, off) == '-')
+            off < ctx.size and ctx.ch(off) == '-')
         {
             var tmp: OFF = off;
-            while (tmp < ctx.size and CH(ctx, tmp) == '-')
+            while (tmp < ctx.size and ctx.ch(tmp) == '-')
                 tmp += 1;
             if (tmp - off >= 3) {
-                while (tmp < ctx.size and CH(ctx, tmp) == ' ')
+                while (tmp < ctx.size and ctx.ch(tmp) == ' ')
                     tmp += 1;
                 if (tmp >= ctx.size or ISNEWLINE(ctx, tmp)) {
                     if (beg == 0) {
@@ -1388,13 +1385,13 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             if (comp_i >= 0 and ctx.containers[@intCast(comp_i)].comp_fm_state == 0) {
                 var found_opener: c_int = FALSE;
                 if (line.indent < ctx.code_indent_offset and
-                    off < ctx.size and CH(ctx, off) == '-')
+                    off < ctx.size and ctx.ch(off) == '-')
                 {
                     var tmp: OFF = off;
-                    while (tmp < ctx.size and CH(ctx, tmp) == '-')
+                    while (tmp < ctx.size and ctx.ch(tmp) == '-')
                         tmp += 1;
                     if (tmp - off >= 3) {
-                        while (tmp < ctx.size and CH(ctx, tmp) == ' ')
+                        while (tmp < ctx.size and ctx.ch(tmp) == ' ')
                             tmp += 1;
                         if (tmp >= ctx.size or ISNEWLINE(ctx, tmp)) {
                             ctx.containers[@intCast(comp_i)].comp_fm_state = 1;
@@ -1471,7 +1468,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         if ((ctx.parser.flags & c.MD_FLAG_COMPONENTS != 0) and
             (line.indent < ctx.code_indent_offset or inside_component != 0) and
             pivot_line.type != .MD_LINE_TEXT and
-            off < ctx.size and CH(ctx, off) == ':')
+            off < ctx.size and ctx.ch(off) == ':')
         {
             var name_beg: OFF = undefined;
             var name_end: OFF = undefined;
@@ -1566,7 +1563,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
         // Check for ATX header.
         if (line.indent < ctx.code_indent_offset and
-            off < ctx.size and CH(ctx, off) == '#')
+            off < ctx.size and ctx.ch(off) == '#')
         {
             var level: c_uint = undefined;
 
@@ -1590,7 +1587,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         }
 
         // Check for start of raw HTML block.
-        if (off < ctx.size and CH(ctx, off) == '<' and
+        if (off < ctx.size and ctx.ch(off) == '<' and
             (ctx.parser.flags & c.MD_FLAG_NOHTMLBLOCKS == 0))
         {
             ctx.html_block_type = md_is_html_block_start_condition(ctx, off);
@@ -1642,8 +1639,8 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
             while (tmp < ctx.size and tmp < off + 3 and ISBLANK(ctx, tmp))
                 tmp += 1;
-            if (tmp + 2 < ctx.size and CH(ctx, tmp) == '[' and
-                ISANYOF(ctx, tmp + 1, "xX ") and CH(ctx, tmp + 2) == ']' and
+            if (tmp + 2 < ctx.size and ctx.ch(tmp) == '[' and
+                ISANYOF(ctx, tmp + 1, "xX ") and ctx.ch(tmp + 2) == ']' and
                 (tmp + 3 == ctx.size or ISBLANK(ctx, tmp + 3) or ISNEWLINE(ctx, tmp + 3)))
             {
                 const task_container = if (n_children > 0) &ctx.containers[@intCast(ctx.n_containers - 1)] else &container;
@@ -1662,10 +1659,10 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     // Scan for end of the line.
     if (ctx.doc_ends_with_newline != 0 and off < ctx.size) {
         while (true) {
-            off += @intCast(strcspn(STR(ctx, off), "\r\n"));
+            off += @intCast(strcspn(ctx.str(off), "\r\n"));
 
             // strcspn() can stop on zero terminator; it can appear anywhere.
-            if (CH(ctx, off) == 0)
+            if (ctx.ch(off) == 0)
                 off += 1
             else
                 break;
@@ -1687,7 +1684,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         var tmp: OFF = line.end;
         while (tmp > line.beg and ISBLANK(ctx, tmp - 1))
             tmp -= 1;
-        while (tmp > line.beg and CH(ctx, tmp - 1) == '#')
+        while (tmp > line.beg and ctx.ch(tmp - 1) == '#')
             tmp -= 1;
         if (tmp == line.beg or ISBLANK(ctx, tmp - 1) or (ctx.parser.flags & c.MD_FLAG_PERMISSIVEATXHEADERS != 0))
             line.end = tmp;
@@ -1700,9 +1697,9 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     }
 
     // Eat also the new line.
-    if (off < ctx.size and CH(ctx, off) == '\r')
+    if (off < ctx.size and ctx.ch(off) == '\r')
         off += 1;
-    if (off < ctx.size and CH(ctx, off) == '\n')
+    if (off < ctx.size and ctx.ch(off) == '\n')
         off += 1;
 
     p_end.* = off;
@@ -1725,9 +1722,9 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     // Enter any container we found a mark for.
     if (n_brothers > 0) {
         // MD_ASSERT(n_brothers == 1);
-        ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, ctx.containers[@intCast(n_parents)].task_mark_off, if (ctx.containers[@intCast(n_parents)].is_task != 0) @intCast(uval(CH(ctx, ctx.containers[@intCast(n_parents)].task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
+        ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, ctx.containers[@intCast(n_parents)].task_mark_off, if (ctx.containers[@intCast(n_parents)].is_task != 0) @intCast(uval(ctx.ch(ctx.containers[@intCast(n_parents)].task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
         if (ret < 0) return ret;
-        ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, container.task_mark_off, if (container.is_task != 0) @intCast(uval(CH(ctx, container.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
+        ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, container.task_mark_off, if (container.is_task != 0) @intCast(uval(ctx.ch(container.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
         if (ret < 0) return ret;
         ctx.containers[@intCast(n_parents)].is_task = container.is_task;
         ctx.containers[@intCast(n_parents)].task_mark_off = container.task_mark_off;

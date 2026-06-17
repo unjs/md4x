@@ -27,14 +27,6 @@ pub const OFF_MAX: OFF = std.math.maxInt(OFF);
 pub const TRUE: c_int = 1;
 pub const FALSE: c_int = 0;
 
-// `MD_LOG(msg)` — call ctx->parser.debug_log if set. The C macro reads `ctx`
-// from the enclosing scope; here it is an explicit method on *MD_CTX.
-pub inline fn md_log(ctx: *MD_CTX, msg: [*:0]const u8) void {
-    if (ctx.parser.debug_log) |cb| {
-        cb(msg, ctx.userdata);
-    }
-}
-
 // ============================================================================
 //  Internal Types
 // ============================================================================
@@ -327,4 +319,23 @@ pub const MD_CTX = struct {
     inline_attrs: [*c]MD_INLINE_ATTR_INFO = null,
     n_inline_attrs: c_int = 0,
     alloc_inline_attrs: c_int = 0,
+
+    // Character accessors. `CH(off)` / `STR(off)` from md4x.c operate on the
+    // enclosing `ctx`; here they are methods on *const MD_CTX.
+    // NOTE: ctx.text is `char*`; in classification we always reinterpret as the
+    // unsigned byte value to match the C `(unsigned)(ch)` casts.
+    pub inline fn ch(self: *const MD_CTX, off: OFF) CHAR {
+        return self.text[off];
+    }
+    pub inline fn str(self: *const MD_CTX, off: OFF) [*c]const CHAR {
+        return self.text + off;
+    }
+
+    // `MD_LOG(msg)` — call ctx->parser.debug_log if set. The C macro reads `ctx`
+    // from the enclosing scope; here it is a method on *MD_CTX.
+    pub inline fn log(self: *MD_CTX, msg: [*:0]const u8) void {
+        if (self.parser.debug_log) |cb| {
+            cb(msg, self.userdata);
+        }
+    }
 };

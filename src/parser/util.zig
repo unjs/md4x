@@ -18,19 +18,7 @@ const TRUE = types.TRUE;
 const FALSE = types.FALSE;
 const MD_CTX = types.MD_CTX;
 const MD_LINE = types.MD_LINE;
-const md_log = types.md_log;
 const c_allocator = types.c_allocator;
-
-// Character accessors. `CH(off)` / `STR(off)` from md4x.c operate on the
-// enclosing `ctx`; here they are explicit helpers taking `ctx`.
-// NOTE: ctx.text is `char*`; in classification we always reinterpret as the
-// unsigned byte value to match the C `(unsigned)(ch)` casts.
-pub inline fn CH(ctx: *const MD_CTX, off: OFF) CHAR {
-    return ctx.text[off];
-}
-pub inline fn STR(ctx: *const MD_CTX, off: OFF) [*c]const CHAR {
-    return ctx.text + off;
-}
 
 // Treat a CHAR (which may be signed `char`) as an unsigned byte, then widen.
 // This reproduces C's `(unsigned)(ch)` on `char` operands which first promotes
@@ -107,49 +95,49 @@ pub inline fn ISANYOF_(ch: CHAR, palette: [*:0]const u8) bool {
 
 // Offset-based wrappers (CH(off) variants).
 pub inline fn ISANYOF(ctx: *const MD_CTX, off: OFF, palette: [*:0]const u8) bool {
-    return ISANYOF_(CH(ctx, off), palette);
+    return ISANYOF_(ctx.ch(off), palette);
 }
 pub inline fn ISANYOF2(ctx: *const MD_CTX, off: OFF, ch1: CHAR, ch2: CHAR) bool {
-    return ISANYOF2_(CH(ctx, off), ch1, ch2);
+    return ISANYOF2_(ctx.ch(off), ch1, ch2);
 }
 pub inline fn ISANYOF3(ctx: *const MD_CTX, off: OFF, ch1: CHAR, ch2: CHAR, ch3: CHAR) bool {
-    return ISANYOF3_(CH(ctx, off), ch1, ch2, ch3);
+    return ISANYOF3_(ctx.ch(off), ch1, ch2, ch3);
 }
 pub inline fn ISASCII(ctx: *const MD_CTX, off: OFF) bool {
-    return ISASCII_(CH(ctx, off));
+    return ISASCII_(ctx.ch(off));
 }
 pub inline fn ISBLANK(ctx: *const MD_CTX, off: OFF) bool {
-    return ISBLANK_(CH(ctx, off));
+    return ISBLANK_(ctx.ch(off));
 }
 pub inline fn ISNEWLINE(ctx: *const MD_CTX, off: OFF) bool {
-    return ISNEWLINE_(CH(ctx, off));
+    return ISNEWLINE_(ctx.ch(off));
 }
 pub inline fn ISWHITESPACE(ctx: *const MD_CTX, off: OFF) bool {
-    return ISWHITESPACE_(CH(ctx, off));
+    return ISWHITESPACE_(ctx.ch(off));
 }
 pub inline fn ISCNTRL(ctx: *const MD_CTX, off: OFF) bool {
-    return ISCNTRL_(CH(ctx, off));
+    return ISCNTRL_(ctx.ch(off));
 }
 pub inline fn ISPUNCT(ctx: *const MD_CTX, off: OFF) bool {
-    return ISPUNCT_(CH(ctx, off));
+    return ISPUNCT_(ctx.ch(off));
 }
 pub inline fn ISUPPER(ctx: *const MD_CTX, off: OFF) bool {
-    return ISUPPER_(CH(ctx, off));
+    return ISUPPER_(ctx.ch(off));
 }
 pub inline fn ISLOWER(ctx: *const MD_CTX, off: OFF) bool {
-    return ISLOWER_(CH(ctx, off));
+    return ISLOWER_(ctx.ch(off));
 }
 pub inline fn ISALPHA(ctx: *const MD_CTX, off: OFF) bool {
-    return ISALPHA_(CH(ctx, off));
+    return ISALPHA_(ctx.ch(off));
 }
 pub inline fn ISDIGIT(ctx: *const MD_CTX, off: OFF) bool {
-    return ISDIGIT_(CH(ctx, off));
+    return ISDIGIT_(ctx.ch(off));
 }
 pub inline fn ISXDIGIT(ctx: *const MD_CTX, off: OFF) bool {
-    return ISXDIGIT_(CH(ctx, off));
+    return ISXDIGIT_(ctx.ch(off));
 }
 pub inline fn ISALNUM(ctx: *const MD_CTX, off: OFF) bool {
-    return ISALNUM_(CH(ctx, off));
+    return ISALNUM_(ctx.ch(off));
 }
 
 // `md_strchr` — C's strchr(palette, ch): returns pointer to first occurrence of
@@ -227,7 +215,7 @@ pub fn md_temp_buffer(ctx: *MD_CTX, sz: SZ) c_int {
         // ctx.buffer may be null on first call, which realloc treats as malloc.
         const new_buffer = c_realloc_array(CHAR, ctx.buffer, @intCast(new_size));
         if (new_buffer == null) {
-            md_log(ctx, "realloc() failed.");
+            ctx.log("realloc() failed.");
             return -1;
         }
         ctx.buffer = new_buffer;
@@ -389,23 +377,23 @@ pub fn md_decode_utf8(str: [*c]const CHAR, str_size: SZ, p_size: ?*SZ) c_uint {
 }
 
 pub fn md_decode_utf8_before(ctx: *const MD_CTX, off: OFF) c_uint {
-    if (!IS_UTF8_LEAD1(CH(ctx, off - 1))) {
-        if (off > 1 and IS_UTF8_LEAD2(CH(ctx, off - 2)) and IS_UTF8_TAIL(CH(ctx, off - 1)))
-            return ((uval(CH(ctx, off - 2)) & 0x1f) << 6) |
-                ((uval(CH(ctx, off - 1)) & 0x3f) << 0);
+    if (!IS_UTF8_LEAD1(ctx.ch(off - 1))) {
+        if (off > 1 and IS_UTF8_LEAD2(ctx.ch(off - 2)) and IS_UTF8_TAIL(ctx.ch(off - 1)))
+            return ((uval(ctx.ch(off - 2)) & 0x1f) << 6) |
+                ((uval(ctx.ch(off - 1)) & 0x3f) << 0);
 
-        if (off > 2 and IS_UTF8_LEAD3(CH(ctx, off - 3)) and IS_UTF8_TAIL(CH(ctx, off - 2)) and IS_UTF8_TAIL(CH(ctx, off - 1)))
-            return ((uval(CH(ctx, off - 3)) & 0x0f) << 12) |
-                ((uval(CH(ctx, off - 2)) & 0x3f) << 6) |
-                ((uval(CH(ctx, off - 1)) & 0x3f) << 0);
+        if (off > 2 and IS_UTF8_LEAD3(ctx.ch(off - 3)) and IS_UTF8_TAIL(ctx.ch(off - 2)) and IS_UTF8_TAIL(ctx.ch(off - 1)))
+            return ((uval(ctx.ch(off - 3)) & 0x0f) << 12) |
+                ((uval(ctx.ch(off - 2)) & 0x3f) << 6) |
+                ((uval(ctx.ch(off - 1)) & 0x3f) << 0);
 
-        if (off > 3 and IS_UTF8_LEAD4(CH(ctx, off - 4)) and IS_UTF8_TAIL(CH(ctx, off - 3)) and IS_UTF8_TAIL(CH(ctx, off - 2)) and IS_UTF8_TAIL(CH(ctx, off - 1)))
-            return ((uval(CH(ctx, off - 4)) & 0x07) << 18) |
-                ((uval(CH(ctx, off - 3)) & 0x3f) << 12) |
-                ((uval(CH(ctx, off - 2)) & 0x3f) << 6) |
-                ((uval(CH(ctx, off - 1)) & 0x3f) << 0);
+        if (off > 3 and IS_UTF8_LEAD4(ctx.ch(off - 4)) and IS_UTF8_TAIL(ctx.ch(off - 3)) and IS_UTF8_TAIL(ctx.ch(off - 2)) and IS_UTF8_TAIL(ctx.ch(off - 1)))
+            return ((uval(ctx.ch(off - 4)) & 0x07) << 18) |
+                ((uval(ctx.ch(off - 3)) & 0x3f) << 12) |
+                ((uval(ctx.ch(off - 2)) & 0x3f) << 6) |
+                ((uval(ctx.ch(off - 1)) & 0x3f) << 0);
     }
-    return uval(CH(ctx, off - 1));
+    return uval(ctx.ch(off - 1));
 }
 
 pub inline fn md_decode_unicode(str: [*c]const CHAR, off: OFF, str_size: SZ, p_char_size: ?*SZ) c_uint {
@@ -417,13 +405,13 @@ pub inline fn ISUNICODEWHITESPACE_(codepoint: c_uint) c_int {
     return md_is_unicode_whitespace(codepoint);
 }
 pub inline fn ISUNICODEWHITESPACE(ctx: *const MD_CTX, off: OFF) bool {
-    return md_is_unicode_whitespace(md_decode_utf8(STR(ctx, off), ctx.size - off, null)) != 0;
+    return md_is_unicode_whitespace(md_decode_utf8(ctx.str(off), ctx.size - off, null)) != 0;
 }
 pub inline fn ISUNICODEWHITESPACEBEFORE(ctx: *const MD_CTX, off: OFF) bool {
     return md_is_unicode_whitespace(md_decode_utf8_before(ctx, off)) != 0;
 }
 pub inline fn ISUNICODEPUNCT(ctx: *const MD_CTX, off: OFF) bool {
-    return md_is_unicode_punct(md_decode_utf8(STR(ctx, off), ctx.size - off, null)) != 0;
+    return md_is_unicode_punct(md_decode_utf8(ctx.str(off), ctx.size - off, null)) != 0;
 }
 pub inline fn ISUNICODEPUNCTBEFORE(ctx: *const MD_CTX, off: OFF) bool {
     return md_is_unicode_punct(md_decode_utf8_before(ctx, off)) != 0;
@@ -447,7 +435,7 @@ pub fn md_merge_lines(ctx: *const MD_CTX, beg: OFF, end: OFF, lines: []const MD_
         if (end < line_end) line_end = end;
 
         while (off < line_end) {
-            ptr[0] = CH(ctx, off);
+            ptr[0] = ctx.ch(off);
             ptr += 1;
             off += 1;
         }
@@ -469,7 +457,7 @@ pub fn md_merge_lines(ctx: *const MD_CTX, beg: OFF, end: OFF, lines: []const MD_
 pub fn md_merge_lines_alloc(ctx: *MD_CTX, beg: OFF, end: OFF, lines: []const MD_LINE, line_break_replacement_char: CHAR, p_str: *[*c]CHAR, p_size: *SZ) c_int {
     const n: usize = @intCast(end - beg);
     const buffer = c_allocator.alloc(CHAR, n) catch {
-        md_log(ctx, "malloc() failed.");
+        ctx.log("malloc() failed.");
         return -1;
     };
     md_merge_lines(ctx, beg, end, lines, line_break_replacement_char, buffer.ptr, p_size);
@@ -583,7 +571,7 @@ pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, tty
         // realloc substr_types (libc realloc tracks the old block's size).
         const new_types = c_realloc_array(c.MD_TEXTTYPE, build.substr_types, alloc_u);
         if (new_types == null) {
-            md_log(ctx, "realloc() failed.");
+            ctx.log("realloc() failed.");
             return error.OutOfMemory;
         }
         build.substr_types = new_types;
@@ -591,7 +579,7 @@ pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, tty
         // realloc substr_offsets (+1 for final offset == raw_size).
         const new_offsets = c_realloc_array(OFF, build.substr_offsets, alloc_u + 1);
         if (new_offsets == null) {
-            md_log(ctx, "realloc() failed.");
+            ctx.log("realloc() failed.");
             return error.OutOfMemory;
         }
         build.substr_offsets = new_offsets;
@@ -650,7 +638,7 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
     } else {
         const buf = c_malloc_array(CHAR, raw_size);
         if (buf == null) {
-            md_log(ctx, "malloc() failed.");
+            ctx.log("malloc() failed.");
             md_free_attribute(ctx, build);
             return error.OutOfMemory;
         }

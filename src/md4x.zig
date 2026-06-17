@@ -65,10 +65,6 @@ const FALSE = types.FALSE;
 // Boolean constants and small helpers (`SIZEOF_ARRAY` becomes `.len`).
 // ----------------------------------------------------------------------------
 
-// `MD_LOG(msg)` — call ctx->parser.debug_log if set. The C macro reads `ctx`
-// from the enclosing scope; here it is an explicit method on *MD_CTX.
-const md_log = types.md_log;
-
 // ----------------------------------------------------------------------------
 // Internal types — re-exposed from parser/types.zig (pure module split).
 // ----------------------------------------------------------------------------
@@ -113,8 +109,6 @@ const MD_CTX = types.MD_CTX;
 // Low-level utilities — re-exposed from parser/util.zig (pure module split).
 // ----------------------------------------------------------------------------
 
-const CH = util.CH;
-const STR = util.STR;
 const uval = util.uval;
 const ISIN_ = util.ISIN_;
 const ISANYOF2_ = util.ISANYOF2_;
@@ -324,8 +318,6 @@ pub export fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PA
 //  the parser is ported. (No runtime effect.)
 // ============================================================================
 comptime {
-    _ = &CH;
-    _ = &STR;
     _ = &ISANYOF;
     _ = &ISANYOF2;
     _ = &ISANYOF3;

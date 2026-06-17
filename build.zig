@@ -114,6 +114,7 @@ pub fn build(b: *std.Build) void {
     // --- Fuzzer targets ---
 
     addFuzzers(b);
+    addZigFuzzer(b, target, include_paths, libyaml_src);
 
     // --- WASM & NAPI targets ---
 
@@ -331,6 +332,32 @@ fn addNapi(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
 
 fn addFuzzers(b: *std.Build) void {
     const fuzz_build = b.addSystemCommand(&.{ "sh", "test/fuzzers/build.sh" });
-    const fuzz_step = b.step("fuzz", "Build all fuzzer harnesses (requires clang)");
+    const fuzz_step = b.step("fuzz", "Build all C/libFuzzer harnesses (requires clang)");
     fuzz_step.dependOn(&fuzz_build.step);
+}
+
+/// Zig-native, coverage-instrumented fuzz harness (`src/fuzz.zig`), complementing
+/// the C/libFuzzer harnesses. It @imports the parser + renderer sources directly,
+/// so Zig's own fuzzer (`zig build fuzz-zig --fuzz`) instruments the library and
+/// gets real coverage feedback — which the C harnesses cannot (see build.sh).
+///
+/// Built ReleaseSafe regardless of -Doptimize so runtime safety checks (OOB,
+/// overflow, unreachable, bad casts) are always armed during fuzzing; without
+/// them a miscompiled UB would pass silently. libyaml (C) is linked for the
+/// html/ast/meta paths but, like in the C harnesses, is not instrumented.
+fn addZigFuzzer(b: *std.Build, target: std.Build.ResolvedTarget, include_paths: []const std.Build.LazyPath, libyaml_src: std.Build.Module.AddCSourceFilesOptions) void {
+    const fuzz_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/fuzz.zig"),
+            .target = target,
+            .optimize = .ReleaseSafe,
+            .link_libc = true,
+            .single_threaded = true,
+        }),
+    });
+    for (include_paths) |p| fuzz_tests.root_module.addIncludePath(p);
+    fuzz_tests.root_module.addCSourceFiles(libyaml_src);
+    const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
+    const fuzz_zig_step = b.step("fuzz-zig", "Run the Zig-native fuzz harness (add --fuzz for coverage-guided fuzzing)");
+    fuzz_zig_step.dependOn(&run_fuzz_tests.step);
 }
