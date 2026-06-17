@@ -436,8 +436,7 @@ pub inline fn ISUNICODEPUNCTBEFORE(ctx: *const MD_CTX, off: OFF) bool {
 // Fill `buffer` with copy of [beg, end) replacing line breaks with the given
 // char. Caller guarantees buffer is large enough (>= end-beg). Mirrors
 // md_merge_lines exactly.
-pub fn md_merge_lines(ctx: *const MD_CTX, beg: OFF, end: OFF, lines: [*c]const MD_LINE, n_lines: MD_SIZE, line_break_replacement_char: CHAR, buffer: [*c]CHAR, p_size: *SZ) void {
-    _ = n_lines;
+pub fn md_merge_lines(ctx: *const MD_CTX, beg: OFF, end: OFF, lines: []const MD_LINE, line_break_replacement_char: CHAR, buffer: [*c]CHAR, p_size: *SZ) void {
     var ptr = buffer;
     var line_index: c_int = 0;
     var off: OFF = beg;
@@ -467,13 +466,13 @@ pub fn md_merge_lines(ctx: *const MD_CTX, beg: OFF, end: OFF, lines: [*c]const M
 }
 
 // Wrapper of md_merge_lines() which allocates the output. Returns 0 / -1.
-pub fn md_merge_lines_alloc(ctx: *MD_CTX, beg: OFF, end: OFF, lines: [*c]const MD_LINE, n_lines: MD_SIZE, line_break_replacement_char: CHAR, p_str: *[*c]CHAR, p_size: *SZ) c_int {
+pub fn md_merge_lines_alloc(ctx: *MD_CTX, beg: OFF, end: OFF, lines: []const MD_LINE, line_break_replacement_char: CHAR, p_str: *[*c]CHAR, p_size: *SZ) c_int {
     const n: usize = @intCast(end - beg);
     const buffer = c_allocator.alloc(CHAR, n) catch {
         md_log(ctx, "malloc() failed.");
         return -1;
     };
-    md_merge_lines(ctx, beg, end, lines, n_lines, line_break_replacement_char, buffer.ptr, p_size);
+    md_merge_lines(ctx, beg, end, lines, line_break_replacement_char, buffer.ptr, p_size);
     p_str.* = buffer.ptr;
     return 0;
 }

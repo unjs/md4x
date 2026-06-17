@@ -705,7 +705,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n
     @memset(std.mem.asBytes(def.?), 0);
 
     if (label_is_multiline) {
-        ret = md_merge_lines_alloc(ctx, label_contents_beg, label_contents_end, lines + label_contents_line_index, n_lines - label_contents_line_index, ' ', &def.?.label, &def.?.label_size);
+        ret = md_merge_lines_alloc(ctx, label_contents_beg, label_contents_end, lines[label_contents_line_index..n_lines], ' ', &def.?.label, &def.?.label_size);
         if (ret < 0) return md_is_link_reference_definition_abort(def, ret);
         def.?.label_needs_free = true;
     } else {
@@ -714,7 +714,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n
     }
 
     if (title_is_multiline) {
-        ret = md_merge_lines_alloc(ctx, title_contents_beg, title_contents_end, lines + title_contents_line_index, n_lines - title_contents_line_index, '\n', &def.?.title, &def.?.title_size);
+        ret = md_merge_lines_alloc(ctx, title_contents_beg, title_contents_end, lines[title_contents_line_index..n_lines], '\n', &def.?.title, &def.?.title_size);
         if (ret < 0) return md_is_link_reference_definition_abort(def, ret);
         def.?.title_needs_free = true;
     } else {
@@ -761,7 +761,7 @@ pub fn md_is_link_reference(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_
 
     if (is_multiline) {
         const beg_line_idx: usize = (@intFromPtr(beg_line) - @intFromPtr(lines)) / @sizeOf(MD_LINE);
-        ret = md_merge_lines_alloc(ctx, beg, end, beg_line, @intCast(n_lines - @as(MD_SIZE, @intCast(beg_line_idx))), ' ', &label, &label_size);
+        ret = md_merge_lines_alloc(ctx, beg, end, lines[beg_line_idx..n_lines], ' ', &label, &label_size);
         if (ret < 0) return ret;
         ret = FALSE;
     } else {
@@ -873,7 +873,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: M
         attr.title_size = title_contents_end - title_contents_beg;
         attr.title_needs_free = FALSE;
     } else {
-        ret = md_merge_lines_alloc(ctx, title_contents_beg, title_contents_end, lines + title_contents_line_index, n_lines - title_contents_line_index, '\n', &attr.title, &attr.title_size);
+        ret = md_merge_lines_alloc(ctx, title_contents_beg, title_contents_end, lines[title_contents_line_index..n_lines], '\n', &attr.title, &attr.title_size);
         if (ret < 0) return ret;
         attr.title_needs_free = TRUE;
     }
