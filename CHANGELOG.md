@@ -23,6 +23,7 @@
 - **Performance**: Built all Zig modules with `single_threaded = true` (the library is single-threaded by design), dropping thread-local/atomic scaffolding from native codegen. WASM size is unchanged (already single-threaded).
 - **Performance**: Vectorized the HTML renderer's escape scan with a 16-wide SIMD compare (`render_html_escaped`), moving the Zig port ~1.22x ahead of the original C scalar scan on the medium benchmark. Output is byte-for-byte unchanged.
 - Added `scripts/diff-corpus.sh`, an output-parity harness hashing all six renderer formats over the spec/extension/regression suites plus the fuzzer seed corpus.
+- **Idiomatic Zig pass (internals only; output, ABI, and behavior byte-for-byte unchanged)**: unified the duplicated realloc-grow blocks into `util.growArray`; converted the OOM-only allocators (attribute builders, mark/container/slot/alert/inline-attr/ref-def pushers) from `c_int` return codes to `error{OutOfMemory}`; switched the internal HTML-entity recognizers to `bool`; and converted the entire internal line-array threading (`md_lookup_line`, `md_merge_lines`, the HTML/code-span/link recognizers, and the full inline/link pipeline) from `[*c]const MD_LINE` + count to Zig slices, adding Debug/ReleaseSafe bounds-checking on those paths. Verified by full corpus parity, the spec/extension suites, native unit tests, and the six libFuzzer harnesses.
 
 ## v0.0.11
 
