@@ -60,6 +60,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .strip = strip,
         .link_libc = true,
+        // The whole library is single-threaded by design (one parse/render call
+        // is self-contained; no module-level mutable state is shared across
+        // threads). This drops thread-local/atomic scaffolding for a smaller
+        // WASM binary and a small speed win everywhere.
+        .single_threaded = true,
     };
 
     // --- libyaml (YAML parser for frontmatter) ---
@@ -97,6 +102,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .link_libc = true,
+            .single_threaded = true,
         }),
     });
     for (include_paths) |p| unit_tests.root_module.addIncludePath(p);
@@ -137,6 +143,7 @@ fn addZigRenderer(b: *std.Build, name: []const u8, target: std.Build.ResolvedTar
             .optimize = optimize,
             .strip = strip,
             .link_libc = true,
+            .single_threaded = true,
         }),
     });
     for (include_paths) |p| lib.root_module.addIncludePath(p);
@@ -158,6 +165,7 @@ fn addParserLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.b
             .optimize = optimize,
             .strip = strip,
             .link_libc = true,
+            .single_threaded = true,
         }),
     });
     for (include_paths) |p| lib.root_module.addIncludePath(p);
@@ -178,6 +186,7 @@ fn addEntityLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.b
             .optimize = optimize,
             .strip = strip,
             .link_libc = true,
+            .single_threaded = true,
         }),
     });
     for (include_paths) |p| lib.root_module.addIncludePath(p);
@@ -198,6 +207,7 @@ fn addWasm(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
             .optimize = opts.optimize,
             .link_libc = true,
             .strip = opts.strip,
+            .single_threaded = true,
         }),
     });
     md4x_wasm.rdynamic = true;
@@ -275,6 +285,7 @@ fn addNapi(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
                 .optimize = opts.optimize,
                 .link_libc = true,
                 .strip = opts.strip,
+                .single_threaded = true,
             }),
         });
         napi_lib.root_module.addCSourceFiles(opts.libyaml_src);
