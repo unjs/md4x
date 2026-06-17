@@ -127,11 +127,15 @@ tracking upstream md4c.
   give the `ptr_stack` a parallel size store (or length-tag the buffer) so the
   generic `md_mark_get_ptr` free can pass an exact length. Touches the sensitive
   mark/ptr-stack plumbing — do it deliberately, Debug-gated.
-- **Renderers (§8.9):** `html`/`ansi`/`text`/`meta`/`markdown` + shared
-  `md4x-props.zig`/`md4x-json.zig` still use `c_int` returns, `[*c]` buffers, and
-  manual `malloc`/`realloc`; the growArray/error-union/slice/ArrayList treatment
-  could extend to them. (The AST renderer already uses an arena + Zig allocator —
-  no action; see §8.9 "do not convert to union(enum)".)
+- **Renderers (§8.9) — largely a non-starter (premise was stale).** Verified
+  2026-06-17: **all** renderers already allocate via `c_allocator` with sized
+  slices — there is **zero** raw `std.c.malloc`/`realloc`/`free` in
+  `src/renderers/`, and the shared `md4x-props.zig`/`md4x-json.zig` are already
+  idiomatic. The remaining `c_int` returns and `[*c]` params are the **ABI-mandated**
+  SAX-callback signatures (`callconv(.c) c_int`) and C string pointers, which
+  constraint #2 (frozen C ABI) requires keeping. So there is no safe, in-scope
+  idiomatization left here. (AST renderer: arena + Zig allocator; see §8.9 "do not
+  convert to union(enum)".)
 - **`TRUE`/`FALSE` retirement (rest of §8.3):** still pervasive; convert to `bool`
   where genuinely two-state. Nuanced — many feed `c_int` ABI-ish fields. The
   tri-state recognizers (`md_is_link_reference_definition`, `md_is_autolink`)
@@ -146,17 +150,29 @@ tracking upstream md4c.
 
 ## Suggested next step
 
-The **"fuller OOM matrix" (§C) is complete**, and `ctx.buffer` is routed too.
-Remaining safe, in-scope items, roughly increasing in effort:
+**The autonomous idiomatization track is effectively done.** Over its run it
+landed the full §8.1 array migration, §8.5 injectable allocator, and the entire
+**"fuller OOM matrix" (§C) — every parser allocation the matrix targeted, plus
+`ctx.buffer`, now routes through `ctx.alloc`** with a full-parse `FailingAllocator`
+sweep (Debug + ReleaseFast), and it surfaced+fixed a latent cleanup-ordering UB
+along the way. There is **no remaining clean, safe, in-scope autonomous work**:
 
-1. **`md_merge_lines_alloc` buffers → `ctx.alloc`** (finishes parser allocator
-   coverage) — ref-def label/title + merged autolink/link-label strings. Needs a
-   highlights-style shrink-to-fit _and_ a length for the `ptr_stack` frees (which
-   today free by raw pointer). Touches the mark/ptr-stack plumbing; do it
-   deliberately and Debug-gated. See §C for the detailed plan.
-2. **Renderers (§8.9)** — `html`/`ansi`/`text`/`meta`/`markdown` + shared
-   `md4x-props.zig`/`md4x-json.zig` still use `c_int`/`[*c]`/manual `malloc`; the
-   same arena/error-union/slice treatment could extend to them (larger, separate).
+- **`md_merge_lines_alloc` buffers** (the last libc allocations in the parser) —
+  routing them requires giving the mark-engine `ptr_stack` a length to free by,
+  i.e. repurposing mark fields / parallel size store. That's **engine plumbing
+  under constraint #5** — needs a deliberate, reviewed change, not autonomous.
+- **Renderers (§8.9)** — premise was stale: allocation is **already** idiomatic
+  (`c_allocator` + sized slices, zero raw malloc); the leftover `c_int`/`[*c]` are
+  ABI-mandated (constraint #2). Nothing safe to do.
+- Everything else is an **owner judgment call (A)** or **deliberate, reviewed
+  design (B)** — explicitly not autonomous.
+
+So: hand back to the owner. The natural next decisions are (B) the §8.2 OOM/abort
+result-type rework (behind a strengthened abort/OOM test matrix), or (A) the
+cosmetic renames — both want human review. If `md_merge_lines_alloc` coverage is
+wanted, scope it as a small reviewed PR (shrink-to-fit + a length-carrying
+`ptr_stack`), gated in **both Debug and ReleaseFast** (`zig build test
+-Doptimize=Debug`).
 
 Everything else is an **owner judgment call (A)** or needs **deliberate,
 human-reviewed design (B)**. Pick up (1)/(2) only if explicitly continued. Always
