@@ -32,7 +32,11 @@ pub const FALSE: c_int = 0;
 //  Internal Types
 // ============================================================================
 
-pub const MD_LINETYPE = enum(c_int) {
+// Internal-only line classifier (never crosses the C ABI — lives only in the
+// plain `MD_LINE_ANALYSIS` struct). The explicit `c_int` backing is dropped so
+// the compiler picks the layout; member names stay MD_LINE_* to preserve
+// upstream md4c cross-reference (PLAN 8.6 / 8.8).
+pub const MD_LINETYPE = enum {
     MD_LINE_BLANK,
     MD_LINE_HR,
     MD_LINE_ATXHEADER,

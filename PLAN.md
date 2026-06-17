@@ -27,7 +27,7 @@ build with live bounds-checks). Summary:
 | **2.5** native tests                      | ✅ done               | `growArray`, `md_decode_utf8`, **abort-code matrix** (see §8.2). Failing-allocator test NOT added (libc-malloc path can't inject) — see §8.5                                 |
 | **3.1** naming                            | ⏭️ skipped (owner)    | reduces grep-ability vs upstream `md4x.c ~NNNN` cross-refs — see §8.6                                                                                                        |
 | **3.2** methods/namespacing               | ◑ partial             | `CH/STR/md_log` → `ctx.ch/str/log`; `ISxxx(ctx,off)` → `ctx.isXxx(off)` methods (§8.7). Constant-namespacing left — see §8.7                                                 |
-| **3.3** drop `extern` on internal structs | ✅ done               | `MD_CONTAINER` → plain struct (others already plain or must stay extern)                                                                                                     |
+| **3.3** drop `extern` on internal structs | ✅ done               | `MD_CONTAINER` → plain struct (others already plain or must stay extern); `MD_LINETYPE` dropped its `c_int` backing (§8.8). Internal-enum member rename deferred — see §8.8  |
 | **3.4** docs sweep                        | ✅ done               | CHANGELOG + AGENTS.md "Idiomatic Zig conventions" note                                                                                                                       |
 
 The idiomatic conventions now in force are recorded in **AGENTS.md →
@@ -528,10 +528,17 @@ should stay regardless, for the same reason.)
 
 ### 8.8 Internal enums → idiomatic Zig members (rest of 3.3)
 
-`MD_LINETYPE` (and similar internal enums) are `enum(c_int)` with `.MD_LINE_*`
-members used as `.MD_LINE_BLANK` etc. Internal-only enums could drop the `c_int`
-backing and use `.blank`/`.hr`/… members. Mechanical but ripples to every literal;
-keep `enum(c_int)` + exact names for anything the headers reference.
+`MD_LINETYPE` is the only internal Zig enum (others — `MD_BLOCKTYPE`, etc. — come
+from the C header via `@cImport`). It is internal-only (lives solely in the plain
+`MD_LINE_ANALYSIS` struct; never crosses the ABI; no `@intFromEnum`/casts).
+
+- **Done:** dropped its explicit `c_int` backing → plain `enum {}` (compiler picks
+  the layout). Corpus-parity + spec + native tests verified.
+- **Deferred (owner call):** renaming the members `MD_LINE_BLANK` → `.blank`, … is
+  the contested half. These mirror upstream md4c's `MD_LINETYPE` identifiers, so
+  renaming them is exactly the upstream-grep/diff harm §8.6 deliberately avoids.
+  Left as-is pending an explicit decision to stop tracking upstream md4c (same
+  rationale as §8.6 / §3.1).
 
 ### 8.9 Renderers are still C-ABI-shaped Zig (NOT covered by the original plan)
 
