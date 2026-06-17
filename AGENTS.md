@@ -257,6 +257,24 @@ These are run manually when updating Unicode compliance (currently Unicode 15.1)
 
 ## Development Best Practices
 
+### Idiomatic Zig conventions (parser internals)
+
+The parser internals have been moved off several C-isms; follow these patterns
+rather than reintroducing the old ones (all are internal-only — the C ABI,
+public headers, and byte-for-byte output stay frozen):
+
+- **Growable arrays:** grow `[*c]T` buffers via `util.growArray(T, &ptr, &alloc, n, min)` — do not hand-write `if (n >= alloc) { … realloc … }` blocks (that idiom was deduplicated into one audited helper).
+- **Allocation failure:** OOM-only internal helpers return `error{OutOfMemory}` (e.g. `md_build_attribute`, the `md_push_*` / `md_add_mark` pushers). Use `try` / `catch`; do not invent new `-1`-on-OOM `c_int` returns for new OOM-only helpers.
+- **Line arrays:** functions that scan a block's lines take a `[]const MD_LINE` slice (length via `.len`), not a `[*c]const MD_LINE` + separate `n_lines`. This bounds-checks the line access in Debug/ReleaseSafe builds.
+- **Ctx accessors:** use the `MD_CTX` methods `ctx.ch(off)`, `ctx.str(off)`, `ctx.log(msg)` (not free `CH`/`STR`/`md_log`).
+- **Internal predicates** that are pure two-state return `bool` (e.g. the entity recognizers). Tri-state recognizers that also signal OOM still return `c_int` (`-1`/`0`/`N`).
+- **Internal-only structs** (e.g. `MD_CONTAINER`) are plain `struct` (compiler-chosen layout). Keep `extern struct` ONLY where layout must mirror C: the `block_bytes` arena types (`MD_BLOCK`/`MD_LINE`/`MD_VERBATIMLINE`), `MD_MARK` (pointer-store trick), `MD_REF_DEF`/`MD_REF_DEF_LIST`.
+- **Abort-code contract (do not break):** `md_parse` propagates a NEGATIVE callback code verbatim but returns 0 for a POSITIVE one (md4c parity — see the abort-matrix native test in `md4x.zig`). OOM and a callback returning `-1` are intentionally unified as `-1` in the emission path; do not try to separate them.
+
+Run the verification gate after any internal change: `bash scripts/diff-corpus.sh`
+must diff-clean against the baseline, plus `zig build test`, the spec suites, and
+the fuzzers (see Testing / Fuzzing).
+
 ### AST Renderer: Union Safety with Dynamic Components
 
 The AST renderer (`md4x-ast.c`) uses a `JSON_NODE` struct with a C union for type-specific detail data. **Dynamic components** (`tag_is_dynamic = 1`) always use `detail.component` and have a heap-allocated tag name. Since a user can create a component with any name (e.g. `::alert{...}`, `::pre{...}`, `::a{...}`), the tag name may collide with built-in static tags.
