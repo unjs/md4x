@@ -221,22 +221,40 @@ fn render_verbatim_lit(r: *MD_HTML, comptime lit: []const u8) void {
     render_verbatim(r, lit.ptr, @intCast(lit.len));
 }
 
+// Find the next offset >= `start` whose byte needs HTML-escaping (one of
+// `" & < >`), or `size` if none. Vectorized: the common case is long plain
+// runs, so we scan 16 bytes at a time. Byte-identical to the scalar predicate
+// `(ESCAPE_MAP[ch] & NEED_HTML_ESC_FLAG) != 0` — only the scan is widened.
+fn next_html_esc(data: [*]const u8, start: c.MD_OFFSET, size: c.MD_SIZE) c.MD_OFFSET {
+    const V = 16;
+    const Vec = @Vector(V, u8);
+    const amp: Vec = @splat('&');
+    const lt: Vec = @splat('<');
+    const gt: Vec = @splat('>');
+    const quot: Vec = @splat('"');
+
+    var off = start;
+    while (off + V <= size) : (off += V) {
+        const chunk: Vec = @as(*const [V]u8, @ptrCast(data + off)).*;
+        const hit = (chunk == amp) | (chunk == lt) | (chunk == gt) | (chunk == quot);
+        if (@reduce(.Or, hit)) {
+            inline for (0..V) |j| {
+                if (hit[j]) return off + @as(c.MD_OFFSET, j);
+            }
+        }
+    }
+    // Scalar tail (< 16 bytes remaining).
+    while (off < size and (ESCAPE_MAP[data[off]] & NEED_HTML_ESC_FLAG) == 0)
+        off += 1;
+    return off;
+}
+
 fn render_html_escaped(r: *MD_HTML, data: [*]const u8, size: c.MD_SIZE) void {
     var beg: c.MD_OFFSET = 0;
     var off: c.MD_OFFSET = 0;
 
-    const NEED_HTML_ESC = struct {
-        inline fn f(ch: u8) bool {
-            return (ESCAPE_MAP[ch] & NEED_HTML_ESC_FLAG) != 0;
-        }
-    }.f;
-
     while (true) {
-        // Optimization: Use some loop unrolling.
-        while (off + 3 < size and !NEED_HTML_ESC(data[off + 0]) and !NEED_HTML_ESC(data[off + 1]) and !NEED_HTML_ESC(data[off + 2]) and !NEED_HTML_ESC(data[off + 3]))
-            off += 4;
-        while (off < size and !NEED_HTML_ESC(data[off]))
-            off += 1;
+        off = next_html_esc(data, off, size);
 
         if (off > beg)
             render_verbatim(r, data + beg, off - beg);
