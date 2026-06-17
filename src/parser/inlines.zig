@@ -262,7 +262,7 @@ pub inline fn md_emph_stack(ctx: *MD_CTX, ch: CHAR, flags: u8) *MD_MARKSTACK {
 
 // md4x.c ~2633. Returns the opener stack that owns the given mark.
 pub fn md_opener_stack(ctx: *MD_CTX, mark_index: c_int) *MD_MARKSTACK {
-    const mark = &ctx.marks[@intCast(mark_index)];
+    const mark = &ctx.marks.items[@intCast(mark_index)];
     switch (mark.ch) {
         '*', '_' => return md_emph_stack(ctx, mark.ch, mark.flags),
         '~' => return if (mark.end - mark.beg == 1) &ctx.opener_stacks[TILDE_OPENERS_1] else &ctx.opener_stacks[TILDE_OPENERS_2],
@@ -274,12 +274,12 @@ pub fn md_opener_stack(ctx: *MD_CTX, mark_index: c_int) *MD_MARKSTACK {
 // md4x.c ~2651. Grow ctx.marks and return a pointer to the new slot, or
 // error.OutOfMemory on allocation failure (the returned pointer is never null).
 pub fn md_add_mark(ctx: *MD_CTX) error{OutOfMemory}![*c]MD_MARK {
-    util.growArray(MD_MARK, &ctx.marks, &ctx.alloc_marks, ctx.n_marks, 64) catch {
+    ctx.marks.ensureUnusedCapacity(c_allocator, 1) catch {
         ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
-    const slot = &ctx.marks[@intCast(ctx.n_marks)];
-    ctx.n_marks += 1;
+    const slot = &ctx.marks.items.ptr[ctx.marks.items.len];
+    ctx.marks.items.len += 1;
     return slot;
 }
 
@@ -297,13 +297,13 @@ pub inline fn addMark(ctx: *MD_CTX, ch: CHAR, beg: OFF, end: OFF, flags: u8) ?[*
 }
 
 pub inline fn md_mark_stack_push(ctx: *MD_CTX, stack: *MD_MARKSTACK, mark_index: c_int) void {
-    ctx.marks[@intCast(mark_index)].next = stack.top;
+    ctx.marks.items[@intCast(mark_index)].next = stack.top;
     stack.top = mark_index;
 }
 
 pub inline fn md_mark_stack_pop(ctx: *MD_CTX, stack: *MD_MARKSTACK) c_int {
     const top = stack.top;
-    if (top >= 0) stack.top = ctx.marks[@intCast(top)].next;
+    if (top >= 0) stack.top = ctx.marks.items[@intCast(top)].next;
     return top;
 }
 
@@ -311,7 +311,7 @@ pub inline fn md_mark_stack_pop(ctx: *MD_CTX, stack: *MD_MARKSTACK) c_int {
 // sizeof(void*) bytes of the mark (beg+end). We replicate by writing the
 // pointer's bits into beg/end. Only valid for 'D' dummy marks.
 pub inline fn md_mark_store_ptr(ctx: *MD_CTX, mark_index: c_int, ptr: ?*anyopaque) void {
-    const mark = &ctx.marks[@intCast(mark_index)];
+    const mark = &ctx.marks.items[@intCast(mark_index)];
     var p = ptr;
     const dst = @as([*]u8, @ptrCast(mark))[0..@sizeOf(?*anyopaque)];
     const src = @as([*]const u8, @ptrCast(&p))[0..@sizeOf(?*anyopaque)];
@@ -319,7 +319,7 @@ pub inline fn md_mark_store_ptr(ctx: *MD_CTX, mark_index: c_int, ptr: ?*anyopaqu
 }
 
 pub inline fn md_mark_get_ptr(ctx: *MD_CTX, mark_index: c_int) ?*anyopaque {
-    const mark = &ctx.marks[@intCast(mark_index)];
+    const mark = &ctx.marks.items[@intCast(mark_index)];
     var ptr: ?*anyopaque = undefined;
     const src = @as([*]const u8, @ptrCast(mark))[0..@sizeOf(?*anyopaque)];
     @memcpy(@as([*]u8, @ptrCast(&ptr))[0..@sizeOf(?*anyopaque)], src);
@@ -327,8 +327,8 @@ pub inline fn md_mark_get_ptr(ctx: *MD_CTX, mark_index: c_int) ?*anyopaque {
 }
 
 pub inline fn md_resolve_range(ctx: *MD_CTX, opener_index: c_int, closer_index: c_int) void {
-    const opener = &ctx.marks[@intCast(opener_index)];
-    const closer = &ctx.marks[@intCast(closer_index)];
+    const opener = &ctx.marks.items[@intCast(opener_index)];
+    const closer = &ctx.marks.items[@intCast(closer_index)];
     opener.next = closer_index;
     closer.prev = opener_index;
     opener.flags |= MD_MARK_OPENER | MD_MARK_RESOLVED;
@@ -350,8 +350,8 @@ pub fn md_rollback(ctx: *MD_CTX, opener_index: c_int, closer_index: c_int, how: 
     if (how == MD_ROLLBACK_ALL) {
         var j: c_int = opener_index + 1;
         while (j < closer_index) : (j += 1) {
-            ctx.marks[@intCast(j)].ch = 'D';
-            ctx.marks[@intCast(j)].flags = 0;
+            ctx.marks.items[@intCast(j)].ch = 'D';
+            ctx.marks.items[@intCast(j)].flags = 0;
         }
     }
 }
@@ -628,7 +628,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
                         ret = -1;
                         return ret;
                     }
-                    md_resolve_range(ctx, ctx.n_marks - 2, ctx.n_marks - 1);
+                    md_resolve_range(ctx, ctx.nMarks() - 2, ctx.nMarks() - 1);
                     off = closer.end;
                     if (off > line.*.end) {
                         line = md_lookup_line(off, lines, &line_index);
@@ -652,7 +652,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
 
             // Potential entity end.
             if (ch == ';') {
-                if (ctx.n_marks > 0 and ctx.marks[@intCast(ctx.n_marks - 1)].ch == '&') {
+                if (ctx.nMarks() > 0 and ctx.marks.items[@intCast(ctx.nMarks() - 1)].ch == '&') {
                     if (addMark(ctx, ch, off, off + 1, MD_MARK_POTENTIAL_CLOSER) == null) {
                         ret = -1;
                         return ret;
@@ -676,8 +676,8 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
                             ret = -1;
                             return ret;
                         }
-                        ctx.marks[@intCast(ctx.n_marks - 2)].next = ctx.n_marks - 1;
-                        ctx.marks[@intCast(ctx.n_marks - 1)].prev = ctx.n_marks - 2;
+                        ctx.marks.items[@intCast(ctx.nMarks() - 2)].next = ctx.nMarks() - 1;
+                        ctx.marks.items[@intCast(ctx.nMarks() - 1)].prev = ctx.nMarks() - 2;
                         off = html_end;
                         if (off > line.*.end) {
                             line = md_lookup_line(off, lines, &line_index);
@@ -701,8 +701,8 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
                         ret = -1;
                         return ret;
                     }
-                    ctx.marks[@intCast(ctx.n_marks - 2)].next = ctx.n_marks - 1;
-                    ctx.marks[@intCast(ctx.n_marks - 1)].prev = ctx.n_marks - 2;
+                    ctx.marks.items[@intCast(ctx.nMarks() - 2)].next = ctx.nMarks() - 1;
+                    ctx.marks.items[@intCast(ctx.nMarks() - 1)].prev = ctx.nMarks() - 2;
                     off = autolink_end;
                     continue :scan;
                 }
@@ -828,7 +828,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
                                     ret = -1;
                                     return ret;
                                 }
-                                const opener_index = ctx.n_marks - 1;
+                                const opener_index = ctx.nMarks() - 1;
                                 if (addMark(ctx, 'D', props_beg, props_end, 0) == null) {
                                     ret = -1;
                                     return ret;
@@ -858,8 +858,8 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
                                     ret = -1;
                                     return ret;
                                 }
-                                ctx.marks[@intCast(ctx.n_marks - 3)].next = ctx.n_marks - 1;
-                                ctx.marks[@intCast(ctx.n_marks - 1)].prev = ctx.n_marks - 3;
+                                ctx.marks.items[@intCast(ctx.nMarks() - 3)].next = ctx.nMarks() - 1;
+                                ctx.marks.items[@intCast(ctx.nMarks() - 1)].prev = ctx.nMarks() - 3;
                                 off = comp_end;
                                 continue :scan;
                             }
@@ -1005,8 +1005,8 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
             const cend = deferred_comp_closers[@intCast(i)].closer_end;
 
             var insert_pos: c_int = opener_index + 2;
-            while (insert_pos < ctx.n_marks) : (insert_pos += 1) {
-                if (ctx.marks[@intCast(insert_pos)].beg >= cbeg) break;
+            while (insert_pos < ctx.nMarks()) : (insert_pos += 1) {
+                if (ctx.marks.items[@intCast(insert_pos)].beg >= cbeg) break;
             }
 
             {
@@ -1016,25 +1016,25 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
                     ret = -1;
                     return ret;
                 };
-                if (insert_pos < ctx.n_marks - 1) {
-                    const dst = &ctx.marks[@intCast(insert_pos + 1)];
-                    const srcp = &ctx.marks[@intCast(insert_pos)];
-                    const count: usize = @intCast(ctx.n_marks - 1 - insert_pos);
+                if (insert_pos < ctx.nMarks() - 1) {
+                    const dst = &ctx.marks.items[@intCast(insert_pos + 1)];
+                    const srcp = &ctx.marks.items[@intCast(insert_pos)];
+                    const count: usize = @intCast(ctx.nMarks() - 1 - insert_pos);
                     std.mem.copyBackwards(MD_MARK, @as([*]MD_MARK, @ptrCast(dst))[0..count], @as([*]const MD_MARK, @ptrCast(srcp))[0..count]);
                 }
             }
-            ctx.marks[@intCast(insert_pos)].beg = cbeg;
-            ctx.marks[@intCast(insert_pos)].end = cend;
-            ctx.marks[@intCast(insert_pos)].ch = 'C';
-            ctx.marks[@intCast(insert_pos)].flags = MD_MARK_CLOSER | MD_MARK_RESOLVED;
-            ctx.marks[@intCast(insert_pos)].prev = -1;
-            ctx.marks[@intCast(insert_pos)].next = -1;
+            ctx.marks.items[@intCast(insert_pos)].beg = cbeg;
+            ctx.marks.items[@intCast(insert_pos)].end = cend;
+            ctx.marks.items[@intCast(insert_pos)].ch = 'C';
+            ctx.marks.items[@intCast(insert_pos)].flags = MD_MARK_CLOSER | MD_MARK_RESOLVED;
+            ctx.marks.items[@intCast(insert_pos)].prev = -1;
+            ctx.marks.items[@intCast(insert_pos)].next = -1;
 
             var jj: c_int = 0;
-            while (jj < ctx.n_marks) : (jj += 1) {
+            while (jj < ctx.nMarks()) : (jj += 1) {
                 if (jj == insert_pos) continue;
-                if (ctx.marks[@intCast(jj)].prev >= insert_pos) ctx.marks[@intCast(jj)].prev += 1;
-                if (ctx.marks[@intCast(jj)].next >= insert_pos) ctx.marks[@intCast(jj)].next += 1;
+                if (ctx.marks.items[@intCast(jj)].prev >= insert_pos) ctx.marks.items[@intCast(jj)].prev += 1;
+                if (ctx.marks.items[@intCast(jj)].next >= insert_pos) ctx.marks.items[@intCast(jj)].next += 1;
             }
             if (opener_index >= insert_pos) opener_index += 1;
             {
@@ -1044,8 +1044,8 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
                         deferred_comp_closers[@intCast(k)].opener_index += 1;
                 }
             }
-            ctx.marks[@intCast(opener_index)].next = insert_pos;
-            ctx.marks[@intCast(insert_pos)].prev = opener_index;
+            ctx.marks.items[@intCast(opener_index)].next = insert_pos;
+            ctx.marks.items[@intCast(insert_pos)].prev = opener_index;
         }
     }
 
@@ -1060,24 +1060,24 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
 
 // md4x.c ~3628.
 pub fn md_analyze_bracket(ctx: *MD_CTX, mark_index: c_int) void {
-    const mark = &ctx.marks[@intCast(mark_index)];
+    const mark = &ctx.marks.items[@intCast(mark_index)];
 
     if (mark.flags & MD_MARK_POTENTIAL_OPENER != 0) {
         if (ctx.opener_stacks[BRACKET_OPENERS].top >= 0)
-            ctx.marks[@intCast(ctx.opener_stacks[BRACKET_OPENERS].top)].flags |= MD_MARK_HASNESTEDBRACKETS;
+            ctx.marks.items[@intCast(ctx.opener_stacks[BRACKET_OPENERS].top)].flags |= MD_MARK_HASNESTEDBRACKETS;
         md_mark_stack_push(ctx, &ctx.opener_stacks[BRACKET_OPENERS], mark_index);
         return;
     }
 
     if (ctx.opener_stacks[BRACKET_OPENERS].top >= 0) {
         const opener_index = md_mark_stack_pop(ctx, &ctx.opener_stacks[BRACKET_OPENERS]);
-        const opener = &ctx.marks[@intCast(opener_index)];
+        const opener = &ctx.marks.items[@intCast(opener_index)];
 
         opener.next = mark_index;
         mark.prev = opener_index;
 
         if (ctx.unresolved_link_tail >= 0)
-            ctx.marks[@intCast(ctx.unresolved_link_tail)].prev = opener_index
+            ctx.marks.items[@intCast(ctx.unresolved_link_tail)].prev = opener_index
         else
             ctx.unresolved_link_head = opener_index;
         ctx.unresolved_link_tail = opener_index;
@@ -1094,9 +1094,9 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
     var last_img_end: OFF = 0;
 
     while (opener_index >= 0) {
-        const opener = &ctx.marks[@intCast(opener_index)];
+        const opener = &ctx.marks.items[@intCast(opener_index)];
         const closer_index = opener.next;
-        const closer = &ctx.marks[@intCast(closer_index)];
+        const closer = &ctx.marks.items[@intCast(closer_index)];
         var next_index = opener.prev;
         var next_opener: ?*MD_MARK = null;
         var next_closer: ?*MD_MARK = null;
@@ -1104,8 +1104,8 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
         var is_link: c_int = FALSE;
 
         if (next_index >= 0) {
-            next_opener = &ctx.marks[@intCast(next_index)];
-            next_closer = &ctx.marks[@intCast(next_opener.?.next)];
+            next_opener = &ctx.marks.items[@intCast(next_index)];
+            next_closer = &ctx.marks.items[@intCast(next_opener.?.next)];
         }
 
         if ((opener.beg < last_link_beg and closer.end < last_link_end) or
@@ -1136,7 +1136,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
             is_link = TRUE;
 
             while (delim_index < closer_index) {
-                const m = &ctx.marks[@intCast(delim_index)];
+                const m = &ctx.marks.items[@intCast(delim_index)];
                 if (m.ch == '|') {
                     delim = m;
                     break;
@@ -1210,7 +1210,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
 
             if (is_link != 0) {
                 closer.end = next_closer.?.end;
-                next_index = ctx.marks[@intCast(next_index)].prev;
+                next_index = ctx.marks.items[@intCast(next_index)].prev;
             }
         } else {
             if (closer.end < ctx.size and ctx.ch(closer.end) == '(') {
@@ -1221,11 +1221,11 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
 
                 if (is_link != 0) {
                     var i: c_int = closer_index + 1;
-                    while (i < ctx.n_marks) {
-                        const m = &ctx.marks[@intCast(i)];
+                    while (i < ctx.nMarks()) {
+                        const m = &ctx.marks.items[@intCast(i)];
                         if (m.beg >= inline_link_end) break;
                         if ((m.flags & (MD_MARK_OPENER | MD_MARK_RESOLVED)) == (MD_MARK_OPENER | MD_MARK_RESOLVED)) {
-                            if (ctx.marks[@intCast(m.next)].beg >= inline_link_end) {
+                            if (ctx.marks.items[@intCast(m.next)].beg >= inline_link_end) {
                                 if (attr.title_needs_free != 0) std.c.free(attr.title);
                                 is_link = FALSE;
                                 break;
@@ -1260,9 +1260,9 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                     }
                     if (depth == 0) {
                         is_link = TRUE;
-                        ctx.marks[@intCast(opener_index + 1)].ch = 'S';
-                        ctx.marks[@intCast(opener_index + 1)].beg = closer.end + 1;
-                        ctx.marks[@intCast(opener_index + 1)].end = scan - 1;
+                        ctx.marks.items[@intCast(opener_index + 1)].ch = 'S';
+                        ctx.marks.items[@intCast(opener_index + 1)].beg = closer.end + 1;
+                        ctx.marks.items[@intCast(opener_index + 1)].end = scan - 1;
                         closer.end = scan;
                     }
                 }
@@ -1273,16 +1273,16 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
             opener.flags |= MD_MARK_OPENER | MD_MARK_RESOLVED;
             closer.flags |= MD_MARK_CLOSER | MD_MARK_RESOLVED;
 
-            if (ctx.marks[@intCast(opener_index + 1)].ch == 'S') {
+            if (ctx.marks.items[@intCast(opener_index + 1)].ch == 'S') {
                 md_analyze_link_contents(ctx, lines, opener_index + 1, closer_index);
             } else {
-                ctx.marks[@intCast(opener_index + 1)].beg = attr.dest_beg;
-                ctx.marks[@intCast(opener_index + 1)].end = attr.dest_end;
+                ctx.marks.items[@intCast(opener_index + 1)].beg = attr.dest_beg;
+                ctx.marks.items[@intCast(opener_index + 1)].end = attr.dest_end;
 
                 md_mark_store_ptr(ctx, opener_index + 2, attr.title);
                 if (attr.title_needs_free != 0)
                     md_mark_stack_push(ctx, &ctx.ptr_stack, opener_index + 2);
-                ctx.marks[@intCast(opener_index + 2)].prev = @bitCast(attr.title_size);
+                ctx.marks.items[@intCast(opener_index + 2)].prev = @bitCast(attr.title_size);
 
                 if (opener.ch == '[') {
                     last_link_beg = opener.beg;
@@ -1296,14 +1296,14 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
 
                 if (ctx.parser.flags & c.MD_FLAG_PERMISSIVEAUTOLINKS != 0) {
                     var first_nested_i: c_int = opener_index + 1;
-                    while (ctx.marks[@intCast(first_nested_i)].ch == 'D' and first_nested_i < closer_index) first_nested_i += 1;
+                    while (ctx.marks.items[@intCast(first_nested_i)].ch == 'D' and first_nested_i < closer_index) first_nested_i += 1;
 
                     // NOTE: the C loop condition tests first_nested->ch (md4c quirk); preserved verbatim.
                     var last_nested_i: c_int = closer_index - 1;
-                    while (ctx.marks[@intCast(first_nested_i)].ch == 'D' and last_nested_i > opener_index) last_nested_i -= 1;
+                    while (ctx.marks.items[@intCast(first_nested_i)].ch == 'D' and last_nested_i > opener_index) last_nested_i -= 1;
 
-                    const first_nested = &ctx.marks[@intCast(first_nested_i)];
-                    const last_nested = &ctx.marks[@intCast(last_nested_i)];
+                    const first_nested = &ctx.marks.items[@intCast(first_nested_i)];
+                    const last_nested = &ctx.marks.items[@intCast(last_nested_i)];
 
                     if ((first_nested.flags & MD_MARK_RESOLVED != 0) and
                         first_nested.beg == opener.end and
@@ -1328,11 +1328,11 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
 
 // md4x.c ~3977.
 pub fn md_analyze_entity(ctx: *MD_CTX, mark_index: c_int) void {
-    const opener = &ctx.marks[@intCast(mark_index)];
+    const opener = &ctx.marks.items[@intCast(mark_index)];
     var off: OFF = undefined;
 
-    if (mark_index + 1 >= ctx.n_marks) return;
-    const closer = &ctx.marks[@intCast(mark_index + 1)];
+    if (mark_index + 1 >= ctx.nMarks()) return;
+    const closer = &ctx.marks.items[@intCast(mark_index + 1)];
     if (closer.ch != ';') return;
 
     if (md_is_entity(ctx, opener.beg, closer.end, &off)) {
@@ -1343,23 +1343,23 @@ pub fn md_analyze_entity(ctx: *MD_CTX, mark_index: c_int) void {
 
 // md4x.c ~4005.
 pub fn md_analyze_table_cell_boundary(ctx: *MD_CTX, mark_index: c_int) void {
-    const mark = &ctx.marks[@intCast(mark_index)];
+    const mark = &ctx.marks.items[@intCast(mark_index)];
     mark.flags |= MD_MARK_RESOLVED;
     mark.next = -1;
 
     if (ctx.table_cell_boundaries_head < 0)
         ctx.table_cell_boundaries_head = mark_index
     else
-        ctx.marks[@intCast(ctx.table_cell_boundaries_tail)].next = mark_index;
+        ctx.marks.items[@intCast(ctx.table_cell_boundaries_tail)].next = mark_index;
     ctx.table_cell_boundaries_tail = mark_index;
     ctx.n_table_cell_boundaries += 1;
 }
 
 // md4x.c ~4024. Split a longer mark into two; the new mark takes `n` chars.
 pub fn md_split_emph_mark(ctx: *MD_CTX, mark_index: c_int, n: SZ) c_int {
-    const mark = &ctx.marks[@intCast(mark_index)];
+    const mark = &ctx.marks.items[@intCast(mark_index)];
     const new_mark_index: c_int = mark_index + @as(c_int, @intCast(mark.end - mark.beg - n));
-    const dummy = &ctx.marks[@intCast(new_mark_index)];
+    const dummy = &ctx.marks.items[@intCast(new_mark_index)];
 
     dummy.* = mark.*;
     mark.end -= n;
@@ -1370,7 +1370,7 @@ pub fn md_split_emph_mark(ctx: *MD_CTX, mark_index: c_int, n: SZ) c_int {
 
 // md4x.c ~4041.
 pub fn md_analyze_emph(ctx: *MD_CTX, mark_index: c_int) void {
-    const mark = &ctx.marks[@intCast(mark_index)];
+    const mark = &ctx.marks.items[@intCast(mark_index)];
 
     if (mark.flags & MD_MARK_POTENTIAL_CLOSER != 0) {
         var opener: ?*MD_MARK = null;
@@ -1404,7 +1404,7 @@ pub fn md_analyze_emph(ctx: *MD_CTX, mark_index: c_int) void {
         while (i < n_opener_stacks) : (i += 1) {
             if (opener_stacks[i].top >= 0) {
                 const m_index = opener_stacks[i].top;
-                const m = &ctx.marks[@intCast(m_index)];
+                const m = &ctx.marks.items[@intCast(m_index)];
                 if (opener == null or m.end > opener.?.end) {
                     opener_index = m_index;
                     opener = m;
@@ -1438,7 +1438,7 @@ pub fn md_analyze_emph(ctx: *MD_CTX, mark_index: c_int) void {
 
 // md4x.c ~4108.
 pub fn md_analyze_tilde(ctx: *MD_CTX, mark_index: c_int) void {
-    const mark = &ctx.marks[@intCast(mark_index)];
+    const mark = &ctx.marks.items[@intCast(mark_index)];
     const stack = md_opener_stack(ctx, mark_index);
 
     if ((mark.flags & MD_MARK_POTENTIAL_CLOSER != 0) and stack.top >= 0) {
@@ -1455,10 +1455,10 @@ pub fn md_analyze_tilde(ctx: *MD_CTX, mark_index: c_int) void {
 
 // md4x.c ~4131.
 pub fn md_analyze_dollar(ctx: *MD_CTX, mark_index: c_int) void {
-    const mark = &ctx.marks[@intCast(mark_index)];
+    const mark = &ctx.marks.items[@intCast(mark_index)];
 
     if ((mark.flags & MD_MARK_POTENTIAL_CLOSER != 0) and ctx.opener_stacks[DOLLAR_OPENERS].top >= 0) {
-        const opener = &ctx.marks[@intCast(ctx.opener_stacks[DOLLAR_OPENERS].top)];
+        const opener = &ctx.marks.items[@intCast(ctx.opener_stacks[DOLLAR_OPENERS].top)];
         const opener_index = ctx.opener_stacks[DOLLAR_OPENERS].top;
         const closer = mark;
         const closer_index = mark_index;
@@ -1479,7 +1479,7 @@ pub fn md_analyze_dollar(ctx: *MD_CTX, mark_index: c_int) void {
 // md4x.c ~4159.
 pub fn md_scan_left_for_resolved_mark(ctx: *MD_CTX, mark_from: [*c]MD_MARK, off: OFF, p_cursor: ?*[*c]MD_MARK) [*c]MD_MARK {
     var mark = mark_from;
-    while (@intFromPtr(mark) >= @intFromPtr(ctx.marks)) : (mark -= 1) {
+    while (@intFromPtr(mark) >= @intFromPtr(ctx.marks.items.ptr)) : (mark -= 1) {
         if (mark.*.ch == 'D' or mark.*.beg > off) continue;
         if (mark.*.beg <= off and off < mark.*.end and (mark.*.flags & MD_MARK_RESOLVED != 0)) {
             if (p_cursor != null) p_cursor.?.* = mark;
@@ -1494,7 +1494,7 @@ pub fn md_scan_left_for_resolved_mark(ctx: *MD_CTX, mark_from: [*c]MD_MARK, off:
 // md4x.c ~4181.
 pub fn md_scan_right_for_resolved_mark(ctx: *MD_CTX, mark_from: [*c]MD_MARK, off: OFF, p_cursor: ?*[*c]MD_MARK) [*c]MD_MARK {
     var mark = mark_from;
-    const end_ptr = ctx.marks + @as(usize, @intCast(ctx.n_marks));
+    const end_ptr = ctx.marks.items.ptr + @as(usize, @intCast(ctx.nMarks()));
     while (@intFromPtr(mark) < @intFromPtr(end_ptr)) : (mark += 1) {
         if (mark.*.ch == 'D' or mark.*.end <= off) continue;
         if (mark.*.beg <= off and off < mark.*.end and (mark.*.flags & MD_MARK_RESOLVED != 0)) {
@@ -1523,8 +1523,8 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
         .{ .start_char = '#', .delim_char = 0, .allowed_nonalnum_chars = ".-+_", .min_components = 1, .optional_end_char = 0 },
     };
 
-    const opener = &ctx.marks[@intCast(mark_index)];
-    const closer = &ctx.marks[@intCast(mark_index + 1)]; // The dummy.
+    const opener = &ctx.marks.items[@intCast(mark_index)];
+    const closer = &ctx.marks.items[@intCast(mark_index + 1)]; // The dummy.
     const line_beg: OFF = closer.beg;
     const line_end: OFF = closer.end;
     var beg: OFF = opener.beg;
@@ -1626,7 +1626,7 @@ pub fn md_analyze_marks(ctx: *MD_CTX, lines: []const MD_LINE, mark_beg: c_int, m
     var last_end: OFF = lines[0].beg;
 
     while (i < mark_end) {
-        const mark = &ctx.marks[@intCast(i)];
+        const mark = &ctx.marks.items[@intCast(i)];
 
         if (mark.flags & MD_MARK_RESOLVED != 0) {
             if ((mark.flags & MD_MARK_OPENER != 0) and mark.ch != 'C' and
@@ -1662,7 +1662,7 @@ pub fn md_analyze_marks(ctx: *MD_CTX, lines: []const MD_LINE, mark_beg: c_int, m
 
         if (mark.flags & MD_MARK_RESOLVED != 0) {
             if (mark.flags & MD_MARK_OPENER != 0)
-                last_end = ctx.marks[@intCast(mark.next)].end
+                last_end = ctx.marks.items[@intCast(mark.next)].end
             else
                 last_end = mark.end;
         }
@@ -1705,8 +1705,8 @@ pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
     ctx.inline_attrs.clearRetainingCapacity();
 
     var i: c_int = 0;
-    while (i < ctx.n_marks) : (i += 1) {
-        const mark = &ctx.marks[@intCast(i)];
+    while (i < ctx.nMarks()) : (i += 1) {
+        const mark = &ctx.marks.items[@intCast(i)];
 
         if (mark.flags & MD_MARK_RESOLVED == 0) continue;
         if (mark.flags & MD_MARK_CLOSER == 0) continue;
@@ -1717,8 +1717,8 @@ pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
         if (mark.ch == ']') {
             const opener_index = mark.prev;
             if (opener_index >= 0) {
-                const opener = &ctx.marks[@intCast(opener_index)];
-                if (opener_index + 1 < ctx.n_marks and ctx.marks[@intCast(opener_index + 1)].ch == 'S') continue;
+                const opener = &ctx.marks.items[@intCast(opener_index)];
+                if (opener_index + 1 < ctx.nMarks() and ctx.marks.items[@intCast(opener_index + 1)].ch == 'S') continue;
                 if (opener.ch == '[' and opener.end - opener.beg >= 2 and mark.end - mark.beg >= 2) continue;
             }
         }
@@ -1746,13 +1746,13 @@ pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
 pub fn md_analyze_inlines(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int) c_int {
     var ret: c_int = 0;
 
-    ctx.n_marks = 0;
+    ctx.marks.clearRetainingCapacity();
 
     ret = md_collect_marks(ctx, lines, table_mode);
     if (ret != 0) return ret;
 
     // (1) Links.
-    md_analyze_marks(ctx, lines, 0, ctx.n_marks, "[]!", 0);
+    md_analyze_marks(ctx, lines, 0, ctx.nMarks(), "[]!", 0);
     ret = md_resolve_links(ctx, lines);
     if (ret != 0) return ret;
     ctx.opener_stacks[BRACKET_OPENERS].top = -1;
@@ -1762,12 +1762,12 @@ pub fn md_analyze_inlines(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_in
     if (table_mode != 0) {
         // (2) Table cell boundaries.
         ctx.n_table_cell_boundaries = 0;
-        md_analyze_marks(ctx, lines, 0, ctx.n_marks, "|", 0);
+        md_analyze_marks(ctx, lines, 0, ctx.nMarks(), "|", 0);
         return ret;
     }
 
     // (3) Emphasis/strong; permissive autolinks.
-    md_analyze_link_contents(ctx, lines, 0, ctx.n_marks);
+    md_analyze_link_contents(ctx, lines, 0, ctx.nMarks());
 
     // (4) Trailing {attrs}.
     ret = md_resolve_attrs(ctx);
@@ -1922,7 +1922,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
     var enforce_hardbreak: c_int = 0;
     var ret: c_int = 0;
 
-    mark = ctx.marks;
+    mark = ctx.marks.items.ptr;
     while (mark.*.flags & MD_MARK_RESOLVED == 0) mark += 1;
 
     text_type = c.MD_TEXT_NORMAL;
@@ -1957,7 +1957,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                     if (mark.*.flags & MD_MARK_OPENER != 0)
                         _ = md_find_inline_attr(ctx, mark.*.next, &raw_a, &raw_a_sz, null)
                     else
-                        _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, null);
+                        _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks.items.ptr)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, null);
 
                     if (mark.*.flags & MD_MARK_OPENER != 0) {
                         if (raw_a != null) {
@@ -1987,7 +1987,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                         if (mark.*.flags & MD_MARK_OPENER != 0)
                             _ = md_find_inline_attr(ctx, mark.*.next, &raw_a, &raw_a_sz, null)
                         else
-                            _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, &attr_skip_to);
+                            _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks.items.ptr)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, &attr_skip_to);
 
                         if (mark.*.flags & MD_MARK_OPENER != 0) {
                             var first: c_int = 1;
@@ -2035,7 +2035,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                     if (mark.*.flags & MD_MARK_OPENER != 0)
                         _ = md_find_inline_attr(ctx, mark.*.next, &raw_a, &raw_a_sz, null)
                     else
-                        _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, null);
+                        _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks.items.ptr)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, null);
 
                     if (mark.*.flags & MD_MARK_OPENER != 0) {
                         if (raw_a != null) {
@@ -2068,8 +2068,8 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 },
 
                 '[', '!', ']' => {
-                    const opener: [*c]MD_MARK = if (mark.*.ch != ']') mark else &ctx.marks[@intCast(mark.*.prev)];
-                    const closer: [*c]MD_MARK = &ctx.marks[@intCast(opener.*.next)];
+                    const opener: [*c]MD_MARK = if (mark.*.ch != ']') mark else &ctx.marks.items[@intCast(mark.*.prev)];
+                    const closer: [*c]MD_MARK = &ctx.marks.items[@intCast(opener.*.next)];
 
                     if ((opener.*.ch == '[' and closer.*.ch == ']') and
                         opener.*.end - opener.*.beg >= 2 and
@@ -2096,10 +2096,10 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                         } else {
                             var raw_a: [*c]const CHAR = null;
                             var raw_a_sz: SZ = 0;
-                            const closer_idx: c_int = @intCast((@intFromPtr(closer) - @intFromPtr(ctx.marks)) / @sizeOf(MD_MARK));
+                            const closer_idx: c_int = @intCast((@intFromPtr(closer) - @intFromPtr(ctx.marks.items.ptr)) / @sizeOf(MD_MARK));
                             _ = md_find_inline_attr(ctx, closer_idx, &raw_a, &raw_a_sz, null);
 
-                            const title_ptr: [*c]const CHAR = @ptrCast(@alignCast(md_mark_get_ptr(ctx, @intCast((@intFromPtr(title_mark) - @intFromPtr(ctx.marks)) / @sizeOf(MD_MARK)))));
+                            const title_ptr: [*c]const CHAR = @ptrCast(@alignCast(md_mark_get_ptr(ctx, @intCast((@intFromPtr(title_mark) - @intFromPtr(ctx.marks.items.ptr)) / @sizeOf(MD_MARK)))));
                             const title_sz: SZ = @bitCast(title_mark.*.prev);
 
                             if (raw_a != null) {
@@ -2140,8 +2140,8 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 },
 
                 'C' => {
-                    const opener: [*c]MD_MARK = if (mark.*.flags & MD_MARK_OPENER != 0) mark else &ctx.marks[@intCast(mark.*.prev)];
-                    const closer: [*c]MD_MARK = &ctx.marks[@intCast(opener.*.next)];
+                    const opener: [*c]MD_MARK = if (mark.*.flags & MD_MARK_OPENER != 0) mark else &ctx.marks.items[@intCast(mark.*.prev)];
+                    const closer: [*c]MD_MARK = &ctx.marks.items[@intCast(opener.*.next)];
                     const props_mark: [*c]MD_MARK = opener + 1;
                     const tag_str = ctx.str(opener.*.beg + 1);
                     var name_end_off: OFF = opener.*.beg + 1;
@@ -2249,7 +2249,7 @@ pub fn emitEmphasis(ctx: *MD_CTX, mark: [*c]MD_MARK, off_p: *OFF, attr_skip_to: 
     if (mark.*.flags & MD_MARK_OPENER != 0)
         _ = md_find_inline_attr(ctx, mark.*.next, &raw_a, &raw_a_sz, null)
     else
-        _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, attr_skip_to);
+        _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks.items.ptr)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, attr_skip_to);
 
     var off = off_p.*;
     if (mark.*.flags & MD_MARK_OPENER != 0) {
@@ -2323,8 +2323,8 @@ pub fn emitEmphasis(ctx: *MD_CTX, mark: [*c]MD_MARK, off_p: *OFF, attr_skip_to: 
 // fallthrough case). md4x.c ~5038.
 pub fn emitPermissiveAutolink(ctx: *MD_CTX, mark: [*c]MD_MARK, off: OFF) c_int {
     var ret: c_int = 0;
-    const opener: [*c]MD_MARK = if (mark.*.flags & MD_MARK_OPENER != 0) mark else &ctx.marks[@intCast(mark.*.prev)];
-    const closer: [*c]MD_MARK = &ctx.marks[@intCast(opener.*.next)];
+    const opener: [*c]MD_MARK = if (mark.*.flags & MD_MARK_OPENER != 0) mark else &ctx.marks.items[@intCast(mark.*.prev)];
+    const closer: [*c]MD_MARK = &ctx.marks.items[@intCast(opener.*.next)];
     var dest: [*c]const CHAR = ctx.str(opener.*.end);
     var dest_size: SZ = closer.*.beg - opener.*.end;
     _ = off;

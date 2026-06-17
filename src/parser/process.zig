@@ -155,8 +155,8 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
     j += 1;
     {
         var i: c_int = ctx.table_cell_boundaries_head;
-        while (i >= 0) : (i = ctx.marks[@intCast(i)].next) {
-            pipe_offs[@intCast(j)] = ctx.marks[@intCast(i)].end;
+        while (i >= 0) : (i = ctx.marks.items[@intCast(i)].next) {
+            pipe_offs[@intCast(j)] = ctx.marks.items[@intCast(i)].end;
             j += 1;
         }
     }
@@ -268,7 +268,7 @@ pub fn md_process_normal_block_contents(ctx: *MD_CTX, lines: []const MD_LINE) c_
 
     // Free any temporary memory blocks stored within some dummy marks.
     var i: c_int = ctx.ptr_stack.top;
-    while (i >= 0) : (i = ctx.marks[@intCast(i)].next) {
+    while (i >= 0) : (i = ctx.marks.items[@intCast(i)].next) {
         std.c.free(md_mark_get_ptr(ctx, i));
     }
     ctx.ptr_stack.top = -1;

@@ -247,10 +247,11 @@ pub const MD_CTX = struct {
     ref_def_hashtable_size: c_int = 0,
     max_ref_def_output: SZ = 0,
 
-    // Stack of inline/span markers.
-    marks: [*c]MD_MARK = null,
-    n_marks: c_int = 0,
-    alloc_marks: c_int = 0,
+    // Stack of inline/span markers. (PLAN 8.1: ArrayListUnmanaged. The emphasis
+    // engine walks it with raw `[*c]MD_MARK` pointers derived from
+    // `marks.items.ptr`; `nMarks()` returns the count; reset is
+    // `clearRetainingCapacity()`.)
+    marks: std.ArrayListUnmanaged(MD_MARK) = .empty,
 
     // UTF-8 build: 256-entry mark char map.
     mark_char_map: [256]u8 = [_]u8{0} ** 256,
@@ -341,6 +342,11 @@ pub const MD_CTX = struct {
     // ArrayListUnmanaged; this replaces the old n_containers field on reads).
     pub inline fn nContainers(self: *const MD_CTX) c_int {
         return @intCast(self.containers.items.len);
+    }
+
+    // Inline-mark count as a c_int (PLAN 8.1: ctx.marks is an ArrayListUnmanaged).
+    pub inline fn nMarks(self: *const MD_CTX) c_int {
+        return @intCast(self.marks.items.len);
     }
 
     pub inline fn isAnyOf(self: *const MD_CTX, off: OFF, palette: [*:0]const u8) bool {

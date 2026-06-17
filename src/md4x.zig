@@ -282,7 +282,7 @@ pub export fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PA
     md_free_ref_defs(&ctx);
     md_free_ref_def_hashtable(&ctx);
     std.c.free(ctx.buffer);
-    std.c.free(ctx.marks);
+    ctx.marks.deinit(c_allocator);
     std.c.free(ctx.block_bytes);
     ctx.containers.deinit(c_allocator);
     ctx.block_component_info.deinit(c_allocator);
@@ -397,7 +397,7 @@ fn _test_run_inline(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ) 
 
     // ptr_stack cleanup (mirrors md_process_normal_block_contents).
     var pi: c_int = ctx.ptr_stack.top;
-    while (pi >= 0) : (pi = ctx.marks[@intCast(pi)].next) {
+    while (pi >= 0) : (pi = ctx.marks.items[@intCast(pi)].next) {
         std.c.free(md_mark_get_ptr(&ctx, pi));
     }
     ctx.ptr_stack.top = -1;
@@ -406,7 +406,7 @@ fn _test_run_inline(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ) 
     md_free_ref_defs(&ctx);
     md_free_ref_def_hashtable(&ctx);
     std.c.free(ctx.buffer);
-    std.c.free(ctx.marks);
+    ctx.marks.deinit(c_allocator);
     ctx.inline_attrs.deinit(c_allocator);
     return ret;
 }
@@ -624,7 +624,7 @@ fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ,
     md_free_ref_defs(&ctx);
     md_free_ref_def_hashtable(&ctx);
     std.c.free(ctx.buffer);
-    std.c.free(ctx.marks);
+    ctx.marks.deinit(c_allocator);
     ctx.inline_attrs.deinit(c_allocator);
     return ret;
 }

@@ -14,21 +14,21 @@ pushed** (each milestone gated on `scripts/diff-corpus.sh` parity + spec/extensi
 suites + native tests + libFuzzer; the slice work additionally gated on a Debug
 build with live bounds-checks). Summary:
 
-| Item                                      | Status                | Notes                                                                                                                                                                        |
-| ----------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **0** baseline parity harness             | ✅ done               | `scripts/diff-corpus.sh` (git-tracked corpus only)                                                                                                                           |
-| **1.1** `single_threaded=true`            | ✅ done               | native codegen wins; WASM already single-threaded (size unchanged)                                                                                                           |
-| **1.2** SIMD HTML escape scan             | ✅ done               | `@Vector(16,u8)`; ~1.22× over C on the medium bench. URL-escape scan left scalar (its "escape set" is the _complement_ of a small set, so positive-match SIMD doesn't apply) |
-| **1.3** batch callback granularity        | ⏭️ skipped            | `out_buf` already amortizes; bench showed no call-overhead win                                                                                                               |
-| **2.1** one grow helper                   | ✅ done (Approach A)  | `util.growArray`; the 8 dup'd realloc blocks unified. **Approach B (ArrayListUnmanaged) in progress** — `block_alert_info` migrated (pilot), rest one-at-a-time; see §8.1    |
-| **2.2** error unions                      | ◑ partial             | **All OOM-only fns done** (attribute builders, every `md_push_*`/`md_add_mark`). **Emission-path split declined** — see leftovers §8.2                                       |
-| **2.3** `bool` predicates                 | ◑ partial             | entity recognizers → `bool`. Tri-state + hot/test-coupled predicates left — see §8.3                                                                                         |
-| **2.4** `[*c]`→slices                     | ✅ done (line arrays) | every line-array param (`md_lookup_line`, `md_merge_lines`, recognizers, full inline/link pipeline) is now `[]const MD_LINE`. Other `[*c]` remain — see §8.4                 |
-| **2.5** native tests                      | ✅ done               | `growArray`, `md_decode_utf8`, **abort-code matrix** (see §8.2). Failing-allocator test NOT added (libc-malloc path can't inject) — see §8.5                                 |
-| **3.1** naming                            | ⏭️ skipped (owner)    | reduces grep-ability vs upstream `md4x.c ~NNNN` cross-refs — see §8.6                                                                                                        |
-| **3.2** methods/namespacing               | ◑ partial             | `CH/STR/md_log` → `ctx.ch/str/log`; `ISxxx(ctx,off)` → `ctx.isXxx(off)` methods (§8.7). Constant-namespacing left — see §8.7                                                 |
-| **3.3** drop `extern` on internal structs | ✅ done               | `MD_CONTAINER` → plain struct (others already plain or must stay extern); `MD_LINETYPE` dropped its `c_int` backing (§8.8). Internal-enum member rename deferred — see §8.8  |
-| **3.4** docs sweep                        | ✅ done               | CHANGELOG + AGENTS.md "Idiomatic Zig conventions" note                                                                                                                       |
+| Item                                      | Status                | Notes                                                                                                                                                                                |
+| ----------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **0** baseline parity harness             | ✅ done               | `scripts/diff-corpus.sh` (git-tracked corpus only)                                                                                                                                   |
+| **1.1** `single_threaded=true`            | ✅ done               | native codegen wins; WASM already single-threaded (size unchanged)                                                                                                                   |
+| **1.2** SIMD HTML escape scan             | ✅ done               | `@Vector(16,u8)`; ~1.22× over C on the medium bench. URL-escape scan left scalar (its "escape set" is the _complement_ of a small set, so positive-match SIMD doesn't apply)         |
+| **1.3** batch callback granularity        | ⏭️ skipped            | `out_buf` already amortizes; bench showed no call-overhead win                                                                                                                       |
+| **2.1** one grow helper                   | ✅ done (A + B)       | `util.growArray` (A); **Approach B done** — all 7 typed `MD_CTX` arrays now `ArrayListUnmanaged` + `c_allocator`, `n_*`/`alloc_*` fields & all 8 growArray call sites gone; see §8.1 |
+| **2.2** error unions                      | ◑ partial             | **All OOM-only fns done** (attribute builders, every `md_push_*`/`md_add_mark`). **Emission-path split declined** — see leftovers §8.2                                               |
+| **2.3** `bool` predicates                 | ◑ partial             | entity recognizers → `bool`. Tri-state + hot/test-coupled predicates left — see §8.3                                                                                                 |
+| **2.4** `[*c]`→slices                     | ✅ done (line arrays) | every line-array param (`md_lookup_line`, `md_merge_lines`, recognizers, full inline/link pipeline) is now `[]const MD_LINE`. Other `[*c]` remain — see §8.4                         |
+| **2.5** native tests                      | ✅ done               | `growArray`, `md_decode_utf8`, **abort-code matrix** (see §8.2). Failing-allocator test NOT added (libc-malloc path can't inject) — see §8.5                                         |
+| **3.1** naming                            | ⏭️ skipped (owner)    | reduces grep-ability vs upstream `md4x.c ~NNNN` cross-refs — see §8.6                                                                                                                |
+| **3.2** methods/namespacing               | ◑ partial             | `CH/STR/md_log` → `ctx.ch/str/log`; `ISxxx(ctx,off)` → `ctx.isXxx(off)` methods (§8.7). Constant-namespacing left — see §8.7                                                         |
+| **3.3** drop `extern` on internal structs | ✅ done               | `MD_CONTAINER` → plain struct (others already plain or must stay extern); `MD_LINETYPE` dropped its `c_int` backing (§8.8). Internal-enum member rename deferred — see §8.8          |
+| **3.4** docs sweep                        | ✅ done               | CHANGELOG + AGENTS.md "Idiomatic Zig conventions" note                                                                                                                               |
 
 The idiomatic conventions now in force are recorded in **AGENTS.md →
 "Idiomatic Zig conventions (parser internals)"**; follow them rather than
@@ -479,8 +479,28 @@ stale-pointer risk):
   malloc/realloc + their own `n_ref_defs`/`alloc_ref_defs` header fields).
   Verified incl. the ReleaseSafe Zig-native fuzz smoke + html+ast libFuzzers
   (ASan/UBSan, 0 crash/leak).
-- ⏳ remaining: `marks` (last — the hottest array and the cached-`&marks[i]`
-  stale-pointer hazard below).
+- ✅ **`marks`** (last; the hottest array — the inline mark engine's core, ~83
+  indexed accesses + raw walking pointers). Indexing went to `.items[i]`
+  (bounds-checked); the base/arithmetic sites (`@intFromPtr(ctx.marks)`,
+  `ctx.marks + n`, the walking-pointer init `mark = ctx.marks`) use
+  `.items.ptr`; `md_add_mark` reserves with `ensureUnusedCapacity` then
+  `&items.ptr[len]` + `items.len += 1`; the per-block reset became
+  `clearRetainingCapacity()`. Reads use a new `ctx.nMarks()`. The walking
+  pointers / index arithmetic the emphasis engine relies on are byte-identical
+  to the old `[*c]` code (only the field's storage changed) — §4's "refactor
+  plumbing, not logic" honored. Verified incl. the ReleaseSafe Zig-native fuzz
+  smoke + html/ast/ansi/text libFuzzers (ASan/UBSan, 0 crash/leak).
+
+**✅ §8.1 COMPLETE** — all seven typed `MD_CTX` growable arrays are on
+`std.ArrayListUnmanaged(T)` + `c_allocator`; every `n_*`/`alloc_*` bookkeeping
+field and all eight `util.growArray` call sites are gone (`util.growArray` is
+retained only as a tested utility for any future `[*c]` buffer). The
+two-allocator split is largely retired for the typed arrays. **Still on raw
+`std.c.malloc` by design:** `block_bytes` (the heterogeneous `MD_BLOCK`/`MD_LINE`
+byte arena — see caveat below), the `MD_REF_DEF_LIST` flexible-array buckets,
+`ref_def_hashtable`, and a few scratch buffers (e.g. table `pipe_offs`). This
+also unblocks §8.5 (a `FailingAllocator` test is now possible over the
+ArrayList paths).
 
 - **Caveats (unchanged from §2.1):** `block_bytes` is a heterogeneous byte arena
   (interleaved packed `MD_BLOCK`/`MD_LINE`/`MD_VERBATIMLINE` by raw offset) — at
@@ -529,10 +549,15 @@ abort: c_int };` (or `error{OutOfMemory}!enum`) threaded through the engine,
 
 Line arrays are done. Still `[*c]`:
 
-- `MD_CTX.marks` / `.containers` / `.ref_defs` / info arrays — folded into §8.1 if
-  Approach B is taken (ArrayList → `.items` slice).
-- Walking pointers `line` in `md_collect_marks` / `md_process_inlines` are kept
-  `[*c]` deliberately (pointer arithmetic). With §8.1 they'd become slice indices.
+- ~~`MD_CTX.marks` / `.containers` / `.ref_defs` / info arrays — folded into §8.1
+  if Approach B is taken (ArrayList → `.items` slice).~~ **Done** via §8.1: those
+  are now `ArrayListUnmanaged`, accessed through `.items` (bounds-checked) or
+  `.items.ptr` where raw pointer arithmetic is intrinsic. `block_bytes` stays
+  `[*c]` (the byte arena — see §8.1 caveat).
+- Walking pointers `line`/`mark`/`closer` in `md_collect_marks` /
+  `md_process_inlines` are kept `[*c]` deliberately (pointer arithmetic over
+  `.items.ptr`); they were not changed by §8.1 (only the backing field's storage
+  changed).
 - ABI-facing `[*c]` (e.g. `MD_ATTRIBUTE.text`, callback params, `md_parse` args)
   **must stay** — they cross the C ABI.
 
