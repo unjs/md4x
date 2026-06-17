@@ -403,7 +403,7 @@ pub fn md_build_mark_char_map(ctx: *MD_CTX) void {
 }
 
 // md4x.c ~2828. Detect a code span starting at `beg`.
-pub fn md_is_code_span(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, beg: OFF, opener: *MD_MARK, closer: *MD_MARK, last_potential_closers: *[CODESPAN_MARK_MAXLEN]OFF, p_reached_paragraph_end: *c_int) c_int {
+pub fn md_is_code_span(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, opener: *MD_MARK, closer: *MD_MARK, last_potential_closers: *[CODESPAN_MARK_MAXLEN]OFF, p_reached_paragraph_end: *c_int) c_int {
     const opener_beg: OFF = beg;
     var opener_end: OFF = undefined;
     var closer_beg: OFF = undefined;
@@ -428,7 +428,7 @@ pub fn md_is_code_span(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE,
     mark_len = opener_end - opener_beg;
     if (mark_len > CODESPAN_MARK_MAXLEN) return FALSE;
 
-    if (last_potential_closers[mark_len - 1] >= lines[n_lines - 1].end or
+    if (last_potential_closers[mark_len - 1] >= lines[lines.len - 1].end or
         (p_reached_paragraph_end.* != 0 and last_potential_closers[mark_len - 1] < opener_end))
         return FALSE;
 
@@ -459,7 +459,7 @@ pub fn md_is_code_span(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE,
 
         if (closer_end >= line_end) {
             line_index += 1;
-            if (line_index >= n_lines) {
+            if (line_index >= lines.len) {
                 p_reached_paragraph_end.* = TRUE;
                 return FALSE;
             }
@@ -631,7 +631,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
                 var opener: MD_MARK = .{};
                 var closer: MD_MARK = .{};
 
-                const is_code_span = md_is_code_span(ctx, line, n_lines - line_index, off, &opener, &closer, &codespan_last_potential_closers, &codespan_scanned_till_paragraph_end);
+                const is_code_span = md_is_code_span(ctx, line[0 .. n_lines - line_index], off, &opener, &closer, &codespan_last_potential_closers, &codespan_scanned_till_paragraph_end);
                 if (is_code_span != 0) {
                     if (addMark(ctx, opener.ch, opener.beg, opener.end, opener.flags) == null) {
                         ret = -1;
