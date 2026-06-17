@@ -413,8 +413,7 @@ pub const MD_LINK_ATTR = struct {
 // Faithful port of md_is_link_label (md4x.c ~1986).
 pub fn md_is_link_label(
     ctx: *MD_CTX,
-    lines: [*c]const MD_LINE,
-    n_lines: MD_SIZE,
+    lines: []const MD_LINE,
     beg: OFF,
     p_end: *OFF,
     p_beg_line_index: *MD_SIZE,
@@ -480,7 +479,7 @@ pub fn md_is_link_label(
 
         line_index += 1;
         len += 1;
-        if (line_index < n_lines)
+        if (line_index < lines.len)
             off = lines[line_index].beg
         else
             break;
@@ -652,7 +651,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n
     var ret: c_int = 0;
 
     // Link label.
-    if (md_is_link_label(ctx, lines, n_lines, lines[0].beg, &off, &label_contents_line_index, &line_index, &label_contents_beg, &label_contents_end) == 0)
+    if (md_is_link_label(ctx, lines[0..n_lines], lines[0].beg, &off, &label_contents_line_index, &line_index, &label_contents_beg, &label_contents_end) == 0)
         return FALSE;
     label_is_multiline = (label_contents_line_index != line_index);
 
