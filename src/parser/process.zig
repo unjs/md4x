@@ -732,8 +732,8 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
             },
             c.MD_BLOCK_TEMPLATE => {
                 const slot_idx: c_int = @intCast(block.bits.data);
-                if (slot_idx >= 0 and slot_idx < ctx.n_slots) {
-                    const info = &ctx.slot_info[@intCast(slot_idx)];
+                if (slot_idx >= 0 and slot_idx < @as(c_int, @intCast(ctx.slot_info.items.len))) {
+                    const info = &ctx.slot_info.items[@intCast(slot_idx)];
                     const name_beg = info.name_beg;
                     const name_end = info.name_end;
 

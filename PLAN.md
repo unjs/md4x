@@ -446,7 +446,10 @@ stale-pointer risk):
 - ✅ **`block_alert_info`** (pilot) — append-only, index-returning push, read
   after all pushes, `.deinit` at the two cleanup sites. Verified incl. html+ast
   libFuzzers (ASan/UBSan, ~19M/~10M execs, 0 crash/leak).
-- ⏳ remaining: `slot_info`, `block_component_info`, `inline_attrs`, `containers`,
+- ✅ **`slot_info`** — same shape as the pilot (append-only, index-returning
+  push, immediate field-copy read, `.deinit` at the two cleanup sites). Verified
+  incl. html+ast libFuzzers (ASan/UBSan, 0 crash/leak).
+- ⏳ remaining: `block_component_info`, `inline_attrs`, `containers`,
   `ref_defs`, `marks` (roughly easiest → hardest; `marks` last — it has the
   cached-`&marks[i]` stale-pointer hazard called out below).
 

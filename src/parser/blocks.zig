@@ -265,15 +265,11 @@ pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg:
 }
 
 pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) error{OutOfMemory}!c_int {
-    util.growArray(MD_SLOT_INFO, &ctx.slot_info, &ctx.alloc_slots, ctx.n_slots, 16) catch {
+    const idx: c_int = @intCast(ctx.slot_info.items.len);
+    ctx.slot_info.append(c_allocator, .{ .name_beg = name_beg, .name_end = name_end }) catch {
         ctx.log("realloc() failed.");
         return error.OutOfMemory;
     };
-
-    const idx = ctx.n_slots;
-    ctx.n_slots += 1;
-    ctx.slot_info[@intCast(idx)].name_beg = name_beg;
-    ctx.slot_info[@intCast(idx)].name_end = name_end;
     return idx;
 }
 

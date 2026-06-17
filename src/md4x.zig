@@ -286,7 +286,7 @@ pub export fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PA
     std.c.free(ctx.block_bytes);
     std.c.free(@ptrCast(ctx.containers));
     std.c.free(@ptrCast(ctx.block_component_info));
-    std.c.free(@ptrCast(ctx.slot_info));
+    ctx.slot_info.deinit(c_allocator);
     ctx.block_alert_info.deinit(c_allocator);
     std.c.free(ctx.inline_attrs);
 
@@ -593,7 +593,7 @@ fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ,
             ctx.n_containers,                               ctx.block_component_nesting,
             ctx.frontmatter_state,                          ctx.last_line_has_list_loosening_effect,
             ctx.last_list_item_starts_with_two_blank_lines, ctx.n_block_bytes,
-            ctx.n_block_components,                         ctx.n_slots,
+            ctx.n_block_components,                         @as(c_int, @intCast(ctx.slot_info.items.len)),
             @as(c_int, @intCast(ctx.block_alert_info.items.len)),
         }, out_fn, out_ud);
         var i: c_int = 0;
@@ -619,7 +619,7 @@ fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ,
     std.c.free(ctx.block_bytes);
     std.c.free(@ptrCast(ctx.containers));
     std.c.free(@ptrCast(ctx.block_component_info));
-    std.c.free(@ptrCast(ctx.slot_info));
+    ctx.slot_info.deinit(c_allocator);
     ctx.block_alert_info.deinit(c_allocator);
     md_free_ref_defs(&ctx);
     md_free_ref_def_hashtable(&ctx);

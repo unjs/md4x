@@ -310,10 +310,8 @@ pub const MD_CTX = struct {
     alloc_block_components: c_int = 0,
     block_component_nesting: c_int = 0,
 
-    // Slot info array within block components.
-    slot_info: [*c]MD_SLOT_INFO = null,
-    n_slots: c_int = 0,
-    alloc_slots: c_int = 0,
+    // Slot info array within block components. (PLAN 8.1: ArrayListUnmanaged.)
+    slot_info: std.ArrayListUnmanaged(MD_SLOT_INFO) = .empty,
 
     // Alert info array. (PLAN 8.1: migrated to ArrayListUnmanaged — the count is
     // `.items.len`, growth/cleanup go through `c_allocator`.)
