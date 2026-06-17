@@ -78,10 +78,10 @@ const md_is_link_reference = refdefs.md_is_link_reference;
 
 // Faithful port of md_is_html_tag (md4x.c ~1131). n_lines == 0 => whole tag
 // must be on one line (block-start probe).
-pub fn md_is_html_tag(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
     var attr_state: c_int = undefined;
     var off: OFF = beg;
-    var line_end: OFF = if (n_lines > 0) lines[0].end else ctx.size;
+    var line_end: OFF = if (lines.len > 0) lines[0].end else ctx.size;
     var line_index: MD_SIZE = 0;
 
     if (off + 1 >= line_end) return FALSE;
@@ -149,10 +149,10 @@ pub fn md_is_html_tag(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, 
         }
 
         // Must be on a single line (HTML block start cond. type 7).
-        if (n_lines == 0) return FALSE;
+        if (lines.len == 0) return FALSE;
 
         line_index += 1;
-        if (line_index >= n_lines) return FALSE;
+        if (line_index >= lines.len) return FALSE;
 
         off = lines[line_index].beg;
         line_end = lines[line_index].end;
@@ -164,7 +164,7 @@ pub fn md_is_html_tag(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, 
 }
 
 // Faithful port of md_scan_for_html_closer (md4x.c ~1249).
-pub fn md_scan_for_html_closer(ctx: *MD_CTX, str: [*c]const CHAR, len: MD_SIZE, lines: [*c]const MD_LINE, n_lines: MD_SIZE, beg: OFF, max_end: OFF, p_end: *OFF, p_scan_horizon: *OFF) c_int {
+pub fn md_scan_for_html_closer(ctx: *MD_CTX, str: [*c]const CHAR, len: MD_SIZE, lines: []const MD_LINE, beg: OFF, max_end: OFF, p_end: *OFF, p_scan_horizon: *OFF) c_int {
     var off: OFF = beg;
     var line_index: MD_SIZE = 0;
 
@@ -182,7 +182,7 @@ pub fn md_scan_for_html_closer(ctx: *MD_CTX, str: [*c]const CHAR, len: MD_SIZE, 
         }
 
         line_index += 1;
-        if (off >= max_end or line_index >= n_lines) {
+        if (off >= max_end or line_index >= lines.len) {
             p_scan_horizon.* = off;
             return FALSE;
         }
@@ -191,23 +191,23 @@ pub fn md_scan_for_html_closer(ctx: *MD_CTX, str: [*c]const CHAR, len: MD_SIZE, 
     }
 }
 
-pub fn md_is_html_comment(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_html_comment(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
     var off: OFF = beg;
     if (off + 4 >= lines[0].end) return FALSE;
     if (CH(ctx, off + 1) != '!' or CH(ctx, off + 2) != '-' or CH(ctx, off + 3) != '-') return FALSE;
     off += 2; // Skip only "<!" so we accept "<!-->" or "<!--->".
-    return md_scan_for_html_closer(ctx, "-->", 3, lines, n_lines, off, max_end, p_end, &ctx.html_comment_horizon);
+    return md_scan_for_html_closer(ctx, "-->", 3, lines, off, max_end, p_end, &ctx.html_comment_horizon);
 }
 
-pub fn md_is_html_processing_instruction(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_html_processing_instruction(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
     var off: OFF = beg;
     if (off + 2 >= lines[0].end) return FALSE;
     if (CH(ctx, off + 1) != '?') return FALSE;
     off += 2;
-    return md_scan_for_html_closer(ctx, "?>", 2, lines, n_lines, off, max_end, p_end, &ctx.html_proc_instr_horizon);
+    return md_scan_for_html_closer(ctx, "?>", 2, lines, off, max_end, p_end, &ctx.html_proc_instr_horizon);
 }
 
-pub fn md_is_html_declaration(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_html_declaration(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
     var off: OFF = beg;
     if (off + 2 >= lines[0].end) return FALSE;
     if (CH(ctx, off + 1) != '!') return FALSE;
@@ -215,25 +215,25 @@ pub fn md_is_html_declaration(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: M
     if (off >= lines[0].end or !ISALPHA(ctx, off)) return FALSE;
     off += 1;
     while (off < lines[0].end and ISALPHA(ctx, off)) off += 1;
-    return md_scan_for_html_closer(ctx, ">", 1, lines, n_lines, off, max_end, p_end, &ctx.html_decl_horizon);
+    return md_scan_for_html_closer(ctx, ">", 1, lines, off, max_end, p_end, &ctx.html_decl_horizon);
 }
 
-pub fn md_is_html_cdata(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_html_cdata(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
     const open_str = "<![CDATA[";
     const open_size: SZ = open_str.len;
     var off: OFF = beg;
     if (off + open_size >= lines[0].end) return FALSE;
     if (std.mem.eql(u8, @as([*]const u8, @ptrCast(STR(ctx, off)))[0..open_size], open_str) == false) return FALSE;
     off += open_size;
-    return md_scan_for_html_closer(ctx, "]]>", 3, lines, n_lines, off, max_end, p_end, &ctx.html_cdata_horizon);
+    return md_scan_for_html_closer(ctx, "]]>", 3, lines, off, max_end, p_end, &ctx.html_cdata_horizon);
 }
 
-pub fn md_is_html_any(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
-    if (md_is_html_tag(ctx, lines, n_lines, beg, max_end, p_end) != 0) return TRUE;
-    if (md_is_html_comment(ctx, lines, n_lines, beg, max_end, p_end) != 0) return TRUE;
-    if (md_is_html_processing_instruction(ctx, lines, n_lines, beg, max_end, p_end) != 0) return TRUE;
-    if (md_is_html_declaration(ctx, lines, n_lines, beg, max_end, p_end) != 0) return TRUE;
-    if (md_is_html_cdata(ctx, lines, n_lines, beg, max_end, p_end) != 0) return TRUE;
+pub fn md_is_html_any(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+    if (md_is_html_tag(ctx, lines, beg, max_end, p_end) != 0) return TRUE;
+    if (md_is_html_comment(ctx, lines, beg, max_end, p_end) != 0) return TRUE;
+    if (md_is_html_processing_instruction(ctx, lines, beg, max_end, p_end) != 0) return TRUE;
+    if (md_is_html_declaration(ctx, lines, beg, max_end, p_end) != 0) return TRUE;
+    if (md_is_html_cdata(ctx, lines, beg, max_end, p_end) != 0) return TRUE;
     return FALSE;
 }
 
@@ -679,7 +679,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
             if (ch == '<') {
                 if (ctx.parser.flags & c.MD_FLAG_NOHTMLSPANS == 0) {
                     var html_end: OFF = undefined;
-                    const is_html = md_is_html_any(ctx, line, n_lines - line_index, off, lines[n_lines - 1].end, &html_end);
+                    const is_html = md_is_html_any(ctx, line[0 .. n_lines - line_index], off, lines[n_lines - 1].end, &html_end);
                     if (is_html != 0) {
                         if (addMark(ctx, '<', off, off, MD_MARK_OPENER | MD_MARK_RESOLVED) == null) {
                             ret = -1;
