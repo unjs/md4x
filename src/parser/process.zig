@@ -334,7 +334,7 @@ pub fn md_process_code_block_contents(ctx: *MD_CTX, is_fenced: c_int, lines_in: 
 
 // md4x.c ~5473. Parse highlight ranges string (e.g. "1-3,5,7") into expanded
 // array. Returns heap-allocated array (null on empty/error) and sets out_count.
-pub fn md_parse_highlights(str: [*c]const CHAR, size: SZ, out_count: *c_uint) [*c]c_uint {
+pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_count: *c_uint) [*c]c_uint {
     var arr: [*c]c_uint = null;
     var capacity: c_uint = 0;
     var count: c_uint = 0;
@@ -380,9 +380,9 @@ pub fn md_parse_highlights(str: [*c]const CHAR, size: SZ, out_count: *c_uint) [*
         while (nn <= end_num) : (nn += 1) {
             if (count >= capacity) {
                 const new_cap: c_uint = if (capacity == 0) 16 else capacity * 2;
-                const tmp: [*c]c_uint = @ptrCast(@alignCast(std.c.realloc(arr, @as(usize, new_cap) * @sizeOf(c_uint))));
+                const tmp = util.realloc_array_a(c_uint, ctx.alloc, arr, @intCast(capacity), @intCast(new_cap));
                 if (tmp == null) {
-                    std.c.free(arr);
+                    util.free_array_a(c_uint, ctx.alloc, arr, @intCast(capacity));
                     return null;
                 }
                 arr = tmp;
@@ -394,8 +394,22 @@ pub fn md_parse_highlights(str: [*c]const CHAR, size: SZ, out_count: *c_uint) [*
     }
 
     if (count == 0) {
-        std.c.free(arr);
+        util.free_array_a(c_uint, ctx.alloc, arr, @intCast(capacity));
         return null;
+    }
+    // Shrink-to-fit so the freed length equals the stored highlight_count (the
+    // ABI MD_BLOCK_CODE_DETAIL has no capacity field). A shrink realloc resizes
+    // in place on c_allocator / the testing allocator, so it effectively never
+    // fails here; if it ever did (OOM), drop the highlights cleanly rather than
+    // leave a capacity≠count buffer the caller would free by the wrong length.
+    if (count < capacity) {
+        const shr = util.realloc_array_a(c_uint, ctx.alloc, arr, @intCast(capacity), @intCast(count));
+        if (shr == null) {
+            util.free_array_a(c_uint, ctx.alloc, arr, @intCast(capacity));
+            return null;
+        }
+        arr = shr;
+        capacity = count;
     }
     out_count.* = count;
     return arr;
@@ -492,7 +506,7 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
 
         // Parse highlights into expanded integer array.
         if (has_highlights != 0 and hl_end > hl_beg) {
-            det.highlights = md_parse_highlights(ctx.str(hl_beg), hl_end - hl_beg, &det.highlight_count);
+            det.highlights = md_parse_highlights(ctx, ctx.str(hl_beg), hl_end - hl_beg, &det.highlight_count);
         }
 
         // Build meta from remaining text (exclude [..] and {..} regions).
@@ -591,7 +605,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
                     md_free_attribute(ctx, &lang_build);
                     md_free_attribute(ctx, &filename_build);
                     util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
-                    std.c.free(@ptrCast(@constCast(det.code.highlights)));
+                    util.free_array_a(c_uint, ctx.alloc, @constCast(det.code.highlights), @intCast(det.code.highlight_count));
                     return ret;
                 }
             }
@@ -612,7 +626,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
                 md_free_attribute(ctx, &lang_build);
                 md_free_attribute(ctx, &filename_build);
                 util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
-                std.c.free(@ptrCast(@constCast(det.code.highlights)));
+                util.free_array_a(c_uint, ctx.alloc, @constCast(det.code.highlights), @intCast(det.code.highlight_count));
             }
             return ret;
         }
@@ -637,7 +651,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
             md_free_attribute(ctx, &lang_build);
             md_free_attribute(ctx, &filename_build);
             util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
-            std.c.free(@ptrCast(@constCast(det.code.highlights)));
+            util.free_array_a(c_uint, ctx.alloc, @constCast(det.code.highlights), @intCast(det.code.highlight_count));
         }
         return ret;
     }
@@ -650,7 +664,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
                 md_free_attribute(ctx, &lang_build);
                 md_free_attribute(ctx, &filename_build);
                 util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
-                std.c.free(@ptrCast(@constCast(det.code.highlights)));
+                util.free_array_a(c_uint, ctx.alloc, @constCast(det.code.highlights), @intCast(det.code.highlight_count));
             }
             return ret;
         }
@@ -661,7 +675,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
         md_free_attribute(ctx, &lang_build);
         md_free_attribute(ctx, &filename_build);
         util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
-        std.c.free(@ptrCast(@constCast(det.code.highlights)));
+        util.free_array_a(c_uint, ctx.alloc, @constCast(det.code.highlights), @intCast(det.code.highlight_count));
     }
     return ret;
 }
