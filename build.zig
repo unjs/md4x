@@ -87,6 +87,24 @@ pub fn build(b: *std.Build) void {
     for (zig_renderers) |name| exe.root_module.linkLibrary(addZigRenderer(b, name, target, optimize, strip, include_paths));
     b.installArtifact(exe);
 
+    // --- Unit tests (`zig build test`) ---
+    // Compile src/md4x.zig as a test artifact. It @cImports md4x.h/entity.h
+    // (resolved via include_paths) and references entity_lookup (provided by the
+    // entity static lib), so we link the entity lib in.
+    const unit_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/md4x.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    for (include_paths) |p| unit_tests.root_module.addIncludePath(p);
+    unit_tests.root_module.linkLibrary(addEntityLib(b, target, optimize, strip, include_paths));
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+    const test_step = b.step("test", "Run parser unit tests");
+    test_step.dependOn(&run_unit_tests.step);
+
     // --- Fuzzer targets ---
 
     addFuzzers(b);

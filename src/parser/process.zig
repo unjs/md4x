@@ -120,11 +120,11 @@ pub fn md_process_table_cell(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, align_val:
     line.end = end;
 
     ret = mdEnterBlock(ctx, cell_type, &det);
-    if (ret < 0) return ret;
+    if (ret != 0) return ret;
     ret = md_process_normal_block_contents(ctx, @ptrCast(&line), 1);
     if (ret < 0) return ret;
     ret = mdLeaveBlock(ctx, cell_type, &det);
-    if (ret < 0) return ret;
+    if (ret != 0) return ret;
     return ret;
 }
 
@@ -168,7 +168,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
 
     // Process cells.
     ret = mdEnterBlock(ctx, c.MD_BLOCK_TR, null);
-    if (ret < 0) {
+    if (ret != 0) {
         std.c.free(pipe_offs);
         ctx.table_cell_boundaries_head = -1;
         ctx.table_cell_boundaries_tail = -1;
@@ -224,7 +224,7 @@ pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: [*
     md_analyze_table_alignment(ctx, lines[1].beg, lines[1].end, align_arr, col_count);
 
     ret = mdEnterBlock(ctx, c.MD_BLOCK_THEAD, null);
-    if (ret < 0) {
+    if (ret != 0) {
         std.c.free(align_arr);
         return ret;
     }
@@ -234,14 +234,14 @@ pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: [*
         return ret;
     }
     ret = mdLeaveBlock(ctx, c.MD_BLOCK_THEAD, null);
-    if (ret < 0) {
+    if (ret != 0) {
         std.c.free(align_arr);
         return ret;
     }
 
     if (n_lines > 2) {
         ret = mdEnterBlock(ctx, c.MD_BLOCK_TBODY, null);
-        if (ret < 0) {
+        if (ret != 0) {
             std.c.free(align_arr);
             return ret;
         }
@@ -254,7 +254,7 @@ pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: [*
             }
         }
         ret = mdLeaveBlock(ctx, c.MD_BLOCK_TBODY, null);
-        if (ret < 0) {
+        if (ret != 0) {
             std.c.free(align_arr);
             return ret;
         }
@@ -293,21 +293,21 @@ pub fn md_process_verbatim_block_contents(ctx: *MD_CTX, text_type: c.MD_TEXTTYPE
         // Output code indentation.
         while (indent > @as(c_int, @intCast(indent_chunk_size))) {
             ret = mdText(ctx, text_type, indent_chunk_str, indent_chunk_size);
-            if (ret < 0) return ret;
+            if (ret != 0) return ret;
             indent -= @intCast(indent_chunk_size);
         }
         if (indent > 0) {
             ret = mdText(ctx, text_type, indent_chunk_str, @intCast(indent));
-            if (ret < 0) return ret;
+            if (ret != 0) return ret;
         }
 
         // Output the code line itself.
         ret = mdTextInsecure(ctx, text_type, STR(ctx, line.beg), line.end - line.beg);
-        if (ret < 0) return ret;
+        if (ret != 0) return ret;
 
         // Enforce end-of-line.
         ret = mdText(ctx, text_type, "\n", 1);
-        if (ret < 0) return ret;
+        if (ret != 0) return ret;
     }
 
     return ret;
@@ -615,7 +615,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
 
     if (!is_in_tight_list or btype != c.MD_BLOCK_P) {
         ret = mdEnterBlock(ctx, btype, &det);
-        if (ret < 0) {
+        if (ret != 0) {
             if (clean_fence_code_detail) {
                 md_free_attribute(ctx, &info_build);
                 md_free_attribute(ctx, &lang_build);
@@ -653,7 +653,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
 
     if (!is_in_tight_list or btype != c.MD_BLOCK_P) {
         ret = mdLeaveBlock(ctx, btype, &det);
-        if (ret < 0) {
+        if (ret != 0) {
             if (clean_fence_code_detail) {
                 md_free_attribute(ctx, &info_build);
                 md_free_attribute(ctx, &lang_build);
@@ -780,7 +780,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
         if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER))) != 0) {
             if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER_CLOSER))) != 0) {
                 ret = mdLeaveBlock(ctx, btype, &det);
-                if (ret < 0) {
+                if (ret != 0) {
                     if (clean_component_detail) md_free_attribute(ctx, &comp_name_build);
                     return ret;
                 }
@@ -791,7 +791,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
 
             if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER_OPENER))) != 0) {
                 ret = mdEnterBlock(ctx, btype, &det);
-                if (ret < 0) {
+                if (ret != 0) {
                     if (clean_component_detail) md_free_attribute(ctx, &comp_name_build);
                     return ret;
                 }
@@ -929,7 +929,7 @@ pub fn md_process_doc(ctx: *MD_CTX) c_int {
     var ret: c_int = 0;
 
     ret = mdEnterBlock(ctx, c.MD_BLOCK_DOC, null);
-    if (ret < 0) return ret;
+    if (ret != 0) return ret;
 
     while (off < ctx.size) {
         if (@as([*c]const MD_LINE_ANALYSIS, line) == pivot_line)
@@ -953,7 +953,7 @@ pub fn md_process_doc(ctx: *MD_CTX) c_int {
     if (ret < 0) return ret;
 
     ret = mdLeaveBlock(ctx, c.MD_BLOCK_DOC, null);
-    if (ret < 0) return ret;
+    if (ret != 0) return ret;
 
     return ret;
 }

@@ -706,6 +706,88 @@ test "fnv1a known vector" {
     try std.testing.expectEqual(@as(c_uint, 0xbf9cf968), md_fnv1a(MD_FNV1A_BASE, foobar.ptr, 6));
 }
 
+// Regression: a callback aborting with a *non-zero* (here positive) return must
+// stop the enclosing emitter immediately, matching md4c's MD_ENTER_BLOCK /
+// MD_LEAVE_BLOCK / MD_TEXT macros (which abort on `ret != 0`). A prior version of
+// the Zig port checked `ret < 0` at these call sites, so positive abort codes
+// were logged-as-aborted but silently ignored and emission continued.
+const AbortProbe = struct {
+    text_calls: u32 = 0,
+    enter_calls: u32 = 0,
+    abort_on_text: bool = false,
+    abort_on_block_p: bool = false,
+
+    fn enterBlock(ty: c.MD_BLOCKTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+        _ = detail;
+        const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
+        self.enter_calls += 1;
+        if (self.abort_on_block_p and ty == c.MD_BLOCK_P) return 1;
+        return 0;
+    }
+    fn leaveBlock(ty: c.MD_BLOCKTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+        _ = ty;
+        _ = detail;
+        _ = ud;
+        return 0;
+    }
+    fn enterSpan(ty: c.MD_SPANTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+        _ = ty;
+        _ = detail;
+        _ = ud;
+        return 0;
+    }
+    fn leaveSpan(ty: c.MD_SPANTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+        _ = ty;
+        _ = detail;
+        _ = ud;
+        return 0;
+    }
+    fn textCb(ty: c.MD_TEXTTYPE, str: [*c]const CHAR, size: SZ, ud: ?*anyopaque) callconv(.c) c_int {
+        _ = ty;
+        _ = str;
+        _ = size;
+        const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
+        self.text_calls += 1;
+        if (self.abort_on_text) return 1;
+        return 0;
+    }
+
+    fn parser(self: *AbortProbe) c.MD_PARSER {
+        _ = self;
+        var p: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER);
+        p.flags = c.MD_DIALECT_ALL;
+        p.enter_block = AbortProbe.enterBlock;
+        p.leave_block = AbortProbe.leaveBlock;
+        p.enter_span = AbortProbe.enterSpan;
+        p.leave_span = AbortProbe.leaveSpan;
+        p.text = AbortProbe.textCb;
+        return p;
+    }
+};
+
+test "callback abort: positive text() return stops verbatim emission" {
+    var probe: AbortProbe = .{ .abort_on_text = true };
+    var p = probe.parser();
+    // A 4-line fenced code block. The verbatim emitter calls text() once per
+    // line (+ a newline). With the fix, the first text()=1 aborts the emitter,
+    // so exactly one text callback fires. With the old `< 0` check, every line
+    // and newline would still be emitted (8 text calls).
+    const input = "```\nA\nB\nC\nD\n```\n";
+    _ = md_parse(@ptrCast(input), @intCast(input.len), &p, &probe);
+    try std.testing.expectEqual(@as(u32, 1), probe.text_calls);
+}
+
+test "callback abort: positive enter_block() return stops block emission" {
+    var probe: AbortProbe = .{ .abort_on_block_p = true };
+    var p = probe.parser();
+    // enter_block(MD_BLOCK_P) returns 1. With the fix, md_process_leaf_block
+    // returns immediately, so the paragraph's inline text is never emitted.
+    // With the old `< 0` check, inline processing would continue (1 text call).
+    const input = "hello world\n";
+    _ = md_parse(@ptrCast(input), @intCast(input.len), &p, &probe);
+    try std.testing.expectEqual(@as(u32, 0), probe.text_calls);
+}
+
 test "link label hash + cmp: whitespace & case-fold equivalence" {
     // Case-fold + whitespace collapse mean these labels are equivalent.
     const a = "Foo   Bar";

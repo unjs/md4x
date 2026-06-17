@@ -11,6 +11,10 @@
 - **WASM**: New `md4x_heal` export
 - **NAPI**: New `heal` binding
 
+### Fixes
+
+- **Parser callback abort codes**: A parser callback (`enter_block`/`leave_block`/`enter_span`/`leave_span`/`text`) that aborts with a non-zero **positive** return value now correctly stops emission immediately, matching the documented contract and the original md4c behavior. Previously several call sites checked `ret < 0`, so positive abort codes were logged as aborted but silently ignored (only negative codes aborted). Negative abort codes (used by all bundled renderers) were unaffected.
+
 ### Internal
 
 - **C → Zig migration**: The entire library implementation (parser, all renderers, entity table, and wasm/napi glue) was ported from C to Zig for memory safety. The C ABI and all output are byte-for-byte unchanged; the public ABI headers and the CLI driver remain C.

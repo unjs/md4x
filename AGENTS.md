@@ -166,9 +166,14 @@ python3 test/run-testsuite.py -s test/spec.txt -p zig-out/bin/md4x
 
 # Pathological inputs only:
 python3 test/pathological-tests.py -p zig-out/bin/md4x
+
+# Zig unit tests (parser internals, e.g. callback-abort behavior):
+zig build test
 ```
 
 Test format: Markdown examples with `.` separator and expected HTML output. The test runner pipes input through `md4x` and compares normalized output.
+
+The HTML-diff suites cannot express parser-internal behavior (e.g. SAX callback return-code handling); those invariants are covered by Zig unit tests in `src/md4x.zig`, run via `zig build test`.
 
 Test suites: `spec.txt`, `spec-tables.txt`, `spec-strikethrough.txt`, `spec-tasklists.txt`, `spec-wiki-links.txt`, `spec-latex-math.txt`, `spec-permissive-autolinks.txt`, `spec-hard-soft-breaks.txt`, `spec-underline.txt`, `spec-frontmatter.txt`, `spec-components.txt`, `spec-attributes.txt`, `spec-alerts.txt`, `spec-markdown.txt`, `regressions.txt`, `coverage.txt`
 
