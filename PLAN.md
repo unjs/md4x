@@ -652,7 +652,15 @@ ported faithfully and remain C-flavored:
   internal fns aren't flagged unused; a tidier test-visibility scheme (or `pub`
   behind a build option) could remove the suppressions.
 - `md_merge_lines` previously _ignored_ its `n_lines`; the slice conversion (2.4)
-  added the missing bound — worth auditing other "count ignored / trusted" spots.
+  added the missing bound. **Audited the rest (clean):** the fixed-size stack
+  buffers `deferred_comp_closers[16]` / `skip_regions[16]` have explicit `< 16`
+  guards at every insertion; the emphasis `opener_stacks` ([16] ctx field, [6]
+  local) are Zig fixed arrays (bounds-checked in Debug/ReleaseSafe and fuzzed via
+  the ReleaseSafe harness); `md_analyze_table_alignment` writes exactly
+  `col_count` entries into a `malloc(col_count*…)` buffer (col*count capped at
+  128); and the `md*{enter,leave}\_child_containers`/`md_push_block_bytes` count
+params are all consumed. §8.1 additionally made the ctx-array element accesses
+bounds-checked (`.items[i]`). No further "count ignored / trusted" bug found.
 - `@intCast`/`@ptrCast` density remains high (mostly `c_uint`↔`usize` index
   juggling at the C-scalar boundary); §8.1 slices remove some, but much is intrinsic
   to mirroring C's integer model. Not worth a dedicated pass.
