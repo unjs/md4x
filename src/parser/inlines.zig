@@ -23,6 +23,7 @@ const MD_LINE = types.MD_LINE;
 const MD_MARK = types.MD_MARK;
 const MD_MARKSTACK = types.MD_MARKSTACK;
 const MD_INLINE_ATTR_INFO = types.MD_INLINE_ATTR_INFO;
+const c_allocator = types.c_allocator;
 const CODESPAN_MARK_MAXLEN = types.CODESPAN_MARK_MAXLEN;
 const MD_MARK_POTENTIAL_OPENER = types.MD_MARK_POTENTIAL_OPENER;
 const MD_MARK_POTENTIAL_CLOSER = types.MD_MARK_POTENTIAL_CLOSER;
@@ -1672,28 +1673,25 @@ pub fn md_analyze_marks(ctx: *MD_CTX, lines: []const MD_LINE, mark_beg: c_int, m
 
 // md4x.c ~4410.
 pub fn md_push_inline_attr(ctx: *MD_CTX, closer_index: c_int, attrs_beg: OFF, attrs_end: OFF) error{OutOfMemory}!void {
-    util.growArray(MD_INLINE_ATTR_INFO, &ctx.inline_attrs, &ctx.alloc_inline_attrs, ctx.n_inline_attrs, 8) catch {
-        ctx.log("realloc() failed.");
-        return error.OutOfMemory;
-    };
-    ctx.inline_attrs[@intCast(ctx.n_inline_attrs)] = .{
+    ctx.inline_attrs.append(c_allocator, .{
         .closer_index = closer_index,
         .attrs_beg = attrs_beg,
         .attrs_end = attrs_end,
         .skip_end = attrs_end + 1,
+    }) catch {
+        ctx.log("realloc() failed.");
+        return error.OutOfMemory;
     };
-    ctx.n_inline_attrs += 1;
 }
 
 // md4x.c ~4436.
 pub fn md_find_inline_attr(ctx: *MD_CTX, closer_index: c_int, raw: *[*c]const CHAR, size: *SZ, skip_end: ?*OFF) c_int {
     if (skip_end != null) skip_end.?.* = 0;
-    var i: c_int = 0;
-    while (i < ctx.n_inline_attrs) : (i += 1) {
-        if (ctx.inline_attrs[@intCast(i)].closer_index == closer_index) {
-            raw.* = ctx.str(ctx.inline_attrs[@intCast(i)].attrs_beg);
-            size.* = ctx.inline_attrs[@intCast(i)].attrs_end - ctx.inline_attrs[@intCast(i)].attrs_beg;
-            if (skip_end != null) skip_end.?.* = ctx.inline_attrs[@intCast(i)].skip_end;
+    for (ctx.inline_attrs.items) |attr| {
+        if (attr.closer_index == closer_index) {
+            raw.* = ctx.str(attr.attrs_beg);
+            size.* = attr.attrs_end - attr.attrs_beg;
+            if (skip_end != null) skip_end.?.* = attr.skip_end;
             return 1;
         }
     }
@@ -1704,7 +1702,7 @@ pub fn md_find_inline_attr(ctx: *MD_CTX, closer_index: c_int, raw: *[*c]const CH
 pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
     if (ctx.parser.flags & c.MD_FLAG_ATTRIBUTES == 0) return 0;
 
-    ctx.n_inline_attrs = 0;
+    ctx.inline_attrs.clearRetainingCapacity();
 
     var i: c_int = 0;
     while (i < ctx.n_marks) : (i += 1) {

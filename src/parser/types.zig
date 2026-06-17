@@ -315,10 +315,9 @@ pub const MD_CTX = struct {
     // `.items.len`, growth/cleanup go through `c_allocator`.)
     block_alert_info: std.ArrayListUnmanaged(MD_BLOCK_ALERT_INFO) = .empty,
 
-    // Inline attribute info array.
-    inline_attrs: [*c]MD_INLINE_ATTR_INFO = null,
-    n_inline_attrs: c_int = 0,
-    alloc_inline_attrs: c_int = 0,
+    // Inline attribute info array. (PLAN 8.1: ArrayListUnmanaged; reset per
+    // resolve pass with clearRetainingCapacity to reuse the buffer.)
+    inline_attrs: std.ArrayListUnmanaged(MD_INLINE_ATTR_INFO) = .empty,
 
     // Character accessors. `CH(off)` / `STR(off)` from md4x.c operate on the
     // enclosing `ctx`; here they are methods on *const MD_CTX.

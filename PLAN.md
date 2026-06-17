@@ -452,9 +452,13 @@ stale-pointer risk):
 - ✅ **`block_component_info`** — same shape (append a fully-constructed 7-field
   struct; the read copies all offsets into locals before any further call).
   Verified incl. html+ast libFuzzers (ASan/UBSan, 0 crash/leak).
-- ⏳ remaining: `inline_attrs`, `containers`, `ref_defs`, `marks` (roughly
-  easiest → hardest; `marks` last — it has the cached-`&marks[i]` stale-pointer
-  hazard called out below).
+- ✅ **`inline_attrs`** — append push; scan-lookup now iterates `.items` (no
+  cached pointer); the per-pass reset (`n_inline_attrs = 0`) became
+  `clearRetainingCapacity()` (reuses the buffer across blocks, as before).
+  Verified incl. html+ast libFuzzers (ASan/UBSan, 0 crash/leak).
+- ⏳ remaining: `containers`, `ref_defs`, `marks` (roughly easiest → hardest;
+  `marks` last — it has the cached-`&marks[i]` stale-pointer hazard called out
+  below).
 
 - **Caveats (unchanged from §2.1):** `block_bytes` is a heterogeneous byte arena
   (interleaved packed `MD_BLOCK`/`MD_LINE`/`MD_VERBATIMLINE` by raw offset) — at

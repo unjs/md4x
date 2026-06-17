@@ -288,7 +288,7 @@ pub export fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PA
     ctx.block_component_info.deinit(c_allocator);
     ctx.slot_info.deinit(c_allocator);
     ctx.block_alert_info.deinit(c_allocator);
-    std.c.free(ctx.inline_attrs);
+    ctx.inline_attrs.deinit(c_allocator);
 
     return ret;
 }
@@ -407,7 +407,7 @@ fn _test_run_inline(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ) 
     md_free_ref_def_hashtable(&ctx);
     std.c.free(ctx.buffer);
     std.c.free(ctx.marks);
-    std.c.free(ctx.inline_attrs);
+    ctx.inline_attrs.deinit(c_allocator);
     return ret;
 }
 
@@ -625,7 +625,7 @@ fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ,
     md_free_ref_def_hashtable(&ctx);
     std.c.free(ctx.buffer);
     std.c.free(ctx.marks);
-    std.c.free(ctx.inline_attrs);
+    ctx.inline_attrs.deinit(c_allocator);
     return ret;
 }
 
