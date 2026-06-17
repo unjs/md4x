@@ -756,7 +756,7 @@ pub fn md_is_link_reference(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_
     end -= 1;
 
     // Find lines corresponding to beg/end positions.
-    const beg_line = md_lookup_line(beg, lines, n_lines, null);
+    const beg_line = md_lookup_line(beg, lines[0..n_lines], null);
     const is_multiline = (end > beg_line.end);
 
     if (is_multiline) {
@@ -807,7 +807,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: M
     var off = beg;
     var ret: c_int = FALSE;
 
-    _ = md_lookup_line(off, lines, n_lines, &line_index);
+    _ = md_lookup_line(off, lines[0..n_lines], &line_index);
 
     // MD_ASSERT(CH(off) == '(');
     off += 1;

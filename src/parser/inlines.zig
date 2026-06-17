@@ -644,7 +644,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
                     md_resolve_range(ctx, ctx.n_marks - 2, ctx.n_marks - 1);
                     off = closer.end;
                     if (off > line.*.end) {
-                        line = md_lookup_line(off, lines, n_lines, &line_index);
+                        line = md_lookup_line(off, lines[0..n_lines], &line_index);
                     }
                     continue :scan;
                 }
@@ -693,7 +693,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
                         ctx.marks[@intCast(ctx.n_marks - 1)].prev = ctx.n_marks - 2;
                         off = html_end;
                         if (off > line.*.end) {
-                            line = md_lookup_line(off, lines, n_lines, &line_index);
+                            line = md_lookup_line(off, lines[0..n_lines], &line_index);
                         }
                         continue :scan;
                     }

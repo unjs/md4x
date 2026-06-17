@@ -720,12 +720,12 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
 
 // Faithful port of md_lookup_line (md4x.c ~558). If the offset falls into a gap
 // between lines, returns the following line. n_lines/lines are MD_LINE arrays.
-pub fn md_lookup_line(off: OFF, lines: [*c]const MD_LINE, n_lines: MD_SIZE, p_line_index: ?*MD_SIZE) *const MD_LINE {
+pub fn md_lookup_line(off: OFF, lines: []const MD_LINE, p_line_index: ?*MD_SIZE) *const MD_LINE {
     var lo: MD_SIZE = 0;
-    var hi: MD_SIZE = n_lines - 1;
+    var hi: MD_SIZE = @intCast(lines.len - 1);
     while (lo <= hi) {
         const pivot: MD_SIZE = (lo + hi) / 2;
-        const line: *const MD_LINE = @ptrCast(&lines[pivot]);
+        const line: *const MD_LINE = &lines[pivot];
 
         if (off < line.beg) {
             if (hi == 0 or lines[hi - 1].end < off) {
@@ -745,7 +745,7 @@ pub fn md_lookup_line(off: OFF, lines: [*c]const MD_LINE, n_lines: MD_SIZE, p_li
     // mirror the C fall-through which returns &lines[n_lines-1] would be UB, but
     // the C code has no return here — it relies on the loop always returning.
     // We return the last line defensively (cannot be hit for well-formed input).
-    return @ptrCast(&lines[n_lines - 1]);
+    return &lines[lines.len - 1];
 }
 
 // libc qsort/bsearch (not exposed by std.c in this Zig version). Same
