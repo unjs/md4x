@@ -500,7 +500,7 @@ pub fn md_is_code_span(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, opener: *
 }
 
 // md4x.c ~3056. Collect all significant marks for the given lines.
-pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, table_mode: c_int) c_int {
+pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int) c_int {
     var line_index: MD_SIZE = 0;
     var ret: c_int = 0;
     var codespan_last_potential_closers = [_]OFF{0} ** CODESPAN_MARK_MAXLEN;
@@ -518,8 +518,8 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
     var skip_regions: [16]SkipRegion = undefined;
     var n_skip_regions: c_int = 0;
 
-    while (line_index < n_lines) : (line_index += 1) {
-        var line: [*c]const MD_LINE = &lines[line_index];
+    while (line_index < lines.len) : (line_index += 1) {
+        var line: [*c]const MD_LINE = @ptrCast(&lines[line_index]);
         var off: OFF = line.*.beg;
 
         scan: while (true) {
@@ -555,7 +555,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
 
             // Backslash escape.
             if (ch == '\\' and off + 1 < ctx.size and (ISPUNCT(ctx, off + 1) or ISNEWLINE(ctx, off + 1))) {
-                if (!ISNEWLINE(ctx, off + 1) or line_index + 1 < n_lines) {
+                if (!ISNEWLINE(ctx, off + 1) or line_index + 1 < lines.len) {
                     if (addMark(ctx, ch, off, off + 2, MD_MARK_RESOLVED) == null) {
                         ret = -1;
                         return ret;
@@ -631,7 +631,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
                 var opener: MD_MARK = .{};
                 var closer: MD_MARK = .{};
 
-                const is_code_span = md_is_code_span(ctx, line[0 .. n_lines - line_index], off, &opener, &closer, &codespan_last_potential_closers, &codespan_scanned_till_paragraph_end);
+                const is_code_span = md_is_code_span(ctx, line[0 .. lines.len - line_index], off, &opener, &closer, &codespan_last_potential_closers, &codespan_scanned_till_paragraph_end);
                 if (is_code_span != 0) {
                     if (addMark(ctx, opener.ch, opener.beg, opener.end, opener.flags) == null) {
                         ret = -1;
@@ -644,7 +644,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
                     md_resolve_range(ctx, ctx.n_marks - 2, ctx.n_marks - 1);
                     off = closer.end;
                     if (off > line.*.end) {
-                        line = md_lookup_line(off, lines[0..n_lines], &line_index);
+                        line = md_lookup_line(off, lines, &line_index);
                     }
                     continue :scan;
                 }
@@ -679,7 +679,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
             if (ch == '<') {
                 if (ctx.parser.flags & c.MD_FLAG_NOHTMLSPANS == 0) {
                     var html_end: OFF = undefined;
-                    const is_html = md_is_html_any(ctx, line[0 .. n_lines - line_index], off, lines[n_lines - 1].end, &html_end);
+                    const is_html = md_is_html_any(ctx, line[0 .. lines.len - line_index], off, lines[lines.len - 1].end, &html_end);
                     if (is_html != 0) {
                         if (addMark(ctx, '<', off, off, MD_MARK_OPENER | MD_MARK_RESOLVED) == null) {
                             ret = -1;
@@ -693,7 +693,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
                         ctx.marks[@intCast(ctx.n_marks - 1)].prev = ctx.n_marks - 2;
                         off = html_end;
                         if (off > line.*.end) {
-                            line = md_lookup_line(off, lines[0..n_lines], &line_index);
+                            line = md_lookup_line(off, lines, &line_index);
                         }
                         continue :scan;
                     }
@@ -701,7 +701,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
 
                 var autolink_end: OFF = undefined;
                 var missing_mailto: c_int = undefined;
-                const is_autolink = md_is_autolink(ctx, off, lines[n_lines - 1].end, &autolink_end, &missing_mailto);
+                const is_autolink = md_is_autolink(ctx, off, lines[lines.len - 1].end, &autolink_end, &missing_mailto);
                 if (is_autolink != 0) {
                     var flags: u8 = MD_MARK_RESOLVED | MD_MARK_AUTOLINK;
                     if (missing_mailto != 0) flags |= MD_MARK_AUTOLINK_MISSING_MAILTO;
@@ -1099,7 +1099,7 @@ pub fn md_analyze_bracket(ctx: *MD_CTX, mark_index: c_int) void {
 }
 
 // md4x.c ~3677.
-pub fn md_resolve_links(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE) c_int {
+pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
     var opener_index = ctx.unresolved_link_head;
     var last_link_beg: OFF = 0;
     var last_link_end: OFF = 0;
@@ -1201,7 +1201,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
                 last_link_end = closer.end;
 
                 if (delim != null)
-                    md_analyze_link_contents(ctx, lines, n_lines, delim_index + 1, closer_index);
+                    md_analyze_link_contents(ctx, lines, delim_index + 1, closer_index);
 
                 opener_index = next_opener.?.prev;
                 continue;
@@ -1212,11 +1212,11 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
             if (next_closer.?.beg > closer.end + 1) {
                 // Might be full reference link.
                 if (next_opener.?.flags & MD_MARK_HASNESTEDBRACKETS == 0)
-                    is_link = md_is_link_reference(ctx, lines, n_lines, next_opener.?.beg, next_closer.?.end, &attr);
+                    is_link = md_is_link_reference(ctx, lines, next_opener.?.beg, next_closer.?.end, &attr);
             } else {
                 // Might be shortcut reference link.
                 if (opener.flags & MD_MARK_HASNESTEDBRACKETS == 0)
-                    is_link = md_is_link_reference(ctx, lines, n_lines, opener.beg, closer.end, &attr);
+                    is_link = md_is_link_reference(ctx, lines, opener.beg, closer.end, &attr);
             }
 
             if (is_link < 0) return -1;
@@ -1229,7 +1229,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
             if (closer.end < ctx.size and CH(ctx, closer.end) == '(') {
                 // Might be inline link.
                 var inline_link_end: OFF = OFF_MAX;
-                is_link = md_is_inline_link_spec(ctx, lines, n_lines, closer.end, &inline_link_end, &attr);
+                is_link = md_is_inline_link_spec(ctx, lines, closer.end, &inline_link_end, &attr);
                 if (is_link < 0) return -1;
 
                 if (is_link != 0) {
@@ -1258,7 +1258,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
             if (is_link == 0) {
                 // Might be collapsed reference link.
                 if (opener.flags & MD_MARK_HASNESTEDBRACKETS == 0)
-                    is_link = md_is_link_reference(ctx, lines, n_lines, opener.beg, closer.end, &attr);
+                    is_link = md_is_link_reference(ctx, lines, opener.beg, closer.end, &attr);
                 if (is_link < 0) return -1;
             }
 
@@ -1287,7 +1287,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
             closer.flags |= MD_MARK_CLOSER | MD_MARK_RESOLVED;
 
             if (ctx.marks[@intCast(opener_index + 1)].ch == 'S') {
-                md_analyze_link_contents(ctx, lines, n_lines, opener_index + 1, closer_index);
+                md_analyze_link_contents(ctx, lines, opener_index + 1, closer_index);
             } else {
                 ctx.marks[@intCast(opener_index + 1)].beg = attr.dest_beg;
                 ctx.marks[@intCast(opener_index + 1)].end = attr.dest_end;
@@ -1305,7 +1305,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
                     last_img_end = closer.end;
                 }
 
-                md_analyze_link_contents(ctx, lines, n_lines, opener_index + 1, closer_index);
+                md_analyze_link_contents(ctx, lines, opener_index + 1, closer_index);
 
                 if (ctx.parser.flags & c.MD_FLAG_PERMISSIVEAUTOLINKS != 0) {
                     var first_nested_i: c_int = opener_index + 1;
@@ -1634,8 +1634,7 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
 pub const MD_ANALYZE_NOSKIP_EMPH: u8 = 0x01;
 
 // md4x.c ~4344.
-pub fn md_analyze_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, mark_beg: c_int, mark_end: c_int, mark_chars: [*:0]const u8, flags: u8) void {
-    _ = n_lines;
+pub fn md_analyze_marks(ctx: *MD_CTX, lines: []const MD_LINE, mark_beg: c_int, mark_end: c_int, mark_chars: [*:0]const u8, flags: u8) void {
     var i: c_int = mark_beg;
     var last_end: OFF = lines[0].beg;
 
@@ -1760,17 +1759,17 @@ pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
 }
 
 // md4x.c ~4538.
-pub fn md_analyze_inlines(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, table_mode: c_int) c_int {
+pub fn md_analyze_inlines(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int) c_int {
     var ret: c_int = 0;
 
     ctx.n_marks = 0;
 
-    ret = md_collect_marks(ctx, lines, n_lines, table_mode);
+    ret = md_collect_marks(ctx, lines, table_mode);
     if (ret != 0) return ret;
 
     // (1) Links.
-    md_analyze_marks(ctx, lines, n_lines, 0, ctx.n_marks, "[]!", 0);
-    ret = md_resolve_links(ctx, lines, n_lines);
+    md_analyze_marks(ctx, lines, 0, ctx.n_marks, "[]!", 0);
+    ret = md_resolve_links(ctx, lines);
     if (ret != 0) return ret;
     ctx.opener_stacks[BRACKET_OPENERS].top = -1;
     ctx.unresolved_link_head = -1;
@@ -1779,12 +1778,12 @@ pub fn md_analyze_inlines(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SI
     if (table_mode != 0) {
         // (2) Table cell boundaries.
         ctx.n_table_cell_boundaries = 0;
-        md_analyze_marks(ctx, lines, n_lines, 0, ctx.n_marks, "|", 0);
+        md_analyze_marks(ctx, lines, 0, ctx.n_marks, "|", 0);
         return ret;
     }
 
     // (3) Emphasis/strong; permissive autolinks.
-    md_analyze_link_contents(ctx, lines, n_lines, 0, ctx.n_marks);
+    md_analyze_link_contents(ctx, lines, 0, ctx.n_marks);
 
     // (4) Trailing {attrs}.
     ret = md_resolve_attrs(ctx);
@@ -1794,12 +1793,12 @@ pub fn md_analyze_inlines(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SI
 }
 
 // md4x.c ~4574.
-pub fn md_analyze_link_contents(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, mark_beg: c_int, mark_end: c_int) void {
-    md_analyze_marks(ctx, lines, n_lines, mark_beg, mark_end, "&", 0);
-    md_analyze_marks(ctx, lines, n_lines, mark_beg, mark_end, "*_~$", 0);
+pub fn md_analyze_link_contents(ctx: *MD_CTX, lines: []const MD_LINE, mark_beg: c_int, mark_end: c_int) void {
+    md_analyze_marks(ctx, lines, mark_beg, mark_end, "&", 0);
+    md_analyze_marks(ctx, lines, mark_beg, mark_end, "*_~$", 0);
 
     if (ctx.parser.flags & c.MD_FLAG_PERMISSIVEAUTOLINKS != 0) {
-        md_analyze_marks(ctx, lines, n_lines, mark_beg, mark_end, "@:.", MD_ANALYZE_NOSKIP_EMPH);
+        md_analyze_marks(ctx, lines, mark_beg, mark_end, "@:.", MD_ANALYZE_NOSKIP_EMPH);
     }
 
     var i: usize = 0;
@@ -1928,12 +1927,12 @@ pub fn md_enter_leave_span_span(ctx: *MD_CTX, enter: c_int, raw_attrs: [*c]const
 }
 
 // md4x.c ~4721. Render the output per the analyzed ctx.marks.
-pub fn md_process_inlines(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE) c_int {
+pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
     var text_type: c.MD_TEXTTYPE = undefined;
-    var line: [*c]const MD_LINE = lines;
+    var line: [*c]const MD_LINE = lines.ptr;
     var mark: [*c]MD_MARK = undefined;
     var off: OFF = lines[0].beg;
-    const end: OFF = lines[n_lines - 1].end;
+    const end: OFF = lines[lines.len - 1].end;
     var tmp: OFF = undefined;
     var attr_skip_to: OFF = 0;
     var enforce_hardbreak: c_int = 0;
@@ -2108,7 +2107,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SI
                             if (ret != 0) return ret;
 
                             if (mark.*.ch == ']') {
-                                while (mark.*.end > line.*.end and @intFromPtr(line) < @intFromPtr(lines + n_lines - 1)) line += 1;
+                                while (mark.*.end > line.*.end and @intFromPtr(line) < @intFromPtr(&lines[lines.len - 1])) line += 1;
                             }
                         } else {
                             var raw_a: [*c]const CHAR = null;
@@ -2127,7 +2126,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SI
                             if (ret != 0) return ret;
 
                             if (mark.*.ch == ']') {
-                                while (mark.*.end > line.*.end and @intFromPtr(line) < @intFromPtr(lines + n_lines - 1)) line += 1;
+                                while (mark.*.end > line.*.end and @intFromPtr(line) < @intFromPtr(&lines[lines.len - 1])) line += 1;
                             }
                         }
                     }

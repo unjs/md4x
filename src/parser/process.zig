@@ -121,7 +121,7 @@ pub fn md_process_table_cell(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, align_val:
 
     ret = mdEnterBlock(ctx, cell_type, &det);
     if (ret != 0) return ret;
-    ret = md_process_normal_block_contents(ctx, @ptrCast(&line), 1);
+    ret = md_process_normal_block_contents(ctx, @as([*]const MD_LINE, @ptrCast(&line))[0..1]);
     if (ret < 0) return ret;
     ret = mdLeaveBlock(ctx, cell_type, &det);
     if (ret != 0) return ret;
@@ -138,7 +138,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
     line.end = end;
 
     // Break the line into table cells by identifying pipe characters.
-    ret = md_analyze_inlines(ctx, @ptrCast(&line), 1, TRUE);
+    ret = md_analyze_inlines(ctx, @as([*]const MD_LINE, @ptrCast(&line))[0..1], TRUE);
     if (ret < 0) {
         ctx.table_cell_boundaries_head = -1;
         ctx.table_cell_boundaries_tail = -1;
@@ -211,7 +211,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
 }
 
 // md4x.c ~5311.
-pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: [*c]const MD_LINE, n_lines: MD_SIZE) c_int {
+pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: []const MD_LINE) c_int {
     var align_arr: [*c]c.MD_ALIGN = null;
     var ret: c_int = 0;
 
@@ -239,14 +239,14 @@ pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: [*
         return ret;
     }
 
-    if (n_lines > 2) {
+    if (lines.len > 2) {
         ret = mdEnterBlock(ctx, c.MD_BLOCK_TBODY, null);
         if (ret != 0) {
             std.c.free(align_arr);
             return ret;
         }
         var line_index: MD_SIZE = 2;
-        while (line_index < n_lines) : (line_index += 1) {
+        while (line_index < lines.len) : (line_index += 1) {
             ret = md_process_table_row(ctx, c.MD_BLOCK_TD, lines[line_index].beg, lines[line_index].end, align_arr, col_count);
             if (ret < 0) {
                 std.c.free(align_arr);
@@ -265,9 +265,9 @@ pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: [*
 }
 
 // md4x.c ~5394.
-pub fn md_process_normal_block_contents(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE) c_int {
-    var ret: c_int = md_analyze_inlines(ctx, lines, n_lines, FALSE);
-    if (ret >= 0) ret = md_process_inlines(ctx, lines, n_lines);
+pub fn md_process_normal_block_contents(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
+    var ret: c_int = md_analyze_inlines(ctx, lines, FALSE);
+    if (ret >= 0) ret = md_process_inlines(ctx, lines);
 
     // Free any temporary memory blocks stored within some dummy marks.
     var i: c_int = ctx.ptr_stack.top;
@@ -280,13 +280,13 @@ pub fn md_process_normal_block_contents(ctx: *MD_CTX, lines: [*c]const MD_LINE, 
 }
 
 // md4x.c ~5412.
-pub fn md_process_verbatim_block_contents(ctx: *MD_CTX, text_type: c.MD_TEXTTYPE, lines: [*c]const MD_VERBATIMLINE, n_lines: MD_SIZE) c_int {
+pub fn md_process_verbatim_block_contents(ctx: *MD_CTX, text_type: c.MD_TEXTTYPE, lines: []const MD_VERBATIMLINE) c_int {
     const indent_chunk_str: [*:0]const CHAR = "                ";
     const indent_chunk_size: SZ = 16;
     var ret: c_int = 0;
 
     var line_index: MD_SIZE = 0;
-    while (line_index < n_lines) : (line_index += 1) {
+    while (line_index < lines.len) : (line_index += 1) {
         const line = &lines[line_index];
         var indent: c_int = @intCast(line.indent);
 
@@ -314,28 +314,25 @@ pub fn md_process_verbatim_block_contents(ctx: *MD_CTX, text_type: c.MD_TEXTTYPE
 }
 
 // md4x.c ~5446.
-pub fn md_process_code_block_contents(ctx: *MD_CTX, is_fenced: c_int, lines_in: [*c]const MD_VERBATIMLINE, n_lines_in: MD_SIZE) c_int {
+pub fn md_process_code_block_contents(ctx: *MD_CTX, is_fenced: c_int, lines_in: []const MD_VERBATIMLINE) c_int {
     var lines = lines_in;
-    var n_lines = n_lines_in;
 
     if (is_fenced != 0) {
         // Skip the first line in case of fenced code: It is the fence.
-        lines += 1;
-        n_lines -= 1;
+        lines = lines[1..];
     } else {
         // Ignore blank lines at start/end of indented code block.
-        while (n_lines > 0 and lines[0].beg == lines[0].end) {
-            lines += 1;
-            n_lines -= 1;
+        while (lines.len > 0 and lines[0].beg == lines[0].end) {
+            lines = lines[1..];
         }
-        while (n_lines > 0 and lines[n_lines - 1].beg == lines[n_lines - 1].end) {
-            n_lines -= 1;
+        while (lines.len > 0 and lines[lines.len - 1].beg == lines[lines.len - 1].end) {
+            lines = lines[0 .. lines.len - 1];
         }
     }
 
-    if (n_lines == 0) return 0;
+    if (lines.len == 0) return 0;
 
-    return md_process_verbatim_block_contents(ctx, c.MD_TEXT_CODE, lines, n_lines);
+    return md_process_verbatim_block_contents(ctx, c.MD_TEXT_CODE, lines);
 }
 
 // md4x.c ~5473. Parse highlight ranges string (e.g. "1-3,5,7") into expanded
@@ -626,15 +623,15 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
     // Process the block contents according to its type.
     switch (btype) {
         c.MD_BLOCK_HR => {},
-        c.MD_BLOCK_CODE => ret = md_process_code_block_contents(ctx, @intFromBool(block.bits.data != 0), @ptrCast(@alignCast(block_lines + 1)), block.n_lines),
-        c.MD_BLOCK_HTML => ret = md_process_verbatim_block_contents(ctx, c.MD_TEXT_HTML, @ptrCast(@alignCast(block_lines + 1)), block.n_lines),
+        c.MD_BLOCK_CODE => ret = md_process_code_block_contents(ctx, @intFromBool(block.bits.data != 0), @as([*]const MD_VERBATIMLINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
+        c.MD_BLOCK_HTML => ret = md_process_verbatim_block_contents(ctx, c.MD_TEXT_HTML, @as([*]const MD_VERBATIMLINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
         c.MD_BLOCK_FRONTMATTER => {
             // Skip the opening fence line (first line is the --- opener).
-            const vlines: [*c]const MD_VERBATIMLINE = @ptrCast(@alignCast(block_lines + 1));
-            ret = md_process_verbatim_block_contents(ctx, c.MD_TEXT_NORMAL, vlines + 1, block.n_lines - 1);
+            const vlines: [*]const MD_VERBATIMLINE = @ptrCast(@alignCast(block_lines + 1));
+            ret = md_process_verbatim_block_contents(ctx, c.MD_TEXT_NORMAL, (vlines + 1)[0 .. block.n_lines - 1]);
         },
-        c.MD_BLOCK_TABLE => ret = md_process_table_block_contents(ctx, @intCast(block.bits.data), @ptrCast(@alignCast(block_lines + 1)), block.n_lines),
-        else => ret = md_process_normal_block_contents(ctx, @ptrCast(@alignCast(block_lines + 1)), block.n_lines),
+        c.MD_BLOCK_TABLE => ret = md_process_table_block_contents(ctx, @intCast(block.bits.data), @as([*]const MD_LINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
+        else => ret = md_process_normal_block_contents(ctx, @as([*]const MD_LINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
     }
     if (ret < 0) {
         if (clean_fence_code_detail) {

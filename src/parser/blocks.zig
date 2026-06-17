@@ -144,7 +144,7 @@ pub fn md_consume_link_reference_definitions(ctx: *MD_CTX) c_int {
     var n: MD_SIZE = 0;
 
     while (n < n_lines) {
-        const n_link_ref_lines = md_is_link_reference_definition(ctx, lines + n, n_lines - n);
+        const n_link_ref_lines = md_is_link_reference_definition(ctx, lines[n..n_lines]);
         // Not a reference definition?
         if (n_link_ref_lines == 0)
             break;

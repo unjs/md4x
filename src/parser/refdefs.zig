@@ -633,7 +633,7 @@ pub fn md_is_link_title(
 
 // Faithful port of md_is_link_reference_definition (md4x.c ~2212). Returns 0 if
 // not a ref-def, N>0 (number of lines) if it is, -1 on OOM.
-pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE) c_int {
+pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
     var label_contents_beg: OFF = undefined;
     var label_contents_end: OFF = undefined;
     var label_contents_line_index: MD_SIZE = undefined;
@@ -651,7 +651,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n
     var ret: c_int = 0;
 
     // Link label.
-    if (md_is_link_label(ctx, lines[0..n_lines], lines[0].beg, &off, &label_contents_line_index, &line_index, &label_contents_beg, &label_contents_end) == 0)
+    if (md_is_link_label(ctx, lines, lines[0].beg, &off, &label_contents_line_index, &line_index, &label_contents_beg, &label_contents_end) == 0)
         return FALSE;
     label_is_multiline = (label_contents_line_index != line_index);
 
@@ -665,7 +665,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n
         off += 1;
     if (off >= lines[line_index].end) {
         line_index += 1;
-        if (line_index >= n_lines)
+        if (line_index >= lines.len)
             return FALSE;
         off = lines[line_index].beg;
     }
@@ -675,7 +675,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n
         return FALSE;
 
     // (Optional) title. Only a title if nothing more follows on its last line.
-    if (md_is_link_title(ctx, lines[line_index..n_lines], off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) != 0 and
+    if (md_is_link_title(ctx, lines[line_index..], off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) != 0 and
         off >= lines[line_index + tmp_line_index].end)
     {
         title_is_multiline = (tmp_line_index != title_contents_line_index);
@@ -703,7 +703,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n
     @memset(std.mem.asBytes(def.?), 0);
 
     if (label_is_multiline) {
-        ret = md_merge_lines_alloc(ctx, label_contents_beg, label_contents_end, lines[label_contents_line_index..n_lines], ' ', &def.?.label, &def.?.label_size);
+        ret = md_merge_lines_alloc(ctx, label_contents_beg, label_contents_end, lines[label_contents_line_index..], ' ', &def.?.label, &def.?.label_size);
         if (ret < 0) return md_is_link_reference_definition_abort(def, ret);
         def.?.label_needs_free = true;
     } else {
@@ -712,7 +712,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: [*c]const MD_LINE, n
     }
 
     if (title_is_multiline) {
-        ret = md_merge_lines_alloc(ctx, title_contents_beg, title_contents_end, lines[title_contents_line_index..n_lines], '\n', &def.?.title, &def.?.title_size);
+        ret = md_merge_lines_alloc(ctx, title_contents_beg, title_contents_end, lines[title_contents_line_index..], '\n', &def.?.title, &def.?.title_size);
         if (ret < 0) return md_is_link_reference_definition_abort(def, ret);
         def.?.title_needs_free = true;
     } else {
@@ -739,7 +739,7 @@ pub fn md_is_link_reference_definition_abort(def: ?*MD_REF_DEF, ret: c_int) c_in
 }
 
 // Faithful port of md_is_link_reference (md4x.c ~2334).
-pub fn md_is_link_reference(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, beg_in: OFF, end_in: OFF, attr: *MD_LINK_ATTR) c_int {
+pub fn md_is_link_reference(ctx: *MD_CTX, lines: []const MD_LINE, beg_in: OFF, end_in: OFF, attr: *MD_LINK_ATTR) c_int {
     var beg = beg_in;
     var end = end_in;
     var label: [*c]CHAR = undefined;
@@ -754,12 +754,12 @@ pub fn md_is_link_reference(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_
     end -= 1;
 
     // Find lines corresponding to beg/end positions.
-    const beg_line = md_lookup_line(beg, lines[0..n_lines], null);
+    const beg_line = md_lookup_line(beg, lines, null);
     const is_multiline = (end > beg_line.end);
 
     if (is_multiline) {
-        const beg_line_idx: usize = (@intFromPtr(beg_line) - @intFromPtr(lines)) / @sizeOf(MD_LINE);
-        ret = md_merge_lines_alloc(ctx, beg, end, lines[beg_line_idx..n_lines], ' ', &label, &label_size);
+        const beg_line_idx: usize = (@intFromPtr(beg_line) - @intFromPtr(lines.ptr)) / @sizeOf(MD_LINE);
+        ret = md_merge_lines_alloc(ctx, beg, end, lines[beg_line_idx..], ' ', &label, &label_size);
         if (ret < 0) return ret;
         ret = FALSE;
     } else {
@@ -795,7 +795,7 @@ pub fn md_is_link_reference(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_
 }
 
 // Faithful port of md_is_inline_link_spec (md4x.c ~2394).
-pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE, beg: OFF, p_end: *OFF, attr: *MD_LINK_ATTR) c_int {
+pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, p_end: *OFF, attr: *MD_LINK_ATTR) c_int {
     var line_index: MD_SIZE = 0;
     var tmp_line_index: MD_SIZE = undefined;
     var title_contents_beg: OFF = undefined;
@@ -805,7 +805,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: M
     var off = beg;
     var ret: c_int = FALSE;
 
-    _ = md_lookup_line(off, lines[0..n_lines], &line_index);
+    _ = md_lookup_line(off, lines, &line_index);
 
     // MD_ASSERT(CH(off) == '(');
     off += 1;
@@ -815,7 +815,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: M
         off += 1;
     if (off >= lines[line_index].end and (off >= ctx.size or ISNEWLINE(ctx, off))) {
         line_index += 1;
-        if (line_index >= n_lines)
+        if (line_index >= lines.len)
             return FALSE;
         off = lines[line_index].beg;
     }
@@ -837,7 +837,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: M
         return FALSE;
 
     // (Optional) title.
-    if (md_is_link_title(ctx, lines[line_index..n_lines], off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) != 0) {
+    if (md_is_link_title(ctx, lines[line_index..], off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) != 0) {
         title_is_multiline = (tmp_line_index != title_contents_line_index);
         title_contents_line_index += line_index;
         line_index += tmp_line_index;
@@ -854,7 +854,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: M
         off += 1;
     if (off >= lines[line_index].end) {
         line_index += 1;
-        if (line_index >= n_lines)
+        if (line_index >= lines.len)
             return FALSE;
         off = lines[line_index].beg;
     }
@@ -871,7 +871,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: M
         attr.title_size = title_contents_end - title_contents_beg;
         attr.title_needs_free = FALSE;
     } else {
-        ret = md_merge_lines_alloc(ctx, title_contents_beg, title_contents_end, lines[title_contents_line_index..n_lines], '\n', &attr.title, &attr.title_size);
+        ret = md_merge_lines_alloc(ctx, title_contents_beg, title_contents_end, lines[title_contents_line_index..], '\n', &attr.title, &attr.title_size);
         if (ret < 0) return ret;
         attr.title_needs_free = TRUE;
     }

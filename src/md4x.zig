@@ -438,8 +438,8 @@ fn _test_run_inline(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ) 
         n_lines = 1;
     }
 
-    var ret = md_analyze_inlines(&ctx, lines, n_lines, FALSE);
-    if (ret == 0) ret = md_process_inlines(&ctx, lines, n_lines);
+    var ret = md_analyze_inlines(&ctx, lines[0..n_lines], FALSE);
+    if (ret == 0) ret = md_process_inlines(&ctx, lines[0..n_lines]);
 
     // ptr_stack cleanup (mirrors md_process_normal_block_contents).
     var pi: c_int = ctx.ptr_stack.top;
