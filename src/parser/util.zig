@@ -733,3 +733,44 @@ pub fn growArray(comptime T: type, ptr: *[*c]T, alloc: *c_int, n: c_int, min_all
     ptr.* = new_arr;
     alloc.* = new_alloc;
 }
+
+// --- raw byte-arena helpers routed through a std.mem.Allocator ----------------
+//
+// PLAN C ("fuller OOM matrix"): `malloc`/`realloc`/`free`-shaped wrappers over
+// `ctx.alloc` for the heterogeneous byte arenas the parser reinterprets as typed
+// records (the block_bytes arena, the ref-def hashtable array, the
+// MD_REF_DEF_LIST flexible-array buckets). Routing them through the injectable
+// allocator lets a std.testing.FailingAllocator drive their OOM paths, which the
+// production libc-malloc build never reaches.
+//
+// Returned pointers are 16-byte aligned — matching libc malloc's max_align_t
+// guarantee — so the arenas stay safe to `@ptrCast`/`@alignCast` into MD_BLOCK /
+// MD_LINE / MD_REF_DEF_LIST / pointer-array views. Callers must track the exact
+// allocated byte length (as the existing alloc_*/`*_size` fields already do) and
+// pass it back to `arena_realloc`/`arena_free`; the std allocators validate that
+// length on free, and the realloc move-fallback uses it to size the copy.
+//
+// Semantics mirror libc: `arena_realloc` returns null on OOM and leaves the old
+// block intact (no free), exactly like the `if (tmp == NULL) keep old` idiom the
+// call sites use. Each returns `?*anyopaque` to match the raw arena field types.
+
+pub const ARENA_ALIGN: std.mem.Alignment = .@"16";
+
+pub fn arena_alloc(alloc: std.mem.Allocator, len: usize) ?*anyopaque {
+    if (len == 0) return null;
+    const slice = alloc.alignedAlloc(u8, ARENA_ALIGN, len) catch return null;
+    return @ptrCast(slice.ptr);
+}
+
+pub fn arena_realloc(alloc: std.mem.Allocator, old: ?*anyopaque, old_len: usize, new_len: usize) ?*anyopaque {
+    const op = old orelse return arena_alloc(alloc, new_len);
+    const old_slice: []align(16) u8 = @as([*]align(16) u8, @ptrCast(@alignCast(op)))[0..old_len];
+    const new_slice = alloc.realloc(old_slice, new_len) catch return null;
+    return @ptrCast(new_slice.ptr);
+}
+
+pub fn arena_free(alloc: std.mem.Allocator, old: ?*anyopaque, old_len: usize) void {
+    const op = old orelse return;
+    if (old_len == 0) return;
+    alloc.free(@as([*]align(16) u8, @ptrCast(@alignCast(op)))[0..old_len]);
+}

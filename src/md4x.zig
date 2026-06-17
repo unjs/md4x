@@ -243,6 +243,14 @@ const md_process_normal_block_contents = process.md_process_normal_block_content
 // ============================================================================
 
 pub export fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PARSER, userdata: ?*anyopaque) callconv(.c) c_int {
+    // Production always uses the libc-backed c_allocator. The allocator is split
+    // out into md_parse_impl so native OOM tests can inject a
+    // std.testing.FailingAllocator and sweep the full parse for crash/leak
+    // freedom across every internal allocation (PLAN 8.5 / C "fuller OOM matrix").
+    return md_parse_impl(c_allocator, text, size, parser, userdata);
+}
+
+fn md_parse_impl(alloc: std.mem.Allocator, text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PARSER, userdata: ?*anyopaque) c_int {
     if (parser.*.abi_version != 0) {
         if (parser.*.debug_log != null)
             parser.*.debug_log.?("Unsupported abi_version.", userdata);
@@ -250,7 +258,7 @@ pub export fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PA
     }
 
     // Setup context structure (zero-initialized like C's memset).
-    var ctx: MD_CTX = .{};
+    var ctx: MD_CTX = .{ .alloc = alloc };
     ctx.text = text;
     ctx.size = size;
     ctx.parser = parser.*;
@@ -278,12 +286,14 @@ pub export fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PA
     // All the work.
     const ret = md_process_doc(&ctx);
 
-    // Clean-up.
-    md_free_ref_defs(&ctx);
+    // Clean-up. The hashtable holds pointers into ctx.ref_defs (simple buckets)
+    // and reads the ref_defs address range to tell simple from complex buckets,
+    // so it MUST be torn down before md_free_ref_defs frees/deinits ref_defs.
     md_free_ref_def_hashtable(&ctx);
+    md_free_ref_defs(&ctx);
     std.c.free(ctx.buffer);
     ctx.marks.deinit(ctx.alloc);
-    std.c.free(ctx.block_bytes);
+    util.arena_free(ctx.alloc, ctx.block_bytes, @intCast(ctx.alloc_block_bytes));
     ctx.containers.deinit(ctx.alloc);
     ctx.block_component_info.deinit(ctx.alloc);
     ctx.slot_info.deinit(ctx.alloc);
@@ -403,8 +413,9 @@ fn _test_run_inline(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ) 
     ctx.ptr_stack.top = -1;
 
     std.c.free(lines);
-    md_free_ref_defs(&ctx);
+    // Hashtable before ref_defs: it indexes into ctx.ref_defs (see md_parse_impl).
     md_free_ref_def_hashtable(&ctx);
+    md_free_ref_defs(&ctx);
     std.c.free(ctx.buffer);
     ctx.marks.deinit(ctx.alloc);
     ctx.inline_attrs.deinit(ctx.alloc);
@@ -616,13 +627,14 @@ fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ,
     }
 
     // Cleanup.
-    std.c.free(ctx.block_bytes);
+    util.arena_free(ctx.alloc, ctx.block_bytes, @intCast(ctx.alloc_block_bytes));
     ctx.containers.deinit(ctx.alloc);
     ctx.block_component_info.deinit(ctx.alloc);
     ctx.slot_info.deinit(ctx.alloc);
     ctx.block_alert_info.deinit(ctx.alloc);
-    md_free_ref_defs(&ctx);
+    // Hashtable before ref_defs: it indexes into ctx.ref_defs (see md_parse_impl).
     md_free_ref_def_hashtable(&ctx);
+    md_free_ref_defs(&ctx);
     std.c.free(ctx.buffer);
     ctx.marks.deinit(ctx.alloc);
     ctx.inline_attrs.deinit(ctx.alloc);
@@ -889,4 +901,48 @@ test "OOM: deinit frees all array storage (no leak)" {
     ctx.marks.deinit(ctx.alloc);
     ctx.slot_info.deinit(ctx.alloc);
     ctx.block_alert_info.deinit(ctx.alloc);
+}
+
+// PLAN C ("fuller OOM matrix"): the raw byte arenas (block_bytes, the ref-def
+// hashtable, MD_REF_DEF_LIST buckets) now allocate through ctx.alloc via the
+// util.arena_* helpers, so the FailingAllocator can drive their OOM paths too.
+
+test "OOM: arena_alloc/realloc/free roundtrip + injected failure" {
+    // Happy path under the leak-checking testing allocator.
+    const a = util.arena_alloc(std.testing.allocator, 64);
+    try std.testing.expect(a != null);
+    const b = util.arena_realloc(std.testing.allocator, a, 64, 256);
+    try std.testing.expect(b != null);
+    util.arena_free(std.testing.allocator, b, 256);
+    // realloc(null, ...) behaves like a fresh alloc; free(null, ...) is a no-op.
+    const cptr = util.arena_realloc(std.testing.allocator, null, 0, 32);
+    try std.testing.expect(cptr != null);
+    util.arena_free(std.testing.allocator, cptr, 32);
+    util.arena_free(std.testing.allocator, null, 0);
+    // Injected OOM: the first allocation fails, arena_alloc returns null.
+    var fa = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    try std.testing.expect(util.arena_alloc(fa.allocator(), 64) == null);
+}
+
+test "OOM: full md_parse sweep is crash- and leak-free under FailingAllocator" {
+    // A document that exercises the ctx.alloc-routed arenas: link reference
+    // definitions (ref_defs array + ref_def_hashtable + a duplicate to walk the
+    // bucket path), headings/paragraphs/lists/code (block_bytes), and emphasis
+    // (marks). std.testing.allocator flags any leak; FailingAllocator turns each
+    // successive internal allocation into OOM so every abort/cleanup path runs.
+    const src =
+        "[a]: /x \"t\"\n[b]: /y\n[a]: /dup\n\n" ++
+        "# Heading *em* `c`\n\nParagraph linking [a] and [b] with **strong**.\n\n" ++
+        "- one\n- two\n  - nested\n\n```js\ncode line\n```\n\n> quote\n";
+    var probe: AbortProbe = .{};
+    var p = probe.parser();
+    var fail: usize = 0;
+    while (fail < 400) : (fail += 1) {
+        var fa = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail });
+        const ret = md_parse_impl(fa.allocator(), @ptrCast(src.ptr), @intCast(src.len), &p, &probe);
+        // Either a clean parse (0) or a graceful OOM abort (-1) — never a crash,
+        // and ctx.alloc allocations are always released (else the allocator
+        // would report a leak at test end).
+        try std.testing.expect(ret == 0 or ret == -1);
+    }
 }

@@ -74,13 +74,15 @@ pub inline fn MIN_u(a: c_uint, b: c_uint) c_uint {
 // or null on OOM (mirroring C's NULL). Fixes ctx.current_block after realloc.
 pub fn md_push_block_bytes(ctx: *MD_CTX, n_bytes: c_int) ?*anyopaque {
     if (ctx.n_block_bytes + n_bytes > ctx.alloc_block_bytes) {
+        const old_alloc: usize = @intCast(ctx.alloc_block_bytes);
         ctx.alloc_block_bytes = if (ctx.alloc_block_bytes > 0)
             ctx.alloc_block_bytes + @divTrunc(ctx.alloc_block_bytes, 2)
         else
             512;
-        const new_block_bytes = std.c.realloc(ctx.block_bytes, @intCast(ctx.alloc_block_bytes));
+        const new_block_bytes = util.arena_realloc(ctx.alloc, ctx.block_bytes, old_alloc, @intCast(ctx.alloc_block_bytes));
         if (new_block_bytes == null) {
             ctx.log("realloc() failed.");
+            ctx.alloc_block_bytes = @intCast(old_alloc);
             return null;
         }
 

@@ -18,7 +18,17 @@ Phases 0–2 and the selected Phase 3 work, plus these §8 leftovers:
   `inline_attrs`) migrated to `std.ArrayListUnmanaged(T)` + `c_allocator`; every
   `n_*`/`alloc_*` field and all 8 `util.growArray` call sites gone.
 - **§8.3** (partial) — Unicode classifiers + `ISUNICODE*` wrappers → `bool`.
-- **§8.5** — injectable `ctx.alloc` + `FailingAllocator` OOM native tests (`zig build test` = 12/12).
+- **§8.5** — injectable `ctx.alloc` + `FailingAllocator` OOM native tests.
+- **§C (fuller OOM matrix, partial)** — the three raw byte arenas (`block_bytes`,
+  the ref-def hashtable array, and the `MD_REF_DEF_LIST` buckets) now allocate
+  through `ctx.alloc` via the `util.arena_alloc`/`arena_realloc`/`arena_free`
+  helpers; `md_parse` split into `md_parse_impl(alloc, …)` + a full-parse
+  `FailingAllocator` sweep test (`zig build test` = 14/14, Debug + ReleaseFast).
+  This surfaced and fixed a latent cleanup-ordering UB (hashtable freed after
+  `ref_defs`; see CHANGELOG Fixes). **Remaining:** `md_build_attribute`'s typed
+  buffers and the per-row scratch buffers in `process.zig` (`pipe_offs`,
+  `align_arr`, code-meta) still use raw `std.c.malloc` — they need per-buffer
+  length tracking before they can route through `ctx.alloc`.
 - **§8.7** (partial) — ctx-first `ISxxx(ctx,off)` char-class predicates → `MD_CTX` methods (`ctx.isWhitespace(off)`, …).
 - **§8.8** (partial) — dropped `MD_LINETYPE`'s explicit `c_int` backing.
 - **§8.9** — corrected the stale AST-renderer "union safety" premise (the C-union footgun was already designed out: flat `Detail` struct + arena; **do not** convert to `union(enum)`).
@@ -41,7 +51,8 @@ Phases 0–2 and the selected Phase 3 work, plus these §8 leftovers:
 ```sh
 bun fmt
 zig build
-zig build test
+zig build test                                      # ReleaseFast (default)
+zig build test -Doptimize=Debug                     # undefined-fill + allocator length checks (catches OOM/cleanup UB)
 bun scripts/run-tests.ts
 python3 test/pathological-tests.py -p zig-out/bin/md4x
 bash scripts/diff-corpus.sh > /tmp/md4x-now.sha   # diff vs baseline — MUST be empty
@@ -86,12 +97,15 @@ tracking upstream md4c.
 
 ### C. Lower-value / out of original scope (safe, but modest payoff)
 
-- **Fuller OOM matrix (extends §8.5/§8.1) — best concrete next step.** Route the
-  remaining raw `std.c.malloc` buffers through `ctx.alloc` so `FailingAllocator`
-  covers them too: `block_bytes` (the heterogeneous `MD_BLOCK`/`MD_LINE`/
-  `MD_VERBATIMLINE` byte arena — biggest, at most `ArrayListUnmanaged(u8)`, never
-  typed), the `MD_REF_DEF_LIST` flexible-array buckets, `ref_def_hashtable`, and
-  `md_build_attribute`'s buffers. Same verified per-buffer slice pattern as §8.1.
+- **Fuller OOM matrix (extends §8.5/§8.1) — partially landed.** The three byte
+  arenas (`block_bytes`, `ref_def_hashtable`, `MD_REF_DEF_LIST` buckets) are done
+  (see Done above). **Still raw `std.c.malloc`:** `md_build_attribute`'s typed
+  buffers (`text`/`substr_types`/`substr_offsets` — need their lengths recorded
+  in `MD_ATTRIBUTE_BUILD` so the Allocator can free them) and the per-row scratch
+  buffers in `process.zig` (`pipe_offs`, `align_arr`, code-block `meta`). Same
+  arena-helper / exact-length pattern; each is short-lived and self-contained.
+  When done, extend the `md_parse` `FailingAllocator` sweep input to a table +
+  fenced code with metadata + a component with attrs so those paths are covered.
 - **Renderers (§8.9):** `html`/`ansi`/`text`/`meta`/`markdown` + shared
   `md4x-props.zig`/`md4x-json.zig` still use `c_int` returns, `[*c]` buffers, and
   manual `malloc`/`realloc`; the growArray/error-union/slice/ArrayList treatment
@@ -111,8 +125,14 @@ tracking upstream md4c.
 
 ## Suggested next step
 
-If continuing autonomously, do the **C-tier "fuller OOM matrix"** — it's the most
-concrete safe win, extends the just-landed §8.5 + §8.1 work with the same
-fuzz-gated per-buffer pattern, and doesn't touch engine logic or upstream-grep
-identifiers. Everything else remaining is either an **owner judgment call (A)** or
-needs **deliberate, human-reviewed design (B)**.
+If continuing autonomously, **finish the "fuller OOM matrix"** — the three byte
+arenas are landed; what's left is routing `md_build_attribute`'s typed buffers and
+`process.zig`'s per-row scratch buffers through `ctx.alloc` (record their lengths
+first), then widening the `md_parse` `FailingAllocator` sweep input to cover the
+table / code-meta / component-attr paths. Same fuzz-gated per-buffer pattern; no
+engine-logic or upstream-grep changes. Run the verification gate in **both Debug
+and ReleaseFast** (`zig build test -Doptimize=Debug`) — Debug's `undefined`-fill +
+allocator length validation is what catches the cleanup-ordering / length-tracking
+bugs this class is prone to (it found one already). Everything else remaining is
+either an **owner judgment call (A)** or needs **deliberate, human-reviewed
+design (B)**.

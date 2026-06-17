@@ -163,6 +163,13 @@ pub inline fn md_ref_def_list_items(list: *MD_REF_DEF_LIST) [*c]?*MD_REF_DEF {
     return @ptrCast(@alignCast(base + @sizeOf(MD_REF_DEF_LIST)));
 }
 
+// Byte size of a complex bucket holding `n` ref-def pointers (header + flexible
+// array). Used to track the exact allocation length for the ctx.alloc-routed
+// arena helpers (PLAN C).
+inline fn md_ref_def_list_bytes(n: c_int) usize {
+    return @sizeOf(MD_REF_DEF_LIST) + @as(usize, @intCast(n)) * @sizeOf(?*MD_REF_DEF);
+}
+
 // qsort/bsearch comparators. CRITICAL ORDERING NOTE (see PARSER-PORT.md log):
 // these mirror md_ref_def_cmp / md_ref_def_cmp_for_sort byte-for-byte and are
 // passed to libc qsort()/bsearch() (via std.c) so that, on the *same* glibc
@@ -214,9 +221,10 @@ pub fn md_build_ref_def_hashtable(ctx: *MD_CTX) c_int {
         return 0;
 
     ctx.ref_def_hashtable_size = @divTrunc(@as(c_int, @intCast(ctx.ref_defs.items.len)) * 5, 4);
-    ctx.ref_def_hashtable = @ptrCast(@alignCast(std.c.malloc(@as(usize, @intCast(ctx.ref_def_hashtable_size)) * @sizeOf(?*anyopaque))));
+    ctx.ref_def_hashtable = @ptrCast(@alignCast(util.arena_alloc(ctx.alloc, @as(usize, @intCast(ctx.ref_def_hashtable_size)) * @sizeOf(?*anyopaque))));
     if (ctx.ref_def_hashtable == null) {
         ctx.log("malloc() failed.");
+        ctx.ref_def_hashtable_size = 0;
         return -1;
     }
     @memset(ctx.ref_def_hashtable[0..@intCast(ctx.ref_def_hashtable_size)], null);
@@ -250,7 +258,7 @@ pub fn md_build_ref_def_hashtable(ctx: *MD_CTX) c_int {
             }
 
             // Promote to a complex bucket.
-            const list: ?*MD_REF_DEF_LIST = @ptrCast(@alignCast(std.c.malloc(@sizeOf(MD_REF_DEF_LIST) + 2 * @sizeOf(?*MD_REF_DEF))));
+            const list: ?*MD_REF_DEF_LIST = @ptrCast(@alignCast(util.arena_alloc(ctx.alloc, md_ref_def_list_bytes(2))));
             if (list == null) {
                 ctx.log("malloc() failed.");
                 return -1;
@@ -270,7 +278,7 @@ pub fn md_build_ref_def_hashtable(ctx: *MD_CTX) c_int {
         var list: *MD_REF_DEF_LIST = @ptrCast(@alignCast(bucket));
         if (list.n_ref_defs >= list.alloc_ref_defs) {
             const new_alloc = list.alloc_ref_defs + @divTrunc(list.alloc_ref_defs, 2);
-            const list_tmp: ?*MD_REF_DEF_LIST = @ptrCast(@alignCast(std.c.realloc(list, @sizeOf(MD_REF_DEF_LIST) + @as(usize, @intCast(new_alloc)) * @sizeOf(?*MD_REF_DEF))));
+            const list_tmp: ?*MD_REF_DEF_LIST = @ptrCast(@alignCast(util.arena_realloc(ctx.alloc, list, md_ref_def_list_bytes(list.alloc_ref_defs), md_ref_def_list_bytes(new_alloc))));
             if (list_tmp == null) {
                 ctx.log("realloc() failed.");
                 return -1;
@@ -325,10 +333,11 @@ pub fn md_free_ref_def_hashtable(ctx: *MD_CTX) void {
             const bucket_addr = @intFromPtr(bucket);
             if (ref_defs_base <= bucket_addr and bucket_addr < ref_defs_end)
                 continue;
-            std.c.free(bucket);
+            const list: *MD_REF_DEF_LIST = @ptrCast(@alignCast(bucket));
+            util.arena_free(ctx.alloc, bucket, md_ref_def_list_bytes(list.alloc_ref_defs));
         }
 
-        std.c.free(@ptrCast(ctx.ref_def_hashtable));
+        util.arena_free(ctx.alloc, @ptrCast(ctx.ref_def_hashtable), @as(usize, @intCast(ctx.ref_def_hashtable_size)) * @sizeOf(?*anyopaque));
     }
 }
 
