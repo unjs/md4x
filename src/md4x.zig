@@ -714,32 +714,42 @@ test "fnv1a known vector" {
 const AbortProbe = struct {
     text_calls: u32 = 0,
     enter_calls: u32 = 0,
+    // The non-zero code a triggered callback returns. md_parse must propagate
+    // this EXACT value (positive or negative) as its own return value.
+    abort_code: c_int = 1,
     abort_on_text: bool = false,
     abort_on_block_p: bool = false,
+    abort_on_enter_block: bool = false,
+    abort_on_leave_block: bool = false,
+    abort_on_enter_span: bool = false,
+    abort_on_leave_span: bool = false,
 
     fn enterBlock(ty: c.MD_BLOCKTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
         _ = detail;
         const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
         self.enter_calls += 1;
-        if (self.abort_on_block_p and ty == c.MD_BLOCK_P) return 1;
+        if (self.abort_on_block_p and ty == c.MD_BLOCK_P) return self.abort_code;
+        if (self.abort_on_enter_block and ty != c.MD_BLOCK_DOC) return self.abort_code;
         return 0;
     }
     fn leaveBlock(ty: c.MD_BLOCKTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
-        _ = ty;
         _ = detail;
-        _ = ud;
+        const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
+        if (self.abort_on_leave_block and ty != c.MD_BLOCK_DOC) return self.abort_code;
         return 0;
     }
     fn enterSpan(ty: c.MD_SPANTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
         _ = ty;
         _ = detail;
-        _ = ud;
+        const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
+        if (self.abort_on_enter_span) return self.abort_code;
         return 0;
     }
     fn leaveSpan(ty: c.MD_SPANTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
         _ = ty;
         _ = detail;
-        _ = ud;
+        const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
+        if (self.abort_on_leave_span) return self.abort_code;
         return 0;
     }
     fn textCb(ty: c.MD_TEXTTYPE, str: [*c]const CHAR, size: SZ, ud: ?*anyopaque) callconv(.c) c_int {
@@ -748,7 +758,7 @@ const AbortProbe = struct {
         _ = size;
         const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
         self.text_calls += 1;
-        if (self.abort_on_text) return 1;
+        if (self.abort_on_text) return self.abort_code;
         return 0;
     }
 
@@ -786,6 +796,49 @@ test "callback abort: positive enter_block() return stops block emission" {
     const input = "hello world\n";
     _ = md_parse(@ptrCast(input), @intCast(input.len), &p, &probe);
     try std.testing.expectEqual(@as(u32, 0), probe.text_calls);
+}
+
+// md_parse's abort-code propagation contract (md4c parity). md4c's internal
+// MD_CHECK macro propagates only `< 0` (via `goto abort`), while the callback
+// macros (MD_ENTER/LEAVE_BLOCK/SPAN, MD_TEXT) stop emission on any `!= 0`. The
+// net OBSERVABLE behavior at md_parse, for each of the five callbacks:
+//   - a NEGATIVE callback code propagates verbatim as md_parse's return value;
+//   - a POSITIVE callback code stops emission but md_parse returns 0 (the
+//     positive code is never caught by an MD_CHECK(<0) boundary and is then
+//     overwritten by a subsequent leave_block/leave_span returning 0).
+// All bundled renderers abort with negative codes, so they always observe their
+// exact code. This matrix is locked here so the Phase 2.2 error-union refactor —
+// which moves OOM (-1 runtime error) onto error{} while keeping callback-abort
+// codes a DISTINCT non-error return path — cannot silently alter it.
+test "callback abort: md_parse return-value matrix (md4c parity)" {
+    const Case = struct { field: []const u8, input: []const u8 };
+    const cases = [_]Case{
+        .{ .field = "text", .input = "hello\n" },
+        .{ .field = "enter_block", .input = "# heading\n" },
+        .{ .field = "leave_block", .input = "para\n" },
+        .{ .field = "enter_span", .input = "a **b** c\n" },
+        .{ .field = "leave_span", .input = "a *b* c\n" },
+    };
+    inline for (cases) |cs| {
+        // Negative code → propagated verbatim.
+        var neg: AbortProbe = .{ .abort_code = -7 };
+        @field(neg, "abort_on_" ++ cs.field) = true;
+        var pn = neg.parser();
+        try std.testing.expectEqual(@as(c_int, -7), md_parse(@ptrCast(cs.input.ptr), @intCast(cs.input.len), &pn, &neg));
+
+        // Positive code → emission aborts, but md_parse returns 0.
+        var pos: AbortProbe = .{ .abort_code = 5 };
+        @field(pos, "abort_on_" ++ cs.field) = true;
+        var pp = pos.parser();
+        try std.testing.expectEqual(@as(c_int, 0), md_parse(@ptrCast(cs.input.ptr), @intCast(cs.input.len), &pp, &pos));
+    }
+}
+
+test "no callback abort: md_parse returns 0" {
+    var probe: AbortProbe = .{};
+    var p = probe.parser();
+    const input = "# h\n\npara with *em* and `code`\n\n- list\n";
+    try std.testing.expectEqual(@as(c_int, 0), md_parse(@ptrCast(input), @intCast(input.len), &p, &probe));
 }
 
 test "link label hash + cmp: whitespace & case-fold equivalence" {
