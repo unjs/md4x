@@ -258,10 +258,10 @@ pub fn md_push_container_bytes(ctx: *MD_CTX, ty: c.MD_BLOCKTYPE, start: c_uint, 
 
 // --- component / slot / alert info arrays ------------------------------------
 
-pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg: OFF, name_end: OFF, props_beg: OFF, props_end: OFF, title_beg: OFF, title_end: OFF) c_int {
+pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg: OFF, name_end: OFF, props_beg: OFF, props_end: OFF, title_beg: OFF, title_end: OFF) error{OutOfMemory}!c_int {
     util.growArray(MD_BLOCK_COMPONENT_INFO, &ctx.block_component_info, &ctx.alloc_block_components, ctx.n_block_components, 16) catch {
         md_log(ctx, "realloc() failed.");
-        return -1;
+        return error.OutOfMemory;
     };
 
     const idx = ctx.n_block_components;
@@ -277,10 +277,10 @@ pub fn md_push_block_component_info(ctx: *MD_CTX, colon_count: c_uint, name_beg:
     return idx;
 }
 
-pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) c_int {
+pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) error{OutOfMemory}!c_int {
     util.growArray(MD_SLOT_INFO, &ctx.slot_info, &ctx.alloc_slots, ctx.n_slots, 16) catch {
         md_log(ctx, "realloc() failed.");
-        return -1;
+        return error.OutOfMemory;
     };
 
     const idx = ctx.n_slots;
@@ -290,10 +290,10 @@ pub fn md_push_slot_info(ctx: *MD_CTX, name_beg: OFF, name_end: OFF) c_int {
     return idx;
 }
 
-pub fn md_push_block_alert_info(ctx: *MD_CTX, type_beg: OFF, type_end: OFF) c_int {
+pub fn md_push_block_alert_info(ctx: *MD_CTX, type_beg: OFF, type_end: OFF) error{OutOfMemory}!c_int {
     util.growArray(MD_BLOCK_ALERT_INFO, &ctx.block_alert_info, &ctx.alloc_block_alerts, ctx.n_block_alerts, 16) catch {
         md_log(ctx, "realloc() failed.");
-        return -1;
+        return error.OutOfMemory;
     };
 
     const idx = ctx.n_block_alerts;
@@ -1202,11 +1202,10 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             var name_end: OFF = undefined;
             var slot_end: OFF = undefined;
             if (md_is_slot_opener(ctx, off, &name_beg, &name_end, &slot_end) != 0) {
-                const slot_idx = md_push_slot_info(ctx, name_beg, name_end);
-                if (slot_idx < 0) {
+                const slot_idx = md_push_slot_info(ctx, name_beg, name_end) catch {
                     ret = -1;
                     return ret;
-                }
+                };
 
                 // Close any existing template container within the component.
                 {
@@ -1321,11 +1320,10 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                         while (tmp < ctx.size and ISBLANK(ctx, tmp))
                             tmp += 1;
                         if (tmp >= ctx.size or ISNEWLINE(ctx, tmp)) {
-                            const alert_idx = md_push_block_alert_info(ctx, type_beg, type_end);
-                            if (alert_idx < 0) {
+                            const alert_idx = md_push_block_alert_info(ctx, type_beg, type_end) catch {
                                 ret = -1;
                                 return ret;
-                            }
+                            };
                             ctx.containers[@intCast(last_cont)].is_alert = TRUE;
                             ctx.containers[@intCast(last_cont)].start = @intCast(alert_idx);
                             line.type = .MD_LINE_BLANK;
@@ -1486,11 +1484,10 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             var comp_end: OFF = undefined;
             const colon_count = md_is_block_component_opener(ctx, off, &name_beg, &name_end, &props_beg, &props_end, &title_beg, &title_end, &comp_end);
             if (colon_count > 0) {
-                const comp_idx = md_push_block_component_info(ctx, colon_count, name_beg, name_end, props_beg, props_end, title_beg, title_end);
-                if (comp_idx < 0) {
+                const comp_idx = md_push_block_component_info(ctx, colon_count, name_beg, name_end, props_beg, props_end, title_beg, title_end) catch {
                     ret = -1;
                     return ret;
-                }
+                };
 
                 container.ch = ':';
                 container.is_loose = FALSE;
