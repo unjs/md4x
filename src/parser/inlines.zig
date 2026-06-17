@@ -284,22 +284,22 @@ pub fn md_opener_stack(ctx: *MD_CTX, mark_index: c_int) *MD_MARKSTACK {
     }
 }
 
-// md4x.c ~2651. Grow ctx.marks and return a pointer to the new slot, or null on OOM.
-pub fn md_add_mark(ctx: *MD_CTX) [*c]MD_MARK {
+// md4x.c ~2651. Grow ctx.marks and return a pointer to the new slot, or
+// error.OutOfMemory on allocation failure (the returned pointer is never null).
+pub fn md_add_mark(ctx: *MD_CTX) error{OutOfMemory}![*c]MD_MARK {
     util.growArray(MD_MARK, &ctx.marks, &ctx.alloc_marks, ctx.n_marks, 64) catch {
         md_log(ctx, "realloc() failed.");
-        return null;
+        return error.OutOfMemory;
     };
     const slot = &ctx.marks[@intCast(ctx.n_marks)];
     ctx.n_marks += 1;
     return slot;
 }
 
-// ADD_MARK(ch, beg, end, flags): allocate+init a mark. On OOM sets ret=-1 and
-// signals abort via returning false (caller must `goto abort`).
+// ADD_MARK(ch, beg, end, flags): allocate+init a mark. On OOM returns null so
+// the caller can signal abort (set ret=-1 and `goto abort`).
 pub inline fn addMark(ctx: *MD_CTX, ch: CHAR, beg: OFF, end: OFF, flags: u8) ?[*c]MD_MARK {
-    const mark = md_add_mark(ctx);
-    if (mark == null) return null;
+    const mark = md_add_mark(ctx) catch return null;
     mark.*.beg = beg;
     mark.*.end = end;
     mark.*.prev = -1;
@@ -1023,11 +1023,12 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
             }
 
             {
-                const new_mark = md_add_mark(ctx);
-                if (new_mark == null) {
+                // Grow ctx.marks by one slot; the returned pointer is unused
+                // here (the new slot is populated below via insert_pos).
+                _ = md_add_mark(ctx) catch {
                     ret = -1;
                     return ret;
-                }
+                };
                 if (insert_pos < ctx.n_marks - 1) {
                     const dst = &ctx.marks[@intCast(insert_pos + 1)];
                     const srcp = &ctx.marks[@intCast(insert_pos)];
