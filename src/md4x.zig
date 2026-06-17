@@ -925,19 +925,27 @@ test "OOM: arena_alloc/realloc/free roundtrip + injected failure" {
 }
 
 test "OOM: full md_parse sweep is crash- and leak-free under FailingAllocator" {
-    // A document that exercises the ctx.alloc-routed arenas: link reference
+    // A document that exercises every ctx.alloc-routed allocation: link reference
     // definitions (ref_defs array + ref_def_hashtable + a duplicate to walk the
-    // bucket path), headings/paragraphs/lists/code (block_bytes), and emphasis
-    // (marks). std.testing.allocator flags any leak; FailingAllocator turns each
-    // successive internal allocation into OOM so every abort/cleanup path runs.
+    // bucket path), headings/paragraphs/lists/code (block_bytes), emphasis
+    // (marks), a table (pipe_offs + align_arr scratch), a fenced code block with
+    // filename + highlight metadata (md_build_attribute info/lang/filename +
+    // meta_buf/meta_copy), an inline link title with an entity (md_build_attribute
+    // non-trivial path), and inline/block components with attributes. std.testing.
+    // allocator flags any leak; FailingAllocator turns each successive internal
+    // allocation into OOM so every abort/cleanup path runs.
     const src =
         "[a]: /x \"t\"\n[b]: /y\n[a]: /dup\n\n" ++
         "# Heading *em* `c`\n\nParagraph linking [a] and [b] with **strong**.\n\n" ++
-        "- one\n- two\n  - nested\n\n```js\ncode line\n```\n\n> quote\n";
+        "A [titled](/u \"a &amp; b\") link and :badge[New]{color=\"blue\" #id .cls}.\n\n" ++
+        "| a | b |\n|:--|--:|\n| 1 | 2 |\n| 3 | 4 |\n\n" ++
+        "```js [app.js] {1-2,4} extra\ncode line\nmore code\n```\n\n" ++
+        "::alert{type=\"info\"}\nNested **content** here.\n::\n\n" ++
+        "- one\n- two\n  - nested\n\n> quote\n";
     var probe: AbortProbe = .{};
     var p = probe.parser();
     var fail: usize = 0;
-    while (fail < 400) : (fail += 1) {
+    while (fail < 900) : (fail += 1) {
         var fa = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail });
         const ret = md_parse_impl(fa.allocator(), @ptrCast(src.ptr), @intCast(src.len), &p, &probe);
         // Either a clean parse (0) or a graceful OOM abort (-1) — never a crash,

@@ -143,7 +143,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
     }
 
     const n: c_int = ctx.n_table_cell_boundaries + 2;
-    pipe_offs = @ptrCast(@alignCast(std.c.malloc(@as(usize, @intCast(n)) * @sizeOf(OFF))));
+    pipe_offs = util.alloc_array_a(OFF, ctx.alloc, @intCast(n));
     if (pipe_offs == null) {
         ctx.log("malloc() failed.");
         ctx.table_cell_boundaries_head = -1;
@@ -166,7 +166,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
     // Process cells.
     ret = mdEnterBlock(ctx, c.MD_BLOCK_TR, null);
     if (ret != 0) {
-        std.c.free(pipe_offs);
+        util.free_array_a(OFF, ctx.alloc, pipe_offs, @intCast(n));
         ctx.table_cell_boundaries_head = -1;
         ctx.table_cell_boundaries_tail = -1;
         return ret;
@@ -179,7 +179,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
                 ret = md_process_table_cell(ctx, cell_type, align_arr[@intCast(k)], pipe_offs[@intCast(i)], pipe_offs[@intCast(i + 1)] - 1);
                 k += 1;
                 if (ret < 0) {
-                    std.c.free(pipe_offs);
+                    util.free_array_a(OFF, ctx.alloc, pipe_offs, @intCast(n));
                     ctx.table_cell_boundaries_head = -1;
                     ctx.table_cell_boundaries_tail = -1;
                     return ret;
@@ -193,7 +193,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
         ret = md_process_table_cell(ctx, cell_type, align_arr[@intCast(k)], 0, 0);
         k += 1;
         if (ret < 0) {
-            std.c.free(pipe_offs);
+            util.free_array_a(OFF, ctx.alloc, pipe_offs, @intCast(n));
             ctx.table_cell_boundaries_head = -1;
             ctx.table_cell_boundaries_tail = -1;
             return ret;
@@ -201,7 +201,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
     }
     ret = mdLeaveBlock(ctx, c.MD_BLOCK_TR, null);
 
-    std.c.free(pipe_offs);
+    util.free_array_a(OFF, ctx.alloc, pipe_offs, @intCast(n));
     ctx.table_cell_boundaries_head = -1;
     ctx.table_cell_boundaries_tail = -1;
     return ret;
@@ -212,7 +212,7 @@ pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: []
     var align_arr: [*c]c.MD_ALIGN = null;
     var ret: c_int = 0;
 
-    align_arr = @ptrCast(@alignCast(std.c.malloc(@as(usize, @intCast(col_count)) * @sizeOf(c.MD_ALIGN))));
+    align_arr = util.alloc_array_a(c.MD_ALIGN, ctx.alloc, @intCast(col_count));
     if (align_arr == null) {
         ctx.log("malloc() failed.");
         return -1;
@@ -222,42 +222,42 @@ pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: []
 
     ret = mdEnterBlock(ctx, c.MD_BLOCK_THEAD, null);
     if (ret != 0) {
-        std.c.free(align_arr);
+        util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
         return ret;
     }
     ret = md_process_table_row(ctx, c.MD_BLOCK_TH, lines[0].beg, lines[0].end, align_arr, col_count);
     if (ret < 0) {
-        std.c.free(align_arr);
+        util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
         return ret;
     }
     ret = mdLeaveBlock(ctx, c.MD_BLOCK_THEAD, null);
     if (ret != 0) {
-        std.c.free(align_arr);
+        util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
         return ret;
     }
 
     if (lines.len > 2) {
         ret = mdEnterBlock(ctx, c.MD_BLOCK_TBODY, null);
         if (ret != 0) {
-            std.c.free(align_arr);
+            util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
             return ret;
         }
         var line_index: MD_SIZE = 2;
         while (line_index < lines.len) : (line_index += 1) {
             ret = md_process_table_row(ctx, c.MD_BLOCK_TD, lines[line_index].beg, lines[line_index].end, align_arr, col_count);
             if (ret < 0) {
-                std.c.free(align_arr);
+                util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
                 return ret;
             }
         }
         ret = mdLeaveBlock(ctx, c.MD_BLOCK_TBODY, null);
         if (ret != 0) {
-            std.c.free(align_arr);
+            util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
             return ret;
         }
     }
 
-    std.c.free(align_arr);
+    util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
     return ret;
 }
 
@@ -498,7 +498,8 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
         // Build meta from remaining text (exclude [..] and {..} regions).
         {
             var meta_len: SZ = 0;
-            const meta_buf: [*c]CHAR = @ptrCast(@alignCast(std.c.malloc(@as(usize, end - rest_beg + 1) * @sizeOf(CHAR))));
+            const meta_cap: usize = @as(usize, end - rest_beg) + 1;
+            const meta_buf: [*c]CHAR = util.alloc_array_a(CHAR, ctx.alloc, meta_cap);
             if (meta_buf == null) {
                 ctx.log("malloc() failed.");
                 return -1;
@@ -535,9 +536,9 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
             }
 
             if (meta_len > 0) {
-                const meta_copy: [*c]CHAR = @ptrCast(@alignCast(std.c.malloc(@as(usize, meta_len + 1) * @sizeOf(CHAR))));
+                const meta_copy: [*c]CHAR = util.alloc_array_a(CHAR, ctx.alloc, @as(usize, meta_len) + 1);
                 if (meta_copy == null) {
-                    std.c.free(meta_buf);
+                    util.free_array_a(CHAR, ctx.alloc, meta_buf, meta_cap);
                     ctx.log("malloc() failed.");
                     return -1;
                 }
@@ -547,7 +548,7 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
                 det.meta_size = @intCast(meta_len);
             }
 
-            std.c.free(meta_buf);
+            util.free_array_a(CHAR, ctx.alloc, meta_buf, meta_cap);
         }
     }
 
@@ -589,7 +590,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
                     md_free_attribute(ctx, &info_build);
                     md_free_attribute(ctx, &lang_build);
                     md_free_attribute(ctx, &filename_build);
-                    std.c.free(@ptrCast(@constCast(det.code.meta)));
+                    util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
                     std.c.free(@ptrCast(@constCast(det.code.highlights)));
                     return ret;
                 }
@@ -610,7 +611,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
                 md_free_attribute(ctx, &info_build);
                 md_free_attribute(ctx, &lang_build);
                 md_free_attribute(ctx, &filename_build);
-                std.c.free(@ptrCast(@constCast(det.code.meta)));
+                util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
                 std.c.free(@ptrCast(@constCast(det.code.highlights)));
             }
             return ret;
@@ -635,7 +636,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
             md_free_attribute(ctx, &info_build);
             md_free_attribute(ctx, &lang_build);
             md_free_attribute(ctx, &filename_build);
-            std.c.free(@ptrCast(@constCast(det.code.meta)));
+            util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
             std.c.free(@ptrCast(@constCast(det.code.highlights)));
         }
         return ret;
@@ -648,7 +649,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
                 md_free_attribute(ctx, &info_build);
                 md_free_attribute(ctx, &lang_build);
                 md_free_attribute(ctx, &filename_build);
-                std.c.free(@ptrCast(@constCast(det.code.meta)));
+                util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
                 std.c.free(@ptrCast(@constCast(det.code.highlights)));
             }
             return ret;
@@ -659,7 +660,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
         md_free_attribute(ctx, &info_build);
         md_free_attribute(ctx, &lang_build);
         md_free_attribute(ctx, &filename_build);
-        std.c.free(@ptrCast(@constCast(det.code.meta)));
+        util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
         std.c.free(@ptrCast(@constCast(det.code.highlights)));
     }
     return ret;

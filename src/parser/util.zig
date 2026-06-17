@@ -500,6 +500,10 @@ pub const MD_ATTRIBUTE_BUILD = struct {
     substr_offsets: [*c]OFF = null,
     substr_count: c_int = 0,
     substr_alloc: c_int = 0,
+    // Exact element count owned by `text` (the decoded-text buffer), so it can be
+    // freed through ctx.alloc (PLAN C). 0 when `text` is borrowed (trivial path)
+    // or unset; md_free_attribute only frees `text` when this is > 0.
+    text_alloc: usize = 0,
     trivial_types: [1]c.MD_TEXTTYPE = .{0},
     trivial_offsets: [2]OFF = .{ 0, 0 },
 };
@@ -508,15 +512,15 @@ pub const MD_BUILD_ATTR_NO_ESCAPES: c_uint = 0x0001;
 
 pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, ttype: c.MD_TEXTTYPE, off: OFF) error{OutOfMemory}!void {
     if (build.substr_count >= build.substr_alloc) {
+        const old_alloc: usize = @intCast(build.substr_alloc);
         build.substr_alloc = if (build.substr_alloc > 0)
             build.substr_alloc + @divTrunc(build.substr_alloc, 2)
         else
             8;
         const alloc_u: usize = @intCast(build.substr_alloc);
 
-        // realloc substr_types.
-        // realloc substr_types (libc realloc tracks the old block's size).
-        const new_types = c_realloc_array(c.MD_TEXTTYPE, build.substr_types, alloc_u);
+        // realloc substr_types (routed through ctx.alloc; exact old length passed).
+        const new_types = realloc_array_a(c.MD_TEXTTYPE, ctx.alloc, build.substr_types, old_alloc, alloc_u);
         if (new_types == null) {
             ctx.log("realloc() failed.");
             return error.OutOfMemory;
@@ -524,7 +528,8 @@ pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, tty
         build.substr_types = new_types;
 
         // realloc substr_offsets (+1 for final offset == raw_size).
-        const new_offsets = c_realloc_array(OFF, build.substr_offsets, alloc_u + 1);
+        const old_off_alloc: usize = if (old_alloc > 0) old_alloc + 1 else 0;
+        const new_offsets = realloc_array_a(OFF, ctx.alloc, build.substr_offsets, old_off_alloc, alloc_u + 1);
         if (new_offsets == null) {
             ctx.log("realloc() failed.");
             return error.OutOfMemory;
@@ -538,16 +543,17 @@ pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, tty
 }
 
 pub fn md_free_attribute(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD) void {
-    _ = ctx;
     if (build.substr_alloc > 0) {
-        if (build.text != null) std.c.free(build.text);
-        if (build.substr_types != null) std.c.free(build.substr_types);
-        if (build.substr_offsets != null) std.c.free(build.substr_offsets);
+        const types_n: usize = @intCast(build.substr_alloc);
+        free_array_a(CHAR, ctx.alloc, build.text, build.text_alloc);
+        free_array_a(c.MD_TEXTTYPE, ctx.alloc, build.substr_types, types_n);
+        free_array_a(OFF, ctx.alloc, build.substr_offsets, types_n + 1);
         // Reset so a second call is a safe no-op. md_build_attribute() frees the
         // build itself on an OOM mid-build and returns -1; callers then also free
         // it in their error cleanup, which would otherwise double-free. (Idempotent
         // free; only reachable under heap-allocation failure. Original C lacked this.)
         build.text = null;
+        build.text_alloc = 0;
         build.substr_types = null;
         build.substr_offsets = null;
         build.substr_alloc = 0;
@@ -583,13 +589,14 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
         build.trivial_offsets[1] = raw_size;
         off = raw_size;
     } else {
-        const buf = c_malloc_array(CHAR, raw_size);
+        const buf = alloc_array_a(CHAR, ctx.alloc, raw_size);
         if (buf == null) {
             ctx.log("malloc() failed.");
             md_free_attribute(ctx, build);
             return error.OutOfMemory;
         }
         build.text = buf;
+        build.text_alloc = raw_size;
 
         raw_off = 0;
         off = 0;
@@ -773,4 +780,27 @@ pub fn arena_free(alloc: std.mem.Allocator, old: ?*anyopaque, old_len: usize) vo
     const op = old orelse return;
     if (old_len == 0) return;
     alloc.free(@as([*]align(16) u8, @ptrCast(@alignCast(op)))[0..old_len]);
+}
+
+// Typed-array variants of the same idea (PLAN C): `malloc`/`realloc`/`free`-shaped
+// over a std.mem.Allocator but keeping the `[*c]T` element-pointer shape that the
+// C ABI buffers need (e.g. MD_ATTRIBUTE's `substr_types`/`substr_offsets`/`text`).
+// Mirror c_malloc_array/c_realloc_array semantics (return `[*c]T`, null on OOM,
+// old block kept on realloc OOM) but track the exact element count so the std
+// allocators can free/validate them — letting a FailingAllocator reach these.
+pub fn alloc_array_a(comptime T: type, alloc: std.mem.Allocator, count: usize) [*c]T {
+    if (count == 0) return null;
+    const slice = alloc.alloc(T, count) catch return null;
+    return slice.ptr;
+}
+
+pub fn realloc_array_a(comptime T: type, alloc: std.mem.Allocator, old: [*c]T, old_count: usize, new_count: usize) [*c]T {
+    if (old == null) return alloc_array_a(T, alloc, new_count);
+    const old_slice = old[0..old_count];
+    const new_slice = alloc.realloc(old_slice, new_count) catch return null;
+    return new_slice.ptr;
+}
+
+pub fn free_array_a(comptime T: type, alloc: std.mem.Allocator, old: [*c]T, count: usize) void {
+    if (old != null and count > 0) alloc.free(old[0..count]);
 }

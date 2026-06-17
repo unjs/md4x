@@ -19,16 +19,22 @@ Phases 0–2 and the selected Phase 3 work, plus these §8 leftovers:
   `n_*`/`alloc_*` field and all 8 `util.growArray` call sites gone.
 - **§8.3** (partial) — Unicode classifiers + `ISUNICODE*` wrappers → `bool`.
 - **§8.5** — injectable `ctx.alloc` + `FailingAllocator` OOM native tests.
-- **§C (fuller OOM matrix, partial)** — the three raw byte arenas (`block_bytes`,
-  the ref-def hashtable array, and the `MD_REF_DEF_LIST` buckets) now allocate
-  through `ctx.alloc` via the `util.arena_alloc`/`arena_realloc`/`arena_free`
-  helpers; `md_parse` split into `md_parse_impl(alloc, …)` + a full-parse
-  `FailingAllocator` sweep test (`zig build test` = 14/14, Debug + ReleaseFast).
-  This surfaced and fixed a latent cleanup-ordering UB (hashtable freed after
-  `ref_defs`; see CHANGELOG Fixes). **Remaining:** `md_build_attribute`'s typed
-  buffers and the per-row scratch buffers in `process.zig` (`pipe_offs`,
-  `align_arr`, code-meta) still use raw `std.c.malloc` — they need per-buffer
-  length tracking before they can route through `ctx.alloc`.
+- **§C (fuller OOM matrix, mostly done)** — the three raw byte arenas
+  (`block_bytes`, the ref-def hashtable array, and the `MD_REF_DEF_LIST` buckets)
+  route through `ctx.alloc` via `util.arena_alloc`/`arena_realloc`/`arena_free`;
+  the typed buffers — `md_build_attribute`'s `text`/`substr_types`/
+  `substr_offsets` (length now recorded in `MD_ATTRIBUTE_BUILD.text_alloc` +
+  `substr_alloc`) and `process.zig`'s per-row scratch (`pipe_offs`, `align_arr`)
+  - code-block `meta_buf`/`meta_copy` (`det.code.meta`) — route through the new
+    `util.alloc_array_a`/`realloc_array_a`/`free_array_a` typed helpers. `md_parse`
+    split into `md_parse_impl(alloc, …)` + a full-parse `FailingAllocator` sweep
+    (now covering ref-defs, table, code-meta, link-title-with-entity, and component
+    paths; `zig build test` = 14/14, Debug + ReleaseFast). This work surfaced and
+    fixed a latent cleanup-ordering UB (hashtable freed after `ref_defs`; see
+    CHANGELOG Fixes). **Remaining:** only `md_parse_highlights`'s `det.code.highlights`
+    array — it keeps a power-of-two capacity ≠ `highlight_count`, and the ABI detail
+    struct has no capacity field, so routing it needs a shrink-to-fit (with an OOM
+    edge) before the allocator can free it by exact length.
 - **§8.7** (partial) — ctx-first `ISxxx(ctx,off)` char-class predicates → `MD_CTX` methods (`ctx.isWhitespace(off)`, …).
 - **§8.8** (partial) — dropped `MD_LINETYPE`'s explicit `c_int` backing.
 - **§8.9** — corrected the stale AST-renderer "union safety" premise (the C-union footgun was already designed out: flat `Detail` struct + arena; **do not** convert to `union(enum)`).
@@ -97,15 +103,20 @@ tracking upstream md4c.
 
 ### C. Lower-value / out of original scope (safe, but modest payoff)
 
-- **Fuller OOM matrix (extends §8.5/§8.1) — partially landed.** The three byte
-  arenas (`block_bytes`, `ref_def_hashtable`, `MD_REF_DEF_LIST` buckets) are done
-  (see Done above). **Still raw `std.c.malloc`:** `md_build_attribute`'s typed
-  buffers (`text`/`substr_types`/`substr_offsets` — need their lengths recorded
-  in `MD_ATTRIBUTE_BUILD` so the Allocator can free them) and the per-row scratch
-  buffers in `process.zig` (`pipe_offs`, `align_arr`, code-block `meta`). Same
-  arena-helper / exact-length pattern; each is short-lived and self-contained.
-  When done, extend the `md_parse` `FailingAllocator` sweep input to a table +
-  fenced code with metadata + a component with attrs so those paths are covered.
+- **Fuller OOM matrix (extends §8.5/§8.1) — nearly complete.** The three byte
+  arenas + `md_build_attribute`'s typed buffers + `process.zig`'s `pipe_offs`/
+  `align_arr`/`meta_buf`/`meta_copy` are done (see Done above), and the sweep
+  input now covers table/code-meta/link-title/component paths. **Only remaining:**
+  `md_parse_highlights` (`det.code.highlights`). Plan: pass `ctx` in, grow the
+  `c_uint` array via `realloc_array_a`, then **shrink-to-fit to `count`** at the
+  end so the freed length equals the stored `highlight_count` (the ABI struct has
+  no capacity field). Handle the shrink's OOM edge: a failed shrink must keep the
+  array usable AND keep the free length correct (e.g. only adopt the shrunk
+  pointer when realloc succeeds, and free by `count` only once shrunk — otherwise
+  free by the tracked capacity). Then add a highlights case to the sweep.
+  Other raw `std.c.malloc` buffers still outside this matrix: `ctx.buffer` (the
+  `md_temp_buffer` scratch, grows via `util.c_realloc_array`, freed via
+  `std.c.free` with `alloc_buffer` known) — a trivial follow-on if desired.
 - **Renderers (§8.9):** `html`/`ansi`/`text`/`meta`/`markdown` + shared
   `md4x-props.zig`/`md4x-json.zig` still use `c_int` returns, `[*c]` buffers, and
   manual `malloc`/`realloc`; the growArray/error-union/slice/ArrayList treatment
@@ -125,14 +136,14 @@ tracking upstream md4c.
 
 ## Suggested next step
 
-If continuing autonomously, **finish the "fuller OOM matrix"** — the three byte
-arenas are landed; what's left is routing `md_build_attribute`'s typed buffers and
-`process.zig`'s per-row scratch buffers through `ctx.alloc` (record their lengths
-first), then widening the `md_parse` `FailingAllocator` sweep input to cover the
-table / code-meta / component-attr paths. Same fuzz-gated per-buffer pattern; no
-engine-logic or upstream-grep changes. Run the verification gate in **both Debug
-and ReleaseFast** (`zig build test -Doptimize=Debug`) — Debug's `undefined`-fill +
-allocator length validation is what catches the cleanup-ordering / length-tracking
-bugs this class is prone to (it found one already). Everything else remaining is
+If continuing autonomously, **finish the last "fuller OOM matrix" buffer** —
+`md_parse_highlights`'s `det.code.highlights` (see §C for the shrink-to-fit plan
+and its OOM edge), then add a highlights case to the `md_parse` `FailingAllocator`
+sweep. Optionally also route the trivial `ctx.buffer` (`md_temp_buffer`) scratch.
+Same fuzz-gated per-buffer pattern; no engine-logic or upstream-grep changes. Run
+the verification gate in **both Debug and ReleaseFast** (`zig build test
+-Doptimize=Debug`) — Debug's `undefined`-fill + allocator length validation is what
+catches the length-tracking / cleanup-ordering bugs this class is prone to (it
+found one already). After that, the matrix is exhausted and everything remaining is
 either an **owner judgment call (A)** or needs **deliberate, human-reviewed
-design (B)**.
+design (B)** — at which point the autonomous loop should wind down.
