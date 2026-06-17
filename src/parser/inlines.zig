@@ -1686,10 +1686,10 @@ pub fn md_analyze_marks(ctx: *MD_CTX, lines: [*c]const MD_LINE, n_lines: MD_SIZE
 }
 
 // md4x.c ~4410.
-pub fn md_push_inline_attr(ctx: *MD_CTX, closer_index: c_int, attrs_beg: OFF, attrs_end: OFF) c_int {
+pub fn md_push_inline_attr(ctx: *MD_CTX, closer_index: c_int, attrs_beg: OFF, attrs_end: OFF) error{OutOfMemory}!void {
     util.growArray(MD_INLINE_ATTR_INFO, &ctx.inline_attrs, &ctx.alloc_inline_attrs, ctx.n_inline_attrs, 8) catch {
         md_log(ctx, "realloc() failed.");
-        return -1;
+        return error.OutOfMemory;
     };
     ctx.inline_attrs[@intCast(ctx.n_inline_attrs)] = .{
         .closer_index = closer_index,
@@ -1698,7 +1698,6 @@ pub fn md_push_inline_attr(ctx: *MD_CTX, closer_index: c_int, attrs_beg: OFF, at
         .skip_end = attrs_end + 1,
     };
     ctx.n_inline_attrs += 1;
-    return 0;
 }
 
 // md4x.c ~4436.
@@ -1718,8 +1717,6 @@ pub fn md_find_inline_attr(ctx: *MD_CTX, closer_index: c_int, raw: *[*c]const CH
 
 // md4x.c ~4454.
 pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
-    var ret: c_int = 0;
-
     if (ctx.parser.flags & c.MD_FLAG_ATTRIBUTES == 0) return 0;
 
     ctx.n_inline_attrs = 0;
@@ -1754,13 +1751,12 @@ pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
         if (depth != 0) continue;
 
         const attrs_beg = mark.end + 1;
-        ret = md_push_inline_attr(ctx, i, attrs_beg, scan - 1);
-        if (ret != 0) return ret;
+        md_push_inline_attr(ctx, i, attrs_beg, scan - 1) catch return -1;
 
         if (mark.ch != '*' and mark.ch != '_') mark.end = scan;
     }
 
-    return ret;
+    return 0;
 }
 
 // md4x.c ~4538.

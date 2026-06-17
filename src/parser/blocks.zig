@@ -816,15 +816,14 @@ pub fn md_is_container_compatible(pivot_p: [*c]const MD_CONTAINER, container_p: 
     return TRUE;
 }
 
-pub fn md_push_container(ctx: *MD_CTX, container: *const MD_CONTAINER) c_int {
+pub fn md_push_container(ctx: *MD_CTX, container: *const MD_CONTAINER) error{OutOfMemory}!void {
     util.growArray(MD_CONTAINER, &ctx.containers, &ctx.alloc_containers, ctx.n_containers, 16) catch {
         md_log(ctx, "realloc() failed.");
-        return -1;
+        return error.OutOfMemory;
     };
 
     ctx.containers[@intCast(ctx.n_containers)] = container.*;
     ctx.n_containers += 1;
-    return 0;
 }
 
 pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
@@ -1240,8 +1239,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 }
 
                 n_children += 1;
-                ret = md_push_container(ctx, &container);
-                if (ret < 0) return ret;
+                md_push_container(ctx, &container) catch return -1;
 
                 off = slot_end;
                 line.type = .MD_LINE_BLANK;
@@ -1506,8 +1504,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 }
 
                 n_children += 1;
-                ret = md_push_container(ctx, &container);
-                if (ret < 0) return ret;
+                md_push_container(ctx, &container) catch return -1;
                 ctx.block_component_nesting += 1;
 
                 off = comp_end;
@@ -1556,8 +1553,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 }
 
                 n_children += 1;
-                ret = md_push_container(ctx, &container);
-                if (ret < 0) return ret;
+                md_push_container(ctx, &container) catch return -1;
                 continue :classify;
             }
         }
