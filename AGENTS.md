@@ -33,6 +33,7 @@ src/
   entity.h             # Entity header (C ABI, retained)
   md4x-wasm.zig        # WASM exports (alloc/free + renderer wrappers)
   md4x-napi.zig        # Node.js NAPI addon (module registration + renderer wrappers)
+  fuzz.zig             # Zig-native coverage-instrumented fuzz harness (zig build fuzz-zig --fuzz)
   renderers/
     md4x-props.zig     # Shared component property parser (Zig module)
     md4x-json.zig      # Shared JSON writer + YAML-to-JSON helpers (Zig module)
@@ -179,6 +180,23 @@ The HTML-diff suites cannot express parser-internal behavior (e.g. SAX callback 
 Test suites: `spec.txt`, `spec-tables.txt`, `spec-strikethrough.txt`, `spec-tasklists.txt`, `spec-wiki-links.txt`, `spec-latex-math.txt`, `spec-permissive-autolinks.txt`, `spec-hard-soft-breaks.txt`, `spec-underline.txt`, `spec-frontmatter.txt`, `spec-components.txt`, `spec-attributes.txt`, `spec-alerts.txt`, `spec-markdown.txt`, `regressions.txt`, `coverage.txt`
 
 ## Fuzzing
+
+Two complementary harness sets:
+
+1. **C/libFuzzer harnesses** (`test/fuzzers/`) — drive the public C ABI through prebuilt static libs under ASan/UBSan. Strong memory-error/UB detection, but **no coverage feedback on the Zig library**: `zig build-obj` emits no SanitizerCoverage tables, so libFuzzer only "sees" the C harness + libyaml (documented in `test/fuzzers/build.sh`).
+2. **Zig-native harness** (`src/fuzz.zig`, `zig build fuzz-zig`) — `@import`s the parser + renderer sources directly so Zig's own fuzzer instruments the library and steers inputs by **real coverage of the Zig internals**. No ASan/UBSan; relies on Zig runtime safety checks (the artifact is built `ReleaseSafe`). Use it alongside the C harnesses, not as a replacement.
+
+### Zig-native harness (`zig build fuzz-zig`)
+
+```sh
+zig build fuzz-zig                 # smoke-run: exercise each harness once (+ parser unit tests)
+zig build fuzz-zig --fuzz          # coverage-guided fuzzing (serves a local web UI)
+zig build fuzz-zig --fuzz -- md_html   # fuzz a single named test
+```
+
+Covers the same surface as the C harnesses: `md_parse` (parser-only, no-op SAX callbacks), the six renderers (`md_html`, `md_ast`, `md_ansi`, `md_text`, `md_meta`, `md_markdown`), and `md_heal`. Inputs are gated to valid, NUL-free UTF-8 (same contract as the C harnesses and the JS binding surface). libyaml is linked for the html/ast/meta paths but, like in the C harnesses, is not instrumented.
+
+### C/libFuzzer harnesses (`test/fuzzers/`)
 
 LibFuzzer harnesses for all renderers and the heal utility. Requires clang with LibFuzzer and libyaml.
 
