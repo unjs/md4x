@@ -293,14 +293,16 @@ Run the verification gate after any internal change: `bash scripts/diff-corpus.s
 must diff-clean against the baseline, plus `zig build test`, the spec suites, and
 the fuzzers (see Testing / Fuzzing).
 
-### AST Renderer: Union Safety with Dynamic Components
+### AST Renderer: Dynamic-Component Dispatch (formerly "Union Safety")
 
-The AST renderer (`md4x-ast.c`) uses a `JSON_NODE` struct with a C union for type-specific detail data. **Dynamic components** (`tag_is_dynamic = 1`) always use `detail.component` and have a heap-allocated tag name. Since a user can create a component with any name (e.g. `::alert{...}`, `::pre{...}`, `::a{...}`), the tag name may collide with built-in static tags.
+> **Zig-port note (current):** The Zig AST renderer (`src/renderers/md4x-ast.zig`) has **structurally retired** the two memory-safety failure modes below. `JsonNode.detail` is a **flat `Detail` struct** (one field per variant — see `md4x-ast.zig:107`), so union type-confusion is impossible. The node tree is **arena-allocated** (`JsonCtx.arena`; built during parse, serialized once, freed wholesale), so `jsonNodeFree` is a deliberate **no-op** (`md4x-ast.zig:226`) — there is no per-node free, hence no double-free. **The dispatch-order rule still applies for correctness:** `jsonWriteProps` / `jsonSerializeNode` check `tag_is_dynamic` (and switch on `tag_kind`) **before** any built-in-tag handling, so a dynamic component whose name collides with a built-in tag is still serialized via the component path (otherwise it reads the wrong flat-struct field). Do **not** "modernize" this into a `union(enum)`: that would reintroduce a discriminant to keep in sync, regressing the safety the flat struct already guarantees.
 
-**Critical rule:** In `json_node_free`, `json_write_props`, and `json_serialize_node`, always check `node->tag_is_dynamic` **before** any `strcmp(node->tag, ...)` dispatch. If dynamic, use the component code path exclusively — never fall through to static tag handlers. Violating this causes:
+The historical C description (still accurate for the original `md4x-ast.c`): a `JSON_NODE` struct with a C **union** for type-specific detail data. **Dynamic components** (`tag_is_dynamic = 1`) always use `detail.component` and have a heap-allocated tag name. Since a user can create a component with any name (e.g. `::alert{...}`, `::pre{...}`, `::a{...}`), the tag name may collide with built-in static tags.
 
-1. **Double-free** — `json_node_free` frees the same union pointer via both the static tag cleanup and the dynamic cleanup (heap corruption, OOB in WASM)
-2. **Wrong serialization** — `json_write_props` reads the union as the wrong type (e.g. interprets `raw_props` pointer as `alert.type_name`)
+**Critical rule (C version):** In `json_node_free`, `json_write_props`, and `json_serialize_node`, always check `node->tag_is_dynamic` **before** any `strcmp(node->tag, ...)` dispatch. If dynamic, use the component code path exclusively — never fall through to static tag handlers. Violating this causes:
+
+1. **Double-free** — `json_node_free` frees the same union pointer via both the static tag cleanup and the dynamic cleanup (heap corruption, OOB in WASM). _(N/A in the Zig port: arena alloc, no per-node free.)_
+2. **Wrong serialization** — `json_write_props` reads the union as the wrong type (e.g. interprets `raw_props` pointer as `alert.type_name`). _(In the Zig port this surfaces as reading the wrong flat-struct field — still prevented by the `tag_is_dynamic`-first rule.)_
 
 ### Memory Safety Patterns (Common Bug Classes)
 
@@ -310,7 +312,7 @@ Based on past bugs found via fuzzing. **Check these patterns when modifying C co
 
 2. **Stale pointers after realloc** — Never cache pointers into growable buffers (`buf->data`, `ctx->comp_info`, etc.) across calls that may reallocate. Assign results immediately after each `realloc` before doing the next one. A double-realloc sequence where the first succeeds and the second fails can cause double-free if intermediate results aren't stored.
 
-3. **Union type confusion with dynamic components** — See "AST Renderer: Union Safety" above. Always check `tag_is_dynamic` before `strcmp(node->tag, ...)`. This is the project's most recurring bug class.
+3. **Union type confusion with dynamic components** — See "AST Renderer: Dynamic-Component Dispatch" above. Historically the project's most recurring bug class in the C renderer. In the Zig port it is **structurally prevented** (flat `Detail` struct + arena alloc), but the `tag_is_dynamic`-first dispatch rule is still required for correct serialization — always resolve `tag_is_dynamic` / `tag_kind` before any built-in-tag handling.
 
 4. **Unbalanced SAX callbacks** — Renderers must be defensive against unbalanced `enter`/`leave` callbacks from the parser. Always guard state transitions (stack pops, counter decrements) with the correct type check. Handle NULL `ctx->current` / stack underflow gracefully. Example: `json_leave_span` must only decrement `image_nesting` for `MD_SPAN_IMG`, not all span types.
 

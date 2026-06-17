@@ -545,15 +545,27 @@ from the C header via `@cImport`). It is internal-only (lives solely in the plai
 The plan targeted the parser. The renderers (`src/renderers/md4x-*.zig`) were
 ported faithfully and remain C-flavored:
 
-- **AST renderer (`md4x-ast.zig`)**: `JSON_NODE` uses a **C `union` + a
-  `tag_is_dynamic` discriminant** — exactly the footgun AGENTS.md devotes a whole
-  "Union Safety" section to. A Zig **tagged union** (`union(enum)`) would make the
-  discriminant intrinsic and delete that entire bug class (double-free / union
-  misread). High-value, self-contained, but a real refactor of the AST builder.
-- Renderers still use `c_int` return codes, `[*c]` buffers, and manual
-  `malloc`/`realloc` with the same patterns 2.1/2.2 addressed in the parser; the
-  growArray/error-union/slice treatment could be extended to them.
-- The shared `md4x-props.zig` / `md4x-json.zig` modules likewise.
+- **AST renderer (`md4x-ast.zig`)**: ~~`JSON_NODE` uses a C `union` + a
+  `tag_is_dynamic` discriminant … a Zig tagged union would delete that bug
+  class.~~ **Stale premise — already resolved during the port (verified).** The
+  Zig AST renderer does **not** use a union: `JsonNode.detail` is a _flat_
+  `Detail` struct (one field per variant, see `md4x-ast.zig:107`), so union
+  type-confusion is structurally impossible. The node tree is **arena-allocated**
+  (`JsonCtx.arena`, single lifetime, serialized once, freed wholesale), so
+  `jsonNodeFree` is a deliberate **no-op** (`md4x-ast.zig:226`) — the
+  `json_node_free` double-free / heap-corruption class from the C version cannot
+  occur. Dispatch is a `tag_kind` enum `switch` with `tag_is_dynamic` checked
+  first (still required for correct _field selection_ / serialization, not for
+  memory safety). **Do NOT convert to `union(enum)`**: it would reintroduce a
+  discriminant that must stay in sync with `tag_kind`/`tag_is_dynamic` — a
+  regression against the safety goal — for a negligible memory gain on small
+  arena nodes. (AGENTS.md "Union Safety" updated to match.)
+- The OTHER renderers (`html`/`ansi`/`text`/`meta`/`markdown`) and the shared
+  `md4x-props.zig` / `md4x-json.zig` modules still use `c_int` return codes,
+  `[*c]` buffers, and manual `malloc`/`realloc`; the growArray/error-union/slice
+  treatment could be extended to them. Lower value — these were "NOT covered by
+  the original plan" — and the AST renderer already moved to an arena + Zig
+  allocator, so it is **not** part of this leftover.
 
 ### 8.10 Misc smaller items spotted
 
