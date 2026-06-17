@@ -77,6 +77,33 @@ const JsonNodeKind = enum(c_int) {
     text,
 };
 
+// Classifies the built-in tag for fast switch-based dispatch (replaces strcmp
+// chains in jsonWriteProps / jsonSerializeNode / isLeafContainerTag). Set once
+// at node creation. `dynamic` is for user components (tag_is_dynamic), `comment`
+// for [null,{}] comment nodes, `other` for anything not needing special dispatch
+// (em, strong, blockquote, headings, p, hr, ...).
+const TagKind = enum {
+    dynamic,
+    comment,
+    other,
+    pre,
+    a,
+    img,
+    wikilink,
+    template,
+    alert,
+    ol,
+    ul,
+    li,
+    th,
+    td,
+    code,
+    math,
+    math_display,
+    html_block,
+    frontmatter,
+};
+
 // Detail variants. The C version uses a union; since every dispatch checks the
 // tag (and tag_is_dynamic first), a flat struct produces identical output while
 // avoiding union type-confusion entirely. Dynamic components only ever touch the
@@ -126,6 +153,8 @@ const Detail = struct {
 const JsonNode = struct {
     kind: JsonNodeKind,
     tag: ?[*:0]const u8 = null,
+    // Classification of the built-in tag for switch-based dispatch.
+    tag_kind: TagKind = .other,
 
     first_child: ?*JsonNode = null,
     last_child: ?*JsonNode = null,
@@ -146,6 +175,11 @@ const JsonNode = struct {
 };
 
 const JsonCtx = struct {
+    // Arena owns the entire node tree and all node strings. The whole tree has a
+    // single lifetime (built during parse, serialized once, freed all at once),
+    // so an arena replaces the per-node malloc/free churn.
+    arena: std.heap.ArenaAllocator,
+    alloc: std.mem.Allocator = undefined,
     root: ?*JsonNode = null,
     current: ?*JsonNode = null,
     stack: [JSON_MAX_DEPTH]?*JsonNode = undefined,
@@ -154,90 +188,46 @@ const JsonCtx = struct {
     err: c_int = 0,
 };
 
+// The active arena allocator. The callbacks receive only a `*JsonCtx` userdata,
+// and the helper functions (allocBytes, dupNts, jsonAttrToStr, jsonAppendText,
+// the text-merge paths) do not get the ctx threaded through; rather than rewrite
+// every signature, the current ctx's allocator is stashed here for the duration
+// of a single (non-reentrant) md_parse run. md_ast is the only entry point and
+// md_parse is synchronous, so this is safe.
+threadlocal var g_alloc: std.mem.Allocator = undefined;
+
 // *****************************
 // ***  Memory management    ***
 // *****************************
 
-// Allocate a buffer of `n` bytes (no NUL slot added here; callers add one when
-// they want C-string semantics). Returns null on failure.
+// Allocate a buffer of `n` bytes from the arena (no NUL slot added here; callers
+// add one when they want C-string semantics). Returns null on failure.
 fn allocBytes(n: usize) ?[*]u8 {
     if (n == 0) {
         // Match malloc(0) behavior loosely: return a 1-byte allocation. The
         // call sites that pass 0 always also write a NUL terminator at [0].
-        const m = c_allocator.alloc(u8, 1) catch return null;
+        const m = g_alloc.alloc(u8, 1) catch return null;
         return m.ptr;
     }
-    const m = c_allocator.alloc(u8, n) catch return null;
+    const m = g_alloc.alloc(u8, n) catch return null;
     return m.ptr;
 }
 
-fn freeCStr(p: ?[*:0]u8) void {
-    if (p) |s| c.free(@ptrCast(s));
-}
-
-fn freeCStrConst(p: ?[*:0]const u8) void {
-    if (p) |s| c.free(@ptrCast(@constCast(s)));
-}
-
 fn jsonNodeNew(tag: ?[*:0]const u8, kind: JsonNodeKind) ?*JsonNode {
-    const node = c_allocator.create(JsonNode) catch return null;
+    const node = g_alloc.create(JsonNode) catch return null;
     node.* = .{ .kind = kind, .tag = tag };
     return node;
 }
 
+// All node and string memory lives in the arena and is freed wholesale when the
+// arena is deinitialized. Per-node freeing is therefore a no-op; the function is
+// retained so existing call sites read clearly (and so partial nodes on the OOM
+// path are simply abandoned to the arena).
 fn jsonNodeFree(node_opt: ?*JsonNode) void {
-    const node = node_opt orelse return;
-
-    var child = node.first_child;
-    while (child) |ch| {
-        const next = ch.next_sibling;
-        jsonNodeFree(ch);
-        child = next;
-    }
-
-    if (node.text_value) |t| c.free(@ptrCast(t));
-
-    // Free heap-allocated detail strings.
-    // Dynamic components (tag_is_dynamic) use detail.component fields, so must
-    // be checked first to avoid double-free when a component name collides with
-    // a static tag (e.g. ::alert{...} vs MD_BLOCK_ALERT).
-    if (node.tag_is_dynamic != 0) {
-        freeCStr(node.detail.component_raw_props);
-        freeCStr(node.detail.component_title);
-        freeCStrConst(node.tag);
-    } else if (node.tag != null) {
-        const tag = node.tag.?;
-        if (cstrEq(tag, "pre")) {
-            freeCStr(node.detail.code_info);
-            freeCStr(node.detail.code_lang);
-            freeCStr(node.detail.code_filename);
-            freeCStr(node.detail.code_meta);
-            if (node.detail.code_highlights) |h| c.free(@ptrCast(h));
-        } else if (cstrEq(tag, "a")) {
-            freeCStr(node.detail.a_href);
-            freeCStr(node.detail.a_title);
-        } else if (cstrEq(tag, "img")) {
-            freeCStr(node.detail.img_src);
-            freeCStr(node.detail.img_title);
-        } else if (cstrEq(tag, "wikilink")) {
-            freeCStr(node.detail.wikilink_target);
-        } else if (cstrEq(tag, "template")) {
-            freeCStr(node.detail.tmpl_name);
-        } else if (cstrEq(tag, "alert")) {
-            freeCStr(node.detail.alert_type_name);
-        }
-    }
-
-    if (node.raw_attrs) |ra| c.free(@ptrCast(ra));
-
-    c_allocator.destroy(node);
+    _ = node_opt;
 }
 
-fn cstrEq(s: [*:0]const u8, lit: [:0]const u8) bool {
-    return c.strcmp(@ptrCast(s), lit.ptr) == 0;
-}
-
-// Convert an MD_ATTRIBUTE to a heap-allocated, NUL-terminated string. Returns
+// Convert an MD_ATTRIBUTE to an arena-allocated, NUL-terminated string. Returns
 // null if attr.text is null OR on allocation failure (matching the C version).
 fn jsonAttrToStr(attr: *const c.MD_ATTRIBUTE) ?[*:0]u8 {
     if (attr.text == null)
@@ -251,7 +241,7 @@ fn jsonAttrToStr(attr: *const c.MD_ATTRIBUTE) ?[*:0]u8 {
     return @ptrCast(buf);
 }
 
-// Duplicate `len` bytes from `src` into a NUL-terminated heap string.
+// Duplicate `len` bytes from `src` into a NUL-terminated arena string.
 fn dupNts(src: [*]const u8, len: usize) ?[*:0]u8 {
     const buf = allocBytes(len + 1) orelse return null;
     if (len > 0)
@@ -310,7 +300,7 @@ fn jsonAppendText(node: *JsonNode, src: [*]const u8, src_size: c.MD_SIZE) c_int 
         const old_size = node.text_size;
         const old = node.text_value.?;
         const old_slice = @as([*]u8, @ptrCast(old))[0 .. @as(usize, old_size) + 1];
-        const merged = c_allocator.realloc(old_slice, @as(usize, old_size) + @as(usize, src_size) + 1) catch return -1;
+        const merged = g_alloc.realloc(old_slice, @as(usize, old_size) + @as(usize, src_size) + 1) catch return -1;
         if (src_size > 0)
             @memcpy(merged[old_size .. old_size + src_size], src[0..src_size]);
         node.text_size = old_size + src_size;
@@ -413,7 +403,6 @@ fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
         }
         node = jsonNodeNew(tag, .element);
         if (node == null) {
-            freeCStrConst(tag);
             ctx.err = 1;
             return -1;
         }
@@ -421,7 +410,6 @@ fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
         if (d.raw_props != null and d.raw_props_size > 0) {
             const dup = dupNts(@ptrCast(d.raw_props), d.raw_props_size);
             if (dup == null) {
-                jsonNodeFree(node);
                 ctx.err = 1;
                 return -1;
             }
@@ -443,7 +431,6 @@ fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
         const name_str = jsonAttrToStr(&d.name);
         node = jsonNodeNew("template", .element);
         if (node == null) {
-            freeCStr(name_str);
             ctx.err = 1;
             return -1;
         }
@@ -456,6 +443,24 @@ fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
         return -1;
     }
     const n = node.?;
+
+    // Classify the tag once for fast dispatch later (dynamic components win).
+    if (n.tag_is_dynamic != 0) {
+        n.tag_kind = .dynamic;
+    } else switch (block_type) {
+        c.MD_BLOCK_UL => n.tag_kind = .ul,
+        c.MD_BLOCK_OL => n.tag_kind = .ol,
+        c.MD_BLOCK_LI => n.tag_kind = .li,
+        c.MD_BLOCK_H => n.tag_kind = .other,
+        c.MD_BLOCK_CODE => n.tag_kind = .pre,
+        c.MD_BLOCK_HTML => n.tag_kind = .html_block,
+        c.MD_BLOCK_TH => n.tag_kind = .th,
+        c.MD_BLOCK_TD => n.tag_kind = .td,
+        c.MD_BLOCK_FRONTMATTER => n.tag_kind = .frontmatter,
+        c.MD_BLOCK_TEMPLATE => n.tag_kind = .template,
+        c.MD_BLOCK_ALERT => n.tag_kind = .alert,
+        else => n.tag_kind = .other,
+    }
 
     // Copy type-specific detail data.
     switch (block_type) {
@@ -486,7 +491,7 @@ fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
                     n.detail.code_meta = dup;
             }
             if (d.highlights != null and d.highlight_count > 0) {
-                const m = c_allocator.alloc(c_uint, d.highlight_count) catch null;
+                const m = g_alloc.alloc(c_uint, d.highlight_count) catch null;
                 if (m) |arr| {
                     @memcpy(arr, @as([*]const c_uint, @ptrCast(d.highlights))[0..d.highlight_count]);
                     n.detail.code_highlights = arr.ptr;
@@ -532,9 +537,10 @@ fn jsonLeaveBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
         if (jsonIsHtmlComment(@ptrCast(cur.text_value.?), cur.text_size, &body, &body_size) != 0) {
             // Replace tag with NULL (comment node).
             cur.tag = null;
-            // Replace text_value with just the comment body.
+            // Replace text_value with just the comment body. The old buffer is
+            // abandoned to the arena (freed wholesale at deinit).
             if (dupNts(body, body_size)) |new_text| {
-                c.free(@ptrCast(cur.text_value.?));
+                cur.tag_kind = .comment;
                 cur.text_value = new_text;
                 cur.text_size = body_size;
             }
@@ -566,15 +572,14 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
         }
         node = jsonNodeNew(tag, .element);
         if (node == null) {
-            freeCStrConst(tag);
             ctx.err = 1;
             return -1;
         }
         node.?.tag_is_dynamic = 1;
+        node.?.tag_kind = .dynamic;
         if (d.raw_props != null and d.raw_props_size > 0) {
             const dup = dupNts(@ptrCast(d.raw_props), d.raw_props_size);
             if (dup == null) {
-                jsonNodeFree(node);
                 ctx.err = 1;
                 return -1;
             }
@@ -603,6 +608,16 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
             return -1;
         }
         const n = node.?;
+
+        n.tag_kind = switch (span_type) {
+            c.MD_SPAN_A => .a,
+            c.MD_SPAN_IMG => .img,
+            c.MD_SPAN_CODE => .code,
+            c.MD_SPAN_LATEXMATH => .math,
+            c.MD_SPAN_LATEXMATH_DISPLAY => .math_display,
+            c.MD_SPAN_WIKILINK => .wikilink,
+            else => .other,
+        };
 
         switch (span_type) {
             c.MD_SPAN_A => {
@@ -720,7 +735,7 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
     // Leaf container nodes: accumulate text as literal on the parent node.
     // Dynamic components (tag_is_dynamic) must never match here, even if their
     // name collides with a built-in tag (e.g. ::pre, ::code).
-    if (cur.tag_is_dynamic == 0 and cur.tag != null and isLeafContainerTag(cur.tag.?)) {
+    if (cur.tag_is_dynamic == 0 and cur.tag != null and isLeafContainer(cur.tag_kind)) {
         var src: [*]const u8 = text;
         var src_size: c.MD_SIZE = size;
         const nullchar_buf = [_]u8{ 0xEF, 0xBF, 0xBD };
@@ -786,6 +801,7 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
                     ctx.err = 1;
                     return -1;
                 }
+                cnode.?.tag_kind = .comment;
                 if (cbody_size > 0) {
                     const dup = dupNts(cbody, cbody_size);
                     if (dup == null) {
@@ -825,8 +841,7 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
         const prev = prev_opt.?;
         const old_size = prev.text_size;
         const old_slice = @as([*]u8, @ptrCast(prev.text_value.?))[0 .. @as(usize, old_size) + 1];
-        const merged = c_allocator.realloc(old_slice, @as(usize, old_size) + @as(usize, value_size) + 1) catch {
-            c.free(@ptrCast(value.?));
+        const merged = g_alloc.realloc(old_slice, @as(usize, old_size) + @as(usize, value_size) + 1) catch {
             ctx.err = 1;
             return -1;
         };
@@ -835,13 +850,13 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
         prev.text_size = old_size + value_size;
         merged[prev.text_size] = 0;
         prev.text_value = @ptrCast(merged.ptr);
-        c.free(@ptrCast(value.?));
+        // `value` is abandoned to the arena.
         return 0;
     }
 
     const node = jsonNodeNew(null, .text);
     if (node == null) {
-        if (value) |v| c.free(@ptrCast(v));
+        // `value` is abandoned to the arena.
         ctx.err = 1;
         return -1;
     }
@@ -852,13 +867,11 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
     return 0;
 }
 
-fn isLeafContainerTag(tag: [*:0]const u8) bool {
-    return cstrEq(tag, "pre") or
-        cstrEq(tag, "html_block") or
-        cstrEq(tag, "code") or
-        cstrEq(tag, "frontmatter") or
-        cstrEq(tag, "math") or
-        cstrEq(tag, "math-display");
+fn isLeafContainer(kind: TagKind) bool {
+    return switch (kind) {
+        .pre, .html_block, .code, .frontmatter, .math, .math_display => true,
+        else => false,
+    };
 }
 
 fn jsonDebugLog(msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
@@ -951,7 +964,7 @@ fn jsonWriteProps(w: *JsonWriter, node: *const JsonNode) void {
         // Component frontmatter: if first child is a frontmatter node, merge its YAML as props.
         if (node.first_child != null and node.first_child.?.kind == .element and
             node.first_child.?.tag != null and node.first_child.?.tag_is_dynamic == 0 and
-            cstrEq(node.first_child.?.tag.?, "frontmatter") and
+            node.first_child.?.tag_kind == .frontmatter and
             node.first_child.?.text_value != null and node.first_child.?.text_size > 0)
         {
             has_prop = @intFromBool(jsonWriteYamlProps(w, @ptrCast(node.first_child.?.text_value.?), node.first_child.?.text_size) > 0);
@@ -969,108 +982,122 @@ fn jsonWriteProps(w: *JsonWriter, node: *const JsonNode) void {
             const wrote = jsonWriteComponentProps(w, @ptrCast(node.detail.component_raw_props.?), node.detail.component_raw_props_size);
             has_prop = @intFromBool(wrote != 0 or has_prop != 0);
         }
-    } else if (cstrEq(node.tag.?, "ol")) {
-        if (node.detail.ol_start != 1) {
-            var buf: [32]u8 = undefined;
-            _ = c.snprintf(&buf, buf.len, "\"start\":%u", node.detail.ol_start);
-            jsonWriteStrZ(w, @ptrCast(&buf));
-            has_prop = 1;
-        }
-    } else if (cstrEq(node.tag.?, "li") and node.detail.li_is_task != 0) {
-        jsonWriteStr(w, "\"task\":true,\"checked\":");
-        jsonWriteStr(w, if (node.detail.li_task_mark == 'x' or node.detail.li_task_mark == 'X') "true" else "false");
-        has_prop = 1;
-    } else if (cstrEq(node.tag.?, "pre")) {
-        if (node.detail.code_lang != null and node.detail.code_lang.?[0] != 0) {
-            jsonWriteStr(w, "\"language\":");
-            jsonWriteString(w, @ptrCast(node.detail.code_lang.?), strlenZ(node.detail.code_lang.?));
-            has_prop = 1;
-        }
-        if (node.detail.code_filename != null and node.detail.code_filename.?[0] != 0) {
-            if (has_prop != 0) jsonWrite(w, ",", 1);
-            jsonWriteStr(w, "\"filename\":");
-            jsonWriteString(w, @ptrCast(node.detail.code_filename.?), strlenZ(node.detail.code_filename.?));
-            has_prop = 1;
-        }
-        if (node.detail.code_highlights != null and node.detail.code_highlight_count > 0) {
-            var buf: [16]u8 = undefined;
-            if (has_prop != 0) jsonWrite(w, ",", 1);
-            jsonWriteStr(w, "\"highlights\":[");
-            var hi: c_uint = 0;
-            while (hi < node.detail.code_highlight_count) : (hi += 1) {
-                if (hi > 0) jsonWrite(w, ",", 1);
-                _ = c.snprintf(&buf, buf.len, "%u", node.detail.code_highlights.?[hi]);
+    } else switch (node.tag_kind) {
+        .ol => {
+            if (node.detail.ol_start != 1) {
+                var buf: [32]u8 = undefined;
+                _ = c.snprintf(&buf, buf.len, "\"start\":%u", node.detail.ol_start);
                 jsonWriteStrZ(w, @ptrCast(&buf));
+                has_prop = 1;
             }
-            jsonWrite(w, "]", 1);
-            has_prop = 1;
-        }
-        if (node.detail.code_meta != null and node.detail.code_meta.?[0] != 0) {
-            if (has_prop != 0) jsonWrite(w, ",", 1);
-            jsonWriteStr(w, "\"meta\":");
-            jsonWriteString(w, @ptrCast(node.detail.code_meta.?), strlenZ(node.detail.code_meta.?));
-            has_prop = 1;
-        }
-    } else if (cstrEq(node.tag.?, "th") or cstrEq(node.tag.?, "td")) {
-        const align_str = jsonAlignStr(node.detail.td_align);
-        if (align_str) |a| {
-            jsonWriteStr(w, "\"align\":\"");
-            jsonWriteStrZ(w, a);
-            jsonWrite(w, "\"", 1);
-            has_prop = 1;
-        }
-    } else if (cstrEq(node.tag.?, "a")) {
-        if (node.detail.a_href != null) {
-            jsonWriteStr(w, "\"href\":");
-            jsonWriteString(w, @ptrCast(node.detail.a_href.?), strlenZ(node.detail.a_href.?));
-            has_prop = 1;
-        }
-        if (node.detail.a_title != null and node.detail.a_title.?[0] != 0) {
-            if (has_prop != 0) jsonWrite(w, ",", 1);
-            jsonWriteStr(w, "\"title\":");
-            jsonWriteString(w, @ptrCast(node.detail.a_title.?), strlenZ(node.detail.a_title.?));
-            has_prop = 1;
-        }
-    } else if (cstrEq(node.tag.?, "img")) {
-        if (node.detail.img_src != null) {
-            jsonWriteStr(w, "\"src\":");
-            jsonWriteString(w, @ptrCast(node.detail.img_src.?), strlenZ(node.detail.img_src.?));
-            has_prop = 1;
-        }
-        if (node.text_value != null) {
-            if (has_prop != 0) jsonWrite(w, ",", 1);
-            jsonWriteStr(w, "\"alt\":");
-            jsonWriteString(w, @ptrCast(node.text_value.?), node.text_size);
-            has_prop = 1;
-        }
-        if (node.detail.img_title != null and node.detail.img_title.?[0] != 0) {
-            if (has_prop != 0) jsonWrite(w, ",", 1);
-            jsonWriteStr(w, "\"title\":");
-            jsonWriteString(w, @ptrCast(node.detail.img_title.?), strlenZ(node.detail.img_title.?));
-            has_prop = 1;
-        }
-    } else if (cstrEq(node.tag.?, "wikilink")) {
-        if (node.detail.wikilink_target != null) {
-            jsonWriteStr(w, "\"target\":");
-            jsonWriteString(w, @ptrCast(node.detail.wikilink_target.?), strlenZ(node.detail.wikilink_target.?));
-            has_prop = 1;
-        }
-    } else if (cstrEq(node.tag.?, "template")) {
-        if (node.detail.tmpl_name != null) {
-            jsonWriteStr(w, "\"name\":");
-            jsonWriteString(w, @ptrCast(node.detail.tmpl_name.?), strlenZ(node.detail.tmpl_name.?));
-            has_prop = 1;
-        }
-    } else if (cstrEq(node.tag.?, "alert")) {
-        if (node.detail.alert_type_name != null) {
-            jsonWriteStr(w, "\"type\":");
-            jsonWriteString(w, @ptrCast(node.detail.alert_type_name.?), strlenZ(node.detail.alert_type_name.?));
-            has_prop = 1;
-        }
-    } else if (cstrEq(node.tag.?, "frontmatter")) {
-        if (node.text_value != null and node.text_size > 0) {
-            has_prop = @intFromBool(jsonWriteYamlProps(w, @ptrCast(node.text_value.?), node.text_size) > 0);
-        }
+        },
+        .li => {
+            if (node.detail.li_is_task != 0) {
+                jsonWriteStr(w, "\"task\":true,\"checked\":");
+                jsonWriteStr(w, if (node.detail.li_task_mark == 'x' or node.detail.li_task_mark == 'X') "true" else "false");
+                has_prop = 1;
+            }
+        },
+        .pre => {
+            if (node.detail.code_lang != null and node.detail.code_lang.?[0] != 0) {
+                jsonWriteStr(w, "\"language\":");
+                jsonWriteString(w, @ptrCast(node.detail.code_lang.?), strlenZ(node.detail.code_lang.?));
+                has_prop = 1;
+            }
+            if (node.detail.code_filename != null and node.detail.code_filename.?[0] != 0) {
+                if (has_prop != 0) jsonWrite(w, ",", 1);
+                jsonWriteStr(w, "\"filename\":");
+                jsonWriteString(w, @ptrCast(node.detail.code_filename.?), strlenZ(node.detail.code_filename.?));
+                has_prop = 1;
+            }
+            if (node.detail.code_highlights != null and node.detail.code_highlight_count > 0) {
+                var buf: [16]u8 = undefined;
+                if (has_prop != 0) jsonWrite(w, ",", 1);
+                jsonWriteStr(w, "\"highlights\":[");
+                var hi: c_uint = 0;
+                while (hi < node.detail.code_highlight_count) : (hi += 1) {
+                    if (hi > 0) jsonWrite(w, ",", 1);
+                    _ = c.snprintf(&buf, buf.len, "%u", node.detail.code_highlights.?[hi]);
+                    jsonWriteStrZ(w, @ptrCast(&buf));
+                }
+                jsonWrite(w, "]", 1);
+                has_prop = 1;
+            }
+            if (node.detail.code_meta != null and node.detail.code_meta.?[0] != 0) {
+                if (has_prop != 0) jsonWrite(w, ",", 1);
+                jsonWriteStr(w, "\"meta\":");
+                jsonWriteString(w, @ptrCast(node.detail.code_meta.?), strlenZ(node.detail.code_meta.?));
+                has_prop = 1;
+            }
+        },
+        .th, .td => {
+            const align_str = jsonAlignStr(node.detail.td_align);
+            if (align_str) |a| {
+                jsonWriteStr(w, "\"align\":\"");
+                jsonWriteStrZ(w, a);
+                jsonWrite(w, "\"", 1);
+                has_prop = 1;
+            }
+        },
+        .a => {
+            if (node.detail.a_href != null) {
+                jsonWriteStr(w, "\"href\":");
+                jsonWriteString(w, @ptrCast(node.detail.a_href.?), strlenZ(node.detail.a_href.?));
+                has_prop = 1;
+            }
+            if (node.detail.a_title != null and node.detail.a_title.?[0] != 0) {
+                if (has_prop != 0) jsonWrite(w, ",", 1);
+                jsonWriteStr(w, "\"title\":");
+                jsonWriteString(w, @ptrCast(node.detail.a_title.?), strlenZ(node.detail.a_title.?));
+                has_prop = 1;
+            }
+        },
+        .img => {
+            if (node.detail.img_src != null) {
+                jsonWriteStr(w, "\"src\":");
+                jsonWriteString(w, @ptrCast(node.detail.img_src.?), strlenZ(node.detail.img_src.?));
+                has_prop = 1;
+            }
+            if (node.text_value != null) {
+                if (has_prop != 0) jsonWrite(w, ",", 1);
+                jsonWriteStr(w, "\"alt\":");
+                jsonWriteString(w, @ptrCast(node.text_value.?), node.text_size);
+                has_prop = 1;
+            }
+            if (node.detail.img_title != null and node.detail.img_title.?[0] != 0) {
+                if (has_prop != 0) jsonWrite(w, ",", 1);
+                jsonWriteStr(w, "\"title\":");
+                jsonWriteString(w, @ptrCast(node.detail.img_title.?), strlenZ(node.detail.img_title.?));
+                has_prop = 1;
+            }
+        },
+        .wikilink => {
+            if (node.detail.wikilink_target != null) {
+                jsonWriteStr(w, "\"target\":");
+                jsonWriteString(w, @ptrCast(node.detail.wikilink_target.?), strlenZ(node.detail.wikilink_target.?));
+                has_prop = 1;
+            }
+        },
+        .template => {
+            if (node.detail.tmpl_name != null) {
+                jsonWriteStr(w, "\"name\":");
+                jsonWriteString(w, @ptrCast(node.detail.tmpl_name.?), strlenZ(node.detail.tmpl_name.?));
+                has_prop = 1;
+            }
+        },
+        .alert => {
+            if (node.detail.alert_type_name != null) {
+                jsonWriteStr(w, "\"type\":");
+                jsonWriteString(w, @ptrCast(node.detail.alert_type_name.?), strlenZ(node.detail.alert_type_name.?));
+                has_prop = 1;
+            }
+        },
+        .frontmatter => {
+            if (node.text_value != null and node.text_size > 0) {
+                has_prop = @intFromBool(jsonWriteYamlProps(w, @ptrCast(node.text_value.?), node.text_size) > 0);
+            }
+        },
+        else => {},
     }
 
     // Merge inline attributes from trailing {attrs} syntax.
@@ -1098,7 +1125,7 @@ fn jsonSerializeNode(w: *JsonWriter, node: *const JsonNode) void {
             var child = node.first_child;
             while (child) |ch| : (child = ch.next_sibling) {
                 if (ch.kind == .element and ch.tag != null and
-                    ch.tag_is_dynamic == 0 and cstrEq(ch.tag.?, "frontmatter"))
+                    ch.tag_is_dynamic == 0 and ch.tag_kind == .frontmatter)
                 {
                     fm_node = ch;
                     break;
@@ -1150,7 +1177,7 @@ fn jsonSerializeNode(w: *JsonWriter, node: *const JsonNode) void {
 
             // Special handling for built-in tags.
             // Dynamic components always use the regular container path.
-            if (node.tag_is_dynamic == 0 and cstrEq(node.tag.?, "pre")) {
+            if (node.tag_is_dynamic == 0 and node.tag_kind == .pre) {
                 jsonWriteStr(w, ",[\"code\",{");
                 if (node.detail.code_lang != null and node.detail.code_lang.?[0] != 0) {
                     jsonWriteStr(w, "\"class\":\"language-");
@@ -1166,20 +1193,20 @@ fn jsonSerializeNode(w: *JsonWriter, node: *const JsonNode) void {
             }
             // html_block and frontmatter: emit literal as text child.
             else if (node.tag_is_dynamic == 0 and node.text_value != null and
-                (cstrEq(node.tag.?, "html_block") or cstrEq(node.tag.?, "frontmatter")))
+                (node.tag_kind == .html_block or node.tag_kind == .frontmatter))
             {
                 jsonWrite(w, ",", 1);
                 jsonWriteString(w, @ptrCast(node.text_value.?), node.text_size);
             }
             // Inline code, math, math-display: emit literal as text child.
             else if (node.tag_is_dynamic == 0 and node.text_value != null and
-                (cstrEq(node.tag.?, "code") or cstrEq(node.tag.?, "math") or cstrEq(node.tag.?, "math-display")))
+                (node.tag_kind == .code or node.tag_kind == .math or node.tag_kind == .math_display))
             {
                 jsonWrite(w, ",", 1);
                 jsonWriteString(w, @ptrCast(node.text_value.?), node.text_size);
             }
             // img: void element, no children (alt is in props).
-            else if (node.tag_is_dynamic == 0 and cstrEq(node.tag.?, "img")) {
+            else if (node.tag_is_dynamic == 0 and node.tag_kind == .img) {
                 // No children emitted.
             }
             // Regular container: emit children.
@@ -1188,7 +1215,7 @@ fn jsonSerializeNode(w: *JsonWriter, node: *const JsonNode) void {
                 var skip_fm: ?*const JsonNode = null;
                 if (node.tag_is_dynamic != 0 and node.first_child != null and
                     node.first_child.?.kind == .element and node.first_child.?.tag != null and
-                    node.first_child.?.tag_is_dynamic == 0 and cstrEq(node.first_child.?.tag.?, "frontmatter"))
+                    node.first_child.?.tag_is_dynamic == 0 and node.first_child.?.tag_kind == .frontmatter)
                 {
                     skip_fm = node.first_child;
                 }
@@ -1293,7 +1320,10 @@ export fn md_ast(
     parser.text = jsonText;
     parser.debug_log = if (renderer_flags & MD_AST_FLAG_DEBUG != 0) jsonDebugLog else null;
 
-    var ctx: JsonCtx = .{};
+    var ctx: JsonCtx = .{ .arena = std.heap.ArenaAllocator.init(std.heap.c_allocator) };
+    defer ctx.arena.deinit();
+    ctx.alloc = ctx.arena.allocator();
+    g_alloc = ctx.alloc;
 
     // Skip UTF-8 BOM.
     if (@sizeOf(c.MD_CHAR) == 1) {
@@ -1310,7 +1340,7 @@ export fn md_ast(
     const ret = c.md_parse(@ptrCast(input_ptr), size, &parser, @ptrCast(&ctx));
 
     if (ret != 0 or ctx.err != 0) {
-        jsonNodeFree(ctx.root);
+        // Arena (via defer) frees the whole partial tree at once.
         return -1;
     }
 
@@ -1323,6 +1353,6 @@ export fn md_ast(
     }
     jsonWrite(&writer, "\n", 1);
 
-    jsonNodeFree(ctx.root);
+    // Arena (via defer) frees the whole tree at once.
     return 0;
 }

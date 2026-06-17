@@ -3,10 +3,12 @@
 ## WASM Target
 
 ```sh
-zig build wasm                     # outputs zig-out/bin/md4x.wasm (~163K)
+zig build wasm                     # outputs packages/md4x/build/md4x.wasm (~324K)
 ```
 
-Builds a `wasm32-wasi` WASM binary with exported functions. Uses `ReleaseSmall` optimization. The WASM module requires minimal WASI imports (`fd_close`, `fd_seek`, `fd_write`, `proc_exit`) which can be stubbed for browser use.
+Builds a `wasm32-wasi` WASM binary with exported functions. Uses `ReleaseFast` optimization (`pkg_optimize` in `build.zig`, shared with the NAPI targets). The WASM module requires minimal WASI imports (`fd_close`, `fd_seek`, `fd_write`, `proc_exit`) which can be stubbed for browser use.
+
+> **Note on WASM performance:** The WASM target is built `ReleaseFast` (same as NAPI), but it is consistently slower than the native NAPI binding (roughly 3x on `renderToHtml`, 2x on `parseAST` for the medium fixture) due to the WebAssembly runtime plus the cost of copying input/output across the JS↔WASM memory boundary on every call. Renderer-side allocation optimizations (e.g. the AST arena, HTML output buffering) help the native path more than WASM, since wasm's linear-memory allocator has a different cost profile than the system `malloc`. Prefer NAPI where raw throughput matters; WASM is the portable fallback for non-Node environments.
 
 **Exported functions:**
 

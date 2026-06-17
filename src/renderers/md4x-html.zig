@@ -46,6 +46,23 @@ const MD_HTML_FLAG_HEAL: c_uint = 0x0100;
 const NEED_HTML_ESC_FLAG: u8 = 0x1;
 const NEED_URL_ESC_FLAG: u8 = 0x2;
 
+// Map of characters which need escaping. Input-independent, so computed once at
+// comptime. Reproduces exactly the previous per-call runtime construction
+// (including strchr's C semantics where strchr(set, 0) matches the NUL byte).
+const ESCAPE_MAP: [256]u8 = blk: {
+    @setEvalBranchQuota(10000);
+    var map = [_]u8{0} ** 256;
+    var i: usize = 0;
+    while (i < 256) : (i += 1) {
+        const ch: u8 = @intCast(i);
+        if (strchr("\"&<>", ch))
+            map[i] |= NEED_HTML_ESC_FLAG;
+        if (!ISALNUM(ch) and !strchr("~-_.+!*(),%#@?=;:/,+$", ch))
+            map[i] |= NEED_URL_ESC_FLAG;
+    }
+    break :blk map;
+};
+
 // MD_HTML_OPTS must match the C struct layout exactly.
 const MD_HTML_OPTS = extern struct {
     title: ?[*:0]const u8,
@@ -74,7 +91,6 @@ const MD_HTML = struct {
     userdata: ?*anyopaque = null,
     flags: c_uint = 0,
     image_nesting_level: c_int = 0,
-    escape_map: [256]u8 = [_]u8{0} ** 256,
 
     // Frontmatter suppression state.
     in_frontmatter: c_int = 0,
@@ -105,7 +121,57 @@ const MD_HTML = struct {
     code_blocks: ?[*]MD_HTML_CODE_META = null,
     n_code_blocks: c_int = 0,
     code_blocks_cap: c_int = 0,
+
+    // Internal output buffer: batches render_verbatim appends into a single
+    // process_output callback to reduce per-call overhead. `real_process_output`
+    // holds the caller's original callback; `process_output` may be temporarily
+    // swapped (e.g. to comp_fm_tag_capture) — buffering is bypassed while swapped.
+    real_process_output: ProcessOutputFn = null,
+    out_buf: ?[*]u8 = null,
+    out_size: c.MD_SIZE = 0,
+    out_cap: c.MD_SIZE = 0,
 };
+
+// Flush threshold: when the internal buffer reaches this size, emit it.
+const OUT_BUF_THRESHOLD: c.MD_SIZE = 8 * 1024;
+
+// Append bytes to the internal output buffer, flushing to real_process_output
+// when the threshold is exceeded. Falls back to a direct call on OOM so output
+// is never silently dropped.
+fn out_buf_append(r: *MD_HTML, text: [*]const u8, size: c.MD_SIZE) void {
+    if (r.out_size + size > r.out_cap) {
+        const new_cap: c.MD_SIZE = r.out_cap + r.out_cap / 2 + size + OUT_BUF_THRESHOLD;
+        const p = buf_realloc(r.out_buf, r.out_cap, new_cap);
+        if (p == null) {
+            // OOM: flush what we have, then emit directly (no buffering).
+            flush_output(r);
+            r.real_process_output.?(@ptrCast(text), size, r.userdata);
+            return;
+        }
+        r.out_buf = p;
+        r.out_cap = new_cap;
+    }
+    @memcpy(r.out_buf.?[r.out_size .. r.out_size + size], text[0..size]);
+    r.out_size += size;
+    if (r.out_size >= OUT_BUF_THRESHOLD)
+        flush_output(r);
+}
+
+// Emit any buffered bytes via the real callback and reset the buffer.
+fn flush_output(r: *MD_HTML) void {
+    if (r.out_size > 0) {
+        r.real_process_output.?(@ptrCast(r.out_buf.?), r.out_size, r.userdata);
+        r.out_size = 0;
+    }
+}
+
+// Flush the internal buffer, then emit bytes directly via the real callback.
+// Used by direct-output paths (comp_fm_flush_tag, render_code_meta_json) so
+// their output lands in the correct position relative to buffered body content.
+fn emit(r: *MD_HTML, text: [*]const u8, size: c.MD_SIZE) void {
+    flush_output(r);
+    r.real_process_output.?(@ptrCast(text), size, r.userdata);
+}
 
 // *****************************************
 // ***  Shared component property parser ***
@@ -138,7 +204,15 @@ inline fn ISALNUM(ch: u8) bool {
 }
 
 fn render_verbatim(r: *MD_HTML, text: [*]const u8, size: c.MD_SIZE) void {
-    r.process_output.?(@ptrCast(text), size, r.userdata);
+    // When process_output has been temporarily swapped away from the caller's
+    // original callback (e.g. component-frontmatter capture), bypass the
+    // internal buffer and call the swapped callback directly. Otherwise batch
+    // into out_buf.
+    if (r.process_output == r.real_process_output) {
+        out_buf_append(r, text, size);
+    } else {
+        r.process_output.?(@ptrCast(text), size, r.userdata);
+    }
     if (r.flags & MD_HTML_FLAG_CODE_META != 0)
         r.output_offset += size;
 }
@@ -152,16 +226,16 @@ fn render_html_escaped(r: *MD_HTML, data: [*]const u8, size: c.MD_SIZE) void {
     var off: c.MD_OFFSET = 0;
 
     const NEED_HTML_ESC = struct {
-        inline fn f(rr: *MD_HTML, ch: u8) bool {
-            return (rr.escape_map[ch] & NEED_HTML_ESC_FLAG) != 0;
+        inline fn f(ch: u8) bool {
+            return (ESCAPE_MAP[ch] & NEED_HTML_ESC_FLAG) != 0;
         }
     }.f;
 
     while (true) {
         // Optimization: Use some loop unrolling.
-        while (off + 3 < size and !NEED_HTML_ESC(r, data[off + 0]) and !NEED_HTML_ESC(r, data[off + 1]) and !NEED_HTML_ESC(r, data[off + 2]) and !NEED_HTML_ESC(r, data[off + 3]))
+        while (off + 3 < size and !NEED_HTML_ESC(data[off + 0]) and !NEED_HTML_ESC(data[off + 1]) and !NEED_HTML_ESC(data[off + 2]) and !NEED_HTML_ESC(data[off + 3]))
             off += 4;
-        while (off < size and !NEED_HTML_ESC(r, data[off]))
+        while (off < size and !NEED_HTML_ESC(data[off]))
             off += 1;
 
         if (off > beg)
@@ -189,13 +263,13 @@ fn render_url_escaped(r: *MD_HTML, data: [*]const u8, size: c.MD_SIZE) void {
     var off: c.MD_OFFSET = 0;
 
     const NEED_URL_ESC = struct {
-        inline fn f(rr: *MD_HTML, ch: u8) bool {
-            return (rr.escape_map[ch] & NEED_URL_ESC_FLAG) != 0;
+        inline fn f(ch: u8) bool {
+            return (ESCAPE_MAP[ch] & NEED_URL_ESC_FLAG) != 0;
         }
     }.f;
 
     while (true) {
-        while (off < size and !NEED_URL_ESC(r, data[off]))
+        while (off < size and !NEED_URL_ESC(data[off]))
             off += 1;
         if (off > beg)
             render_verbatim(r, data + beg, off - beg);
@@ -519,7 +593,7 @@ fn comp_fm_flush_tag(r: *MD_HTML) void {
         return;
 
     // Emit the buffered tag prefix (e.g. "<card ...props").
-    r.process_output.?(@ptrCast(r.comp_fm_tag.?), r.comp_fm_tag_size, r.userdata);
+    emit(r, r.comp_fm_tag.?, r.comp_fm_tag_size);
 
     // If we captured YAML, parse and emit as attributes.
     if (r.comp_fm_text != null and r.comp_fm_text_size > 0) {
@@ -727,7 +801,10 @@ fn emit_json_str(out: RawOutFn, ud: ?*anyopaque, str: [*]const u8, size: c.MD_SI
 }
 
 fn render_code_meta_json(r: *MD_HTML) void {
-    const out = r.process_output;
+    // Flush buffered body content so the code-meta JSON (and the NUL byte that
+    // precedes it) lands after the body in the final byte stream.
+    flush_output(r);
+    const out = r.real_process_output;
     const ud = r.userdata;
     var buf: [64]u8 = undefined;
 
@@ -1303,6 +1380,7 @@ export fn md_html_ex(
 
     var render: MD_HTML = .{};
     render.process_output = process_output;
+    render.real_process_output = process_output;
     render.userdata = userdata;
     render.flags = renderer_flags;
     render.opts = opts;
@@ -1315,18 +1393,6 @@ export fn md_html_ex(
     parser.leave_span = leave_span_callback;
     parser.text = text_callback;
     parser.debug_log = debug_log_callback;
-
-    // Build map of characters which need escaping.
-    var i: usize = 0;
-    while (i < 256) : (i += 1) {
-        const ch: u8 = @intCast(i);
-
-        if (strchr("\"&<>", ch))
-            render.escape_map[i] |= NEED_HTML_ESC_FLAG;
-
-        if (!ISALNUM(ch) and !strchr("~-_.+!*(),%#@?=;:/,+$", ch))
-            render.escape_map[i] |= NEED_URL_ESC_FLAG;
-    }
 
     // Consider skipping UTF-8 byte order mark (BOM).
     if (renderer_flags & MD_HTML_FLAG_SKIP_UTF8_BOM != 0 and @sizeOf(c.MD_CHAR) == 1) {
@@ -1341,9 +1407,14 @@ export fn md_html_ex(
 
     if (renderer_flags & MD_HTML_FLAG_CODE_META != 0) {
         if (ret == 0)
-            render_code_meta_json(&render);
+            render_code_meta_json(&render); // flushes out_buf internally before JSON
         code_meta_cleanup(&render);
     }
+
+    // Flush any remaining buffered body bytes (render_code_meta_json already
+    // flushed the body before appending JSON when CODE_META is set).
+    flush_output(&render);
+    if (render.out_buf) |p| c_allocator.free(p[0..render.out_cap]);
 
     if (render.fm_text) |p| c_allocator.free(p[0..render.fm_cap]);
     if (render.comp_fm_tag) |p| c_allocator.free(p[0..render.comp_fm_tag_cap]);
