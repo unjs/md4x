@@ -1347,7 +1347,7 @@ pub fn md_analyze_entity(ctx: *MD_CTX, mark_index: c_int) void {
     const closer = &ctx.marks[@intCast(mark_index + 1)];
     if (closer.ch != ';') return;
 
-    if (md_is_entity(ctx, opener.beg, closer.end, &off) != 0) {
+    if (md_is_entity(ctx, opener.beg, closer.end, &off)) {
         md_resolve_range(ctx, mark_index, mark_index + 1);
         opener.end = closer.end;
     }

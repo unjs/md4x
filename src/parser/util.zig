@@ -493,50 +493,50 @@ pub fn md_skip_unicode_whitespace(label: [*c]const CHAR, off_in: OFF, size: SZ) 
 //  Recognizing HTML entities
 // ============================================================================
 
-pub fn md_is_hex_entity_contents(ctx: *MD_CTX, text: [*c]const CHAR, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_hex_entity_contents(ctx: *MD_CTX, text: [*c]const CHAR, beg: OFF, max_end: OFF, p_end: *OFF) bool {
     _ = ctx;
     var off = beg;
     while (off < max_end and ISXDIGIT_(text[off]) and off - beg <= 8) off += 1;
     if (1 <= off - beg and off - beg <= 6) {
         p_end.* = off;
-        return TRUE;
+        return true;
     }
-    return FALSE;
+    return false;
 }
 
-pub fn md_is_dec_entity_contents(ctx: *MD_CTX, text: [*c]const CHAR, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_dec_entity_contents(ctx: *MD_CTX, text: [*c]const CHAR, beg: OFF, max_end: OFF, p_end: *OFF) bool {
     _ = ctx;
     var off = beg;
     while (off < max_end and ISDIGIT_(text[off]) and off - beg <= 8) off += 1;
     if (1 <= off - beg and off - beg <= 7) {
         p_end.* = off;
-        return TRUE;
+        return true;
     }
-    return FALSE;
+    return false;
 }
 
-pub fn md_is_named_entity_contents(ctx: *MD_CTX, text: [*c]const CHAR, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_named_entity_contents(ctx: *MD_CTX, text: [*c]const CHAR, beg: OFF, max_end: OFF, p_end: *OFF) bool {
     _ = ctx;
     var off = beg;
     if (off < max_end and ISALPHA_(text[off])) {
         off += 1;
     } else {
-        return FALSE;
+        return false;
     }
     while (off < max_end and ISALNUM_(text[off]) and off - beg <= 48) off += 1;
     if (2 <= off - beg and off - beg <= 48) {
         p_end.* = off;
-        return TRUE;
+        return true;
     }
-    return FALSE;
+    return false;
 }
 
-pub fn md_is_entity_str(ctx: *MD_CTX, text: [*c]const CHAR, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_entity_str(ctx: *MD_CTX, text: [*c]const CHAR, beg: OFF, max_end: OFF, p_end: *OFF) bool {
     var off = beg;
     // MD_ASSERT(text[off] == '&'); — defensive guard instead of UB-assert.
     off += 1;
 
-    var is_contents: c_int = undefined;
+    var is_contents: bool = undefined;
     if (off + 2 < max_end and text[off] == '#' and (text[off + 1] == 'x' or text[off + 1] == 'X')) {
         is_contents = md_is_hex_entity_contents(ctx, text, off + 2, max_end, &off);
     } else if (off + 1 < max_end and text[off] == '#') {
@@ -545,14 +545,14 @@ pub fn md_is_entity_str(ctx: *MD_CTX, text: [*c]const CHAR, beg: OFF, max_end: O
         is_contents = md_is_named_entity_contents(ctx, text, off, max_end, &off);
     }
 
-    if (is_contents != 0 and off < max_end and text[off] == ';') {
+    if (is_contents and off < max_end and text[off] == ';') {
         p_end.* = off + 1;
-        return TRUE;
+        return true;
     }
-    return FALSE;
+    return false;
 }
 
-pub inline fn md_is_entity(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub inline fn md_is_entity(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) bool {
     return md_is_entity_str(ctx, ctx.text, beg, max_end, p_end);
 }
 
@@ -677,7 +677,7 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
 
             if (raw_text[raw_off] == '&') {
                 var ent_end: OFF = undefined;
-                if (md_is_entity_str(ctx, raw_text, raw_off, raw_size, &ent_end) != 0) {
+                if (md_is_entity_str(ctx, raw_text, raw_off, raw_size, &ent_end)) {
                     if (md_build_attr_append_substr(ctx, build, c.MD_TEXT_ENTITY, off) < 0) {
                         md_free_attribute(ctx, build);
                         return -1;
