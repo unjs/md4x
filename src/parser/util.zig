@@ -93,52 +93,9 @@ pub inline fn ISANYOF_(ch: CHAR, palette: [*:0]const u8) bool {
     return ch != 0 and md_strchr(palette, ch) != null;
 }
 
-// Offset-based wrappers (CH(off) variants).
-pub inline fn ISANYOF(ctx: *const MD_CTX, off: OFF, palette: [*:0]const u8) bool {
-    return ISANYOF_(ctx.ch(off), palette);
-}
-pub inline fn ISANYOF2(ctx: *const MD_CTX, off: OFF, ch1: CHAR, ch2: CHAR) bool {
-    return ISANYOF2_(ctx.ch(off), ch1, ch2);
-}
-pub inline fn ISANYOF3(ctx: *const MD_CTX, off: OFF, ch1: CHAR, ch2: CHAR, ch3: CHAR) bool {
-    return ISANYOF3_(ctx.ch(off), ch1, ch2, ch3);
-}
-pub inline fn ISASCII(ctx: *const MD_CTX, off: OFF) bool {
-    return ISASCII_(ctx.ch(off));
-}
-pub inline fn ISBLANK(ctx: *const MD_CTX, off: OFF) bool {
-    return ISBLANK_(ctx.ch(off));
-}
-pub inline fn ISNEWLINE(ctx: *const MD_CTX, off: OFF) bool {
-    return ISNEWLINE_(ctx.ch(off));
-}
-pub inline fn ISWHITESPACE(ctx: *const MD_CTX, off: OFF) bool {
-    return ISWHITESPACE_(ctx.ch(off));
-}
-pub inline fn ISCNTRL(ctx: *const MD_CTX, off: OFF) bool {
-    return ISCNTRL_(ctx.ch(off));
-}
-pub inline fn ISPUNCT(ctx: *const MD_CTX, off: OFF) bool {
-    return ISPUNCT_(ctx.ch(off));
-}
-pub inline fn ISUPPER(ctx: *const MD_CTX, off: OFF) bool {
-    return ISUPPER_(ctx.ch(off));
-}
-pub inline fn ISLOWER(ctx: *const MD_CTX, off: OFF) bool {
-    return ISLOWER_(ctx.ch(off));
-}
-pub inline fn ISALPHA(ctx: *const MD_CTX, off: OFF) bool {
-    return ISALPHA_(ctx.ch(off));
-}
-pub inline fn ISDIGIT(ctx: *const MD_CTX, off: OFF) bool {
-    return ISDIGIT_(ctx.ch(off));
-}
-pub inline fn ISXDIGIT(ctx: *const MD_CTX, off: OFF) bool {
-    return ISXDIGIT_(ctx.ch(off));
-}
-pub inline fn ISALNUM(ctx: *const MD_CTX, off: OFF) bool {
-    return ISALNUM_(ctx.ch(off));
-}
+// NOTE: the offset-based `CH(off)` predicate wrappers (ISWHITESPACE, ISNEWLINE,
+// ISANYOF, …) are now methods on MD_CTX (`ctx.isWhitespace(off)`, etc.) in
+// types.zig — see PLAN 8.7. The pure `IS*_(ch)` helpers above stay here.
 
 // `md_strchr` — C's strchr(palette, ch): returns pointer to first occurrence of
 // (char)ch in NUL-terminated palette, including matching the terminating NUL.
@@ -400,21 +357,11 @@ pub inline fn md_decode_unicode(str: [*c]const CHAR, off: OFF, str_size: SZ, p_c
     return md_decode_utf8(str + off, str_size - off, p_char_size);
 }
 
-// ISUNICODE* offset wrappers (UTF-8 build).
+// ISUNICODE* codepoint helper (UTF-8 build). The offset-based wrappers
+// (ISUNICODEWHITESPACE/PUNCT[BEFORE]) are now MD_CTX methods in types.zig
+// (`ctx.isUnicodeWhitespace(off)`, …) — see PLAN 8.7.
 pub inline fn ISUNICODEWHITESPACE_(codepoint: c_uint) bool {
     return md_is_unicode_whitespace(codepoint);
-}
-pub inline fn ISUNICODEWHITESPACE(ctx: *const MD_CTX, off: OFF) bool {
-    return md_is_unicode_whitespace(md_decode_utf8(ctx.str(off), ctx.size - off, null));
-}
-pub inline fn ISUNICODEWHITESPACEBEFORE(ctx: *const MD_CTX, off: OFF) bool {
-    return md_is_unicode_whitespace(md_decode_utf8_before(ctx, off));
-}
-pub inline fn ISUNICODEPUNCT(ctx: *const MD_CTX, off: OFF) bool {
-    return md_is_unicode_punct(md_decode_utf8(ctx.str(off), ctx.size - off, null));
-}
-pub inline fn ISUNICODEPUNCTBEFORE(ctx: *const MD_CTX, off: OFF) bool {
-    return md_is_unicode_punct(md_decode_utf8_before(ctx, off));
 }
 
 // ============================================================================

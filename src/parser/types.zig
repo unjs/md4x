@@ -6,6 +6,7 @@
 // no logic change). See AGENTS.md.
 
 const std = @import("std");
+const util = @import("util.zig");
 
 pub const c = @cImport({
     @cInclude("md4x.h");
@@ -329,6 +330,69 @@ pub const MD_CTX = struct {
     }
     pub inline fn str(self: *const MD_CTX, off: OFF) [*c]const CHAR {
         return self.text + off;
+    }
+
+    // Offset-based character-class predicates (PLAN 8.7): methods on *const
+    // MD_CTX that read ctx.text[off] (or decode the UTF-8 codepoint there) and
+    // delegate to the pure `IS*_(ch)` / md_is_unicode_* helpers in util.zig.
+    // The `IS*_` helpers stay free functions taking a raw CHAR — they mirror
+    // md4c's macros and are kept for upstream cross-reference (PLAN 8.6).
+    pub inline fn isAnyOf(self: *const MD_CTX, off: OFF, palette: [*:0]const u8) bool {
+        return util.ISANYOF_(self.ch(off), palette);
+    }
+    pub inline fn isAnyOf2(self: *const MD_CTX, off: OFF, ch1: CHAR, ch2: CHAR) bool {
+        return util.ISANYOF2_(self.ch(off), ch1, ch2);
+    }
+    pub inline fn isAnyOf3(self: *const MD_CTX, off: OFF, ch1: CHAR, ch2: CHAR, ch3: CHAR) bool {
+        return util.ISANYOF3_(self.ch(off), ch1, ch2, ch3);
+    }
+    pub inline fn isAscii(self: *const MD_CTX, off: OFF) bool {
+        return util.ISASCII_(self.ch(off));
+    }
+    pub inline fn isBlank(self: *const MD_CTX, off: OFF) bool {
+        return util.ISBLANK_(self.ch(off));
+    }
+    pub inline fn isNewline(self: *const MD_CTX, off: OFF) bool {
+        return util.ISNEWLINE_(self.ch(off));
+    }
+    pub inline fn isWhitespace(self: *const MD_CTX, off: OFF) bool {
+        return util.ISWHITESPACE_(self.ch(off));
+    }
+    pub inline fn isCntrl(self: *const MD_CTX, off: OFF) bool {
+        return util.ISCNTRL_(self.ch(off));
+    }
+    pub inline fn isPunct(self: *const MD_CTX, off: OFF) bool {
+        return util.ISPUNCT_(self.ch(off));
+    }
+    pub inline fn isUpper(self: *const MD_CTX, off: OFF) bool {
+        return util.ISUPPER_(self.ch(off));
+    }
+    pub inline fn isLower(self: *const MD_CTX, off: OFF) bool {
+        return util.ISLOWER_(self.ch(off));
+    }
+    pub inline fn isAlpha(self: *const MD_CTX, off: OFF) bool {
+        return util.ISALPHA_(self.ch(off));
+    }
+    pub inline fn isDigit(self: *const MD_CTX, off: OFF) bool {
+        return util.ISDIGIT_(self.ch(off));
+    }
+    pub inline fn isXdigit(self: *const MD_CTX, off: OFF) bool {
+        return util.ISXDIGIT_(self.ch(off));
+    }
+    pub inline fn isAlnum(self: *const MD_CTX, off: OFF) bool {
+        return util.ISALNUM_(self.ch(off));
+    }
+    pub inline fn isUnicodeWhitespace(self: *const MD_CTX, off: OFF) bool {
+        return util.md_is_unicode_whitespace(util.md_decode_utf8(self.str(off), self.size - off, null));
+    }
+    pub inline fn isUnicodeWhitespaceBefore(self: *const MD_CTX, off: OFF) bool {
+        return util.md_is_unicode_whitespace(util.md_decode_utf8_before(self, off));
+    }
+    pub inline fn isUnicodePunct(self: *const MD_CTX, off: OFF) bool {
+        return util.md_is_unicode_punct(util.md_decode_utf8(self.str(off), self.size - off, null));
+    }
+    pub inline fn isUnicodePunctBefore(self: *const MD_CTX, off: OFF) bool {
+        return util.md_is_unicode_punct(util.md_decode_utf8_before(self, off));
     }
 
     // `MD_LOG(msg)` — call ctx->parser.debug_log if set. The C macro reads `ctx`

@@ -21,14 +21,7 @@ const MD_LINE = types.MD_LINE;
 const MD_REF_DEF = types.MD_REF_DEF;
 const MD_REF_DEF_LIST = types.MD_REF_DEF_LIST;
 
-const ISNEWLINE = util.ISNEWLINE;
 const ISNEWLINE_ = util.ISNEWLINE_;
-const ISPUNCT = util.ISPUNCT;
-const ISWHITESPACE = util.ISWHITESPACE;
-const ISCNTRL = util.ISCNTRL;
-const ISASCII = util.ISASCII;
-const ISALNUM = util.ISALNUM;
-const ISANYOF = util.ISANYOF;
 const ISUNICODEWHITESPACE_ = util.ISUNICODEWHITESPACE_;
 const md_decode_unicode = util.md_decode_unicode;
 const md_skip_unicode_whitespace = util.md_skip_unicode_whitespace;
@@ -434,7 +427,7 @@ pub fn md_is_link_label(
         const line_end = lines[line_index].end;
 
         while (off < line_end) {
-            if (ctx.ch(off) == '\\' and off + 1 < ctx.size and (ISPUNCT(ctx, off + 1) or ISNEWLINE(ctx, off + 1))) {
+            if (ctx.ch(off) == '\\' and off + 1 < ctx.size and (ctx.isPunct(off + 1) or ctx.isNewline(off + 1))) {
                 if (contents_end == 0) {
                     contents_beg = off;
                     p_beg_line_index.* = line_index;
@@ -494,12 +487,12 @@ pub fn md_is_link_destination_A(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OF
     off += 1;
 
     while (off < max_end) {
-        if (ctx.ch(off) == '\\' and off + 1 < max_end and ISPUNCT(ctx, off + 1)) {
+        if (ctx.ch(off) == '\\' and off + 1 < max_end and ctx.isPunct(off + 1)) {
             off += 2;
             continue;
         }
 
-        if (ISNEWLINE(ctx, off) or ctx.ch(off) == '<')
+        if (ctx.isNewline(off) or ctx.ch(off) == '<')
             return FALSE;
 
         if (ctx.ch(off) == '>') {
@@ -522,12 +515,12 @@ pub fn md_is_link_destination_B(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OF
     var parenthesis_level: c_int = 0;
 
     while (off < max_end) {
-        if (ctx.ch(off) == '\\' and off + 1 < max_end and ISPUNCT(ctx, off + 1)) {
+        if (ctx.ch(off) == '\\' and off + 1 < max_end and ctx.isPunct(off + 1)) {
             off += 2;
             continue;
         }
 
-        if (ISWHITESPACE(ctx, off) or ISCNTRL(ctx, off))
+        if (ctx.isWhitespace(off) or ctx.isCntrl(off))
             break;
 
         // Balanced pairs of unescaped '(' ')', nesting capped at 32 (cmark #214).
@@ -578,7 +571,7 @@ pub fn md_is_link_title(
     var line_index: MD_SIZE = 0;
 
     // White space with up to one line break.
-    while (off < lines[line_index].end and ISWHITESPACE(ctx, off))
+    while (off < lines[line_index].end and ctx.isWhitespace(off))
         off += 1;
     if (off >= lines[line_index].end) {
         line_index += 1;
@@ -606,7 +599,7 @@ pub fn md_is_link_title(
         const line_end = lines[line_index].end;
 
         while (off < line_end) {
-            if (ctx.ch(off) == '\\' and off + 1 < ctx.size and (ISPUNCT(ctx, off + 1) or ISNEWLINE(ctx, off + 1))) {
+            if (ctx.ch(off) == '\\' and off + 1 < ctx.size and (ctx.isPunct(off + 1) or ctx.isNewline(off + 1))) {
                 off += 1;
             } else if (ctx.ch(off) == closer_char) {
                 // Success.
@@ -658,7 +651,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
     off += 1;
 
     // Optional white space with up to one line break.
-    while (off < lines[line_index].end and ISWHITESPACE(ctx, off))
+    while (off < lines[line_index].end and ctx.isWhitespace(off))
         off += 1;
     if (off >= lines[line_index].end) {
         line_index += 1;
@@ -808,9 +801,9 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, p_
     off += 1;
 
     // Optional white space with up to one line break.
-    while (off < lines[line_index].end and ISWHITESPACE(ctx, off))
+    while (off < lines[line_index].end and ctx.isWhitespace(off))
         off += 1;
-    if (off >= lines[line_index].end and (off >= ctx.size or ISNEWLINE(ctx, off))) {
+    if (off >= lines[line_index].end and (off >= ctx.size or ctx.isNewline(off))) {
         line_index += 1;
         if (line_index >= lines.len)
             return FALSE;
@@ -847,7 +840,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, p_
     }
 
     // Optional whitespace followed with final ')'.
-    while (off < lines[line_index].end and ISWHITESPACE(ctx, off))
+    while (off < lines[line_index].end and ctx.isWhitespace(off))
         off += 1;
     if (off >= lines[line_index].end) {
         line_index += 1;
@@ -890,7 +883,7 @@ pub fn md_is_autolink_uri(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) c_i
     // MD_ASSERT(CH(beg) == '<');
 
     // Scheme.
-    if (off >= max_end or !ISASCII(ctx, off))
+    if (off >= max_end or !ctx.isAscii(off))
         return FALSE;
     off += 1;
     while (true) {
@@ -900,14 +893,14 @@ pub fn md_is_autolink_uri(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) c_i
             return FALSE;
         if (ctx.ch(off) == ':' and off - beg >= 3)
             break;
-        if (!ISALNUM(ctx, off) and ctx.ch(off) != '+' and ctx.ch(off) != '-' and ctx.ch(off) != '.')
+        if (!ctx.isAlnum(off) and ctx.ch(off) != '+' and ctx.ch(off) != '-' and ctx.ch(off) != '.')
             return FALSE;
         off += 1;
     }
 
     // Path after the scheme.
     while (off < max_end and ctx.ch(off) != '>') {
-        if (ISWHITESPACE(ctx, off) or ISCNTRL(ctx, off) or ctx.ch(off) == '<')
+        if (ctx.isWhitespace(off) or ctx.isCntrl(off) or ctx.ch(off) == '<')
             return FALSE;
         off += 1;
     }
@@ -928,7 +921,7 @@ pub fn md_is_autolink_email(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) c
     // MD_ASSERT(CH(beg) == '<');
 
     // Username (before '@').
-    while (off < max_end and (ISALNUM(ctx, off) or ISANYOF(ctx, off, ".!#$%&'*+/=?^_`{|}~-")))
+    while (off < max_end and (ctx.isAlnum(off) or ctx.isAnyOf(off, ".!#$%&'*+/=?^_`{|}~-")))
         off += 1;
     if (off <= beg + 1)
         return FALSE;
@@ -941,7 +934,7 @@ pub fn md_is_autolink_email(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) c
     // '.'-delimited labels: each 1-63 alnum or '-', '-' not first/last.
     label_len = 0;
     while (off < max_end) {
-        if (ISALNUM(ctx, off))
+        if (ctx.isAlnum(off))
             label_len += 1
         else if (ctx.ch(off) == '-' and label_len > 0)
             label_len += 1

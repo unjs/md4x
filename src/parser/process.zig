@@ -30,7 +30,6 @@ const MD_BLOCK_CONTAINER_CLOSER = types.MD_BLOCK_CONTAINER_CLOSER;
 const MD_BLOCK_LOOSE_LIST = types.MD_BLOCK_LOOSE_LIST;
 const MD_BLOCK_SETEXT_HEADER = types.MD_BLOCK_SETEXT_HEADER;
 
-const ISWHITESPACE = util.ISWHITESPACE;
 const MD_ATTRIBUTE_BUILD = util.MD_ATTRIBUTE_BUILD;
 const md_build_attribute = util.md_build_attribute;
 const md_free_attribute = util.md_free_attribute;
@@ -109,8 +108,8 @@ pub fn md_process_table_cell(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, align_val:
     var beg = beg_in;
     var end = end_in;
 
-    while (beg < end and ISWHITESPACE(ctx, beg)) beg += 1;
-    while (end > beg and ISWHITESPACE(ctx, end - 1)) end -= 1;
+    while (beg < end and ctx.isWhitespace(beg)) beg += 1;
+    while (end > beg and ctx.isWhitespace(end - 1)) end -= 1;
 
     det.@"align" = align_val;
     line.beg = beg;
@@ -420,14 +419,14 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
 
     // Build lang attribute (first word of info string).
     var lang_end: OFF = beg;
-    while (lang_end < end and !ISWHITESPACE(ctx, lang_end)) lang_end += 1;
+    while (lang_end < end and !ctx.isWhitespace(lang_end)) lang_end += 1;
     md_build_attribute(ctx, ctx.str(beg), lang_end - beg, 0, &det.lang, lang_build) catch return -1;
 
     det.fence_char = fence_ch;
 
     // Parse extended metadata from the rest of the info string (after lang).
     var rest_beg: OFF = lang_end;
-    while (rest_beg < end and ISWHITESPACE(ctx, rest_beg)) rest_beg += 1;
+    while (rest_beg < end and ctx.isWhitespace(rest_beg)) rest_beg += 1;
 
     if (rest_beg < end) {
         var fn_open: OFF = 0;

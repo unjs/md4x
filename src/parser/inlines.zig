@@ -39,19 +39,8 @@ const MD_MARK_AUTOLINK_MISSING_MAILTO = types.MD_MARK_AUTOLINK_MISSING_MAILTO;
 const MD_MARK_VALIDPERMISSIVEAUTOLINK = types.MD_MARK_VALIDPERMISSIVEAUTOLINK;
 const MD_MARK_HASNESTEDBRACKETS = types.MD_MARK_HASNESTEDBRACKETS;
 
-const ISALNUM = util.ISALNUM;
-const ISALPHA = util.ISALPHA;
-const ISANYOF = util.ISANYOF;
 const ISANYOF_ = util.ISANYOF_;
-const ISBLANK = util.ISBLANK;
-const ISNEWLINE = util.ISNEWLINE;
-const ISPUNCT = util.ISPUNCT;
-const ISWHITESPACE = util.ISWHITESPACE;
 const ISWHITESPACE_ = util.ISWHITESPACE_;
-const ISUNICODEPUNCT = util.ISUNICODEPUNCT;
-const ISUNICODEPUNCTBEFORE = util.ISUNICODEPUNCTBEFORE;
-const ISUNICODEWHITESPACE = util.ISUNICODEWHITESPACE;
-const ISUNICODEWHITESPACEBEFORE = util.ISUNICODEWHITESPACEBEFORE;
 const MD_ATTRIBUTE_BUILD = util.MD_ATTRIBUTE_BUILD;
 const MD_BUILD_ATTR_NO_ESCAPES = util.MD_BUILD_ATTR_NO_ESCAPES;
 const md_ascii_eq = util.md_ascii_eq;
@@ -92,14 +81,14 @@ pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: O
     }
 
     // Tag name.
-    if (off >= line_end or !ISALPHA(ctx, off)) return FALSE;
+    if (off >= line_end or !ctx.isAlpha(off)) return FALSE;
     off += 1;
-    while (off < line_end and (ISALNUM(ctx, off) or ctx.ch(off) == '-')) off += 1;
+    while (off < line_end and (ctx.isAlnum(off) or ctx.ch(off) == '-')) off += 1;
 
     while (true) {
-        while (off < line_end and !ISNEWLINE(ctx, off)) {
+        while (off < line_end and !ctx.isNewline(off)) {
             if (attr_state > 40) {
-                if (attr_state == 41 and (ISBLANK(ctx, off) or ISANYOF(ctx, off, "\"'=<>`"))) {
+                if (attr_state == 41 and (ctx.isBlank(off) or ctx.isAnyOf(off, "\"'=<>`"))) {
                     attr_state = 0;
                     off -= 1; // Put the char back for re-inspection.
                 } else if (attr_state == 42 and ctx.ch(off) == '\'') {
@@ -108,7 +97,7 @@ pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: O
                     attr_state = 0;
                 }
                 off += 1;
-            } else if (ISWHITESPACE(ctx, off)) {
+            } else if (ctx.isWhitespace(off)) {
                 if (attr_state == 0) attr_state = 1;
                 off += 1;
             } else if (attr_state <= 2 and ctx.ch(off) == '>') {
@@ -122,9 +111,9 @@ pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: O
                 if (off >= max_end) return FALSE;
                 p_end.* = off + 1;
                 return TRUE;
-            } else if ((attr_state == 1 or attr_state == 2) and (ISALPHA(ctx, off) or ctx.ch(off) == '_' or ctx.ch(off) == ':')) {
+            } else if ((attr_state == 1 or attr_state == 2) and (ctx.isAlpha(off) or ctx.ch(off) == '_' or ctx.ch(off) == ':')) {
                 off += 1;
-                while (off < line_end and (ISALNUM(ctx, off) or ISANYOF(ctx, off, "_.:-"))) off += 1;
+                while (off < line_end and (ctx.isAlnum(off) or ctx.isAnyOf(off, "_.:-"))) off += 1;
                 attr_state = 2;
             } else if (attr_state == 2 and ctx.ch(off) == '=') {
                 off += 1;
@@ -134,7 +123,7 @@ pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: O
                     attr_state = 43;
                 } else if (ctx.ch(off) == '\'') {
                     attr_state = 42;
-                } else if (!ISANYOF(ctx, off, "\"'=<>`") and !ISNEWLINE(ctx, off)) {
+                } else if (!ctx.isAnyOf(off, "\"'=<>`") and !ctx.isNewline(off)) {
                     attr_state = 41;
                 } else {
                     return FALSE;
@@ -209,9 +198,9 @@ pub fn md_is_html_declaration(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, ma
     if (off + 2 >= lines[0].end) return FALSE;
     if (ctx.ch(off + 1) != '!') return FALSE;
     off += 2;
-    if (off >= lines[0].end or !ISALPHA(ctx, off)) return FALSE;
+    if (off >= lines[0].end or !ctx.isAlpha(off)) return FALSE;
     off += 1;
-    while (off < lines[0].end and ISALPHA(ctx, off)) off += 1;
+    while (off < lines[0].end and ctx.isAlpha(off)) off += 1;
     return md_scan_for_html_closer(ctx, ">", 1, lines, off, max_end, p_end, &ctx.html_decl_horizon);
 }
 
@@ -481,7 +470,7 @@ pub fn md_is_code_span(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, opener: *
             closer_beg -= 1;
         } else {
             closer_beg = lines[line_index - 1].end;
-            while (closer_beg < ctx.size and ISBLANK(ctx, closer_beg)) closer_beg += 1;
+            while (closer_beg < ctx.size and ctx.isBlank(closer_beg)) closer_beg += 1;
         }
     }
 
@@ -551,8 +540,8 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
             const ch = ctx.ch(off);
 
             // Backslash escape.
-            if (ch == '\\' and off + 1 < ctx.size and (ISPUNCT(ctx, off + 1) or ISNEWLINE(ctx, off + 1))) {
-                if (!ISNEWLINE(ctx, off + 1) or line_index + 1 < lines.len) {
+            if (ch == '\\' and off + 1 < ctx.size and (ctx.isPunct(off + 1) or ctx.isNewline(off + 1))) {
+                if (!ctx.isNewline(off + 1) or line_index + 1 < lines.len) {
                     if (addMark(ctx, ch, off, off + 2, MD_MARK_RESOLVED) == null) {
                         ret = -1;
                         return ret;
@@ -570,16 +559,16 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
 
                 while (tmp < line.*.end and ctx.ch(tmp) == ch) tmp += 1;
 
-                if (off == line.*.beg or ISUNICODEWHITESPACEBEFORE(ctx, off))
+                if (off == line.*.beg or ctx.isUnicodeWhitespaceBefore(off))
                     left_level = 0
-                else if (ISUNICODEPUNCTBEFORE(ctx, off))
+                else if (ctx.isUnicodePunctBefore(off))
                     left_level = 1
                 else
                     left_level = 2;
 
-                if (tmp == line.*.end or ISUNICODEWHITESPACE(ctx, tmp))
+                if (tmp == line.*.end or ctx.isUnicodeWhitespace(tmp))
                     right_level = 0
-                else if (ISUNICODEPUNCT(ctx, tmp))
+                else if (ctx.isUnicodePunct(tmp))
                     right_level = 1
                 else
                     right_level = 2;
@@ -750,7 +739,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
 
             // Potential permissive e-mail autolink.
             if (ch == '@') {
-                if (line.*.beg + 1 <= off and ISALNUM(ctx, off - 1) and off + 3 < line.*.end and ISALNUM(ctx, off + 1)) {
+                if (line.*.beg + 1 <= off and ctx.isAlnum(off - 1) and off + 3 < line.*.end and ctx.isAlnum(off + 1)) {
                     if (addMark(ctx, ch, off, off + 1, MD_MARK_POTENTIAL_OPENER) == null) {
                         ret = -1;
                         return ret;
@@ -768,12 +757,12 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
             if (ch == ':') {
                 comp: {
                     if ((ctx.parser.flags & c.MD_FLAG_COMPONENTS != 0) and
-                        off + 1 < line.*.end and ISALPHA(ctx, off + 1) and
-                        (off == line.*.beg or !ISALNUM(ctx, off - 1)))
+                        off + 1 < line.*.end and ctx.isAlpha(off + 1) and
+                        (off == line.*.beg or !ctx.isAlnum(off - 1)))
                     {
                         var name_end: OFF = off + 2;
                         var name_has_hyphen: c_int = 0;
-                        while (name_end < line.*.end and (ISALNUM(ctx, name_end) or ctx.ch(name_end) == '-')) {
+                        while (name_end < line.*.end and (ctx.isAlnum(name_end) or ctx.ch(name_end) == '-')) {
                             if (ctx.ch(name_end) == '-') name_has_hyphen = 1;
                             name_end += 1;
                         }
@@ -917,7 +906,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
             // Potential permissive WWW autolink.
             if (ch == '.') {
                 if (line.*.beg + 3 <= off and md_ascii_eq(ctx.str(off - 3), "www", 3) != 0 and
-                    (off - 3 == line.*.beg or ISUNICODEWHITESPACEBEFORE(ctx, off - 3) or ISUNICODEPUNCTBEFORE(ctx, off - 3)))
+                    (off - 3 == line.*.beg or ctx.isUnicodeWhitespaceBefore(off - 3) or ctx.isUnicodePunctBefore(off - 3)))
                 {
                     if (addMark(ctx, ch, off - 3, off + 1, MD_MARK_POTENTIAL_OPENER) == null) {
                         ret = -1;
@@ -951,9 +940,9 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
 
                 if (tmp - off <= 2) {
                     var flags: u8 = MD_MARK_POTENTIAL_OPENER | MD_MARK_POTENTIAL_CLOSER;
-                    if (off > line.*.beg and !ISUNICODEWHITESPACEBEFORE(ctx, off) and !ISUNICODEPUNCTBEFORE(ctx, off))
+                    if (off > line.*.beg and !ctx.isUnicodeWhitespaceBefore(off) and !ctx.isUnicodePunctBefore(off))
                         flags &= ~MD_MARK_POTENTIAL_OPENER;
-                    if (tmp < line.*.end and !ISUNICODEWHITESPACE(ctx, tmp) and !ISUNICODEPUNCT(ctx, tmp))
+                    if (tmp < line.*.end and !ctx.isUnicodeWhitespace(tmp) and !ctx.isUnicodePunct(tmp))
                         flags &= ~MD_MARK_POTENTIAL_CLOSER;
                     if (flags != 0) {
                         if (addMark(ctx, ch, off, tmp, flags) == null) {
@@ -969,7 +958,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
             // Turn non-trivial whitespace into single space.
             if (ISWHITESPACE_(ch)) {
                 var tmp: OFF = off + 1;
-                while (tmp < line.*.end and ISWHITESPACE(ctx, tmp)) tmp += 1;
+                while (tmp < line.*.end and ctx.isWhitespace(tmp)) tmp += 1;
                 if (tmp - off > 1 or ch != ' ') {
                     if (addMark(ctx, ch, off, tmp, MD_MARK_RESOLVED) == null) {
                         ret = -1;
@@ -1165,7 +1154,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
             if (is_link != 0) {
                 var off: OFF = dest_beg;
                 while (off < dest_end) : (off += 1) {
-                    if (ISNEWLINE(ctx, off)) {
+                    if (ctx.isNewline(off)) {
                         is_link = FALSE;
                         break;
                     }
@@ -1546,12 +1535,12 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
 
     if (opener.ch == '@') {
         while (beg > line_beg) {
-            if (ISALNUM(ctx, beg - 1)) {
+            if (ctx.isAlnum(beg - 1)) {
                 beg -= 1;
-            } else if (beg >= line_beg + 2 and ISALNUM(ctx, beg - 2) and
-                ISANYOF(ctx, beg - 1, ".-_+") and
+            } else if (beg >= line_beg + 2 and ctx.isAlnum(beg - 2) and
+                ctx.isAnyOf(beg - 1, ".-_+") and
                 md_scan_left_for_resolved_mark(ctx, left_cursor, beg - 1, &left_cursor) == null and
-                ISALNUM(ctx, beg))
+                ctx.isAlnum(beg))
             {
                 beg -= 1;
             } else {
@@ -1561,9 +1550,9 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
         if (beg == opener.beg) return; // empty user name
     }
 
-    if (beg == line_beg or ISUNICODEWHITESPACEBEFORE(ctx, beg) or ISANYOF(ctx, beg - 1, "({[")) {
+    if (beg == line_beg or ctx.isUnicodeWhitespaceBefore(beg) or ctx.isAnyOf(beg - 1, "({[")) {
         left_boundary_ok = TRUE;
-    } else if (ISANYOF(ctx, beg - 1, "*_~")) {
+    } else if (ctx.isAnyOf(beg - 1, "*_~")) {
         const left_mark = md_scan_left_for_resolved_mark(ctx, left_cursor, beg - 1, &left_cursor);
         if (left_mark != null and (left_mark.*.flags & MD_MARK_OPENER != 0)) left_boundary_ok = TRUE;
     }
@@ -1576,19 +1565,19 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
 
         if (URL_MAP[i].start_char != 0) {
             if (end >= line_end or ctx.ch(end) != URL_MAP[i].start_char) continue;
-            if (URL_MAP[i].min_components > 0 and (end + 1 >= line_end or !ISALNUM(ctx, end + 1))) continue;
+            if (URL_MAP[i].min_components > 0 and (end + 1 >= line_end or !ctx.isAlnum(end + 1))) continue;
             end += 1;
         }
 
         while (end < line_end) {
-            if (ISALNUM(ctx, end)) {
+            if (ctx.isAlnum(end)) {
                 if (n_components == 0) n_components += 1;
                 end += 1;
             } else if (end < line_end and
-                ISANYOF(ctx, end, URL_MAP[i].allowed_nonalnum_chars) and
+                ctx.isAnyOf(end, URL_MAP[i].allowed_nonalnum_chars) and
                 md_scan_right_for_resolved_mark(ctx, right_cursor, end, &right_cursor) == null and
-                ((end > line_beg and (ISALNUM(ctx, end - 1) or ctx.ch(end - 1) == ')')) or ctx.ch(end) == '(') and
-                ((end + 1 < line_end and (ISALNUM(ctx, end + 1) or ctx.ch(end + 1) == '(')) or ctx.ch(end) == ')'))
+                ((end > line_beg and (ctx.isAlnum(end - 1) or ctx.ch(end - 1) == ')')) or ctx.ch(end) == '(') and
+                ((end + 1 < line_end and (ctx.isAlnum(end + 1) or ctx.ch(end + 1) == '(')) or ctx.ch(end) == ')'))
             {
                 if (ctx.ch(end) == URL_MAP[i].delim_char) n_components += 1;
 
@@ -1612,7 +1601,7 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
         if (opener.ch == '@') break; // e-mail wants only the host
     }
 
-    if (end == line_end or ISUNICODEWHITESPACE(ctx, end) or ISANYOF(ctx, end, ")}].!?,;")) {
+    if (end == line_end or ctx.isUnicodeWhitespace(end) or ctx.isAnyOf(end, ")}].!?,;")) {
         right_boundary_ok = TRUE;
     } else {
         const right_mark = md_scan_right_for_resolved_mark(ctx, right_cursor, end, &right_cursor);
@@ -1951,7 +1940,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
         if (off >= mark.*.beg) {
             switch (mark.*.ch) {
                 '\\' => {
-                    if (ISNEWLINE(ctx, mark.*.beg + 1)) {
+                    if (ctx.isNewline(mark.*.beg + 1)) {
                         enforce_hardbreak = 1;
                     } else {
                         ret = mdText(ctx, text_type, ctx.str(mark.*.beg + 1), 1);
@@ -2161,7 +2150,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                     var raw_props: [*c]const CHAR = null;
                     var raw_props_size: SZ = 0;
 
-                    while (name_end_off < opener.*.end and (ISALNUM(ctx, name_end_off) or ctx.ch(name_end_off) == '-')) name_end_off += 1;
+                    while (name_end_off < opener.*.end and (ctx.isAlnum(name_end_off) or ctx.ch(name_end_off) == '-')) name_end_off += 1;
                     const tag_size: SZ = name_end_off - (opener.*.beg + 1);
 
                     if (props_mark.*.ch == 'D' and props_mark.*.end > props_mark.*.beg) {
@@ -2210,7 +2199,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
 
             if (text_type == c.MD_TEXT_CODE or text_type == c.MD_TEXT_LATEXMATH) {
                 tmp = off;
-                while (off < ctx.size and ISBLANK(ctx, off)) off += 1;
+                while (off < ctx.size and ctx.isBlank(off)) off += 1;
                 if (off > tmp) {
                     ret = mdText(ctx, text_type, ctx.str(tmp), off - tmp);
                     if (ret != 0) return ret;
@@ -2221,7 +2210,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 }
             } else if (text_type == c.MD_TEXT_HTML) {
                 tmp = off;
-                while (tmp < end and ISBLANK(ctx, tmp)) tmp += 1;
+                while (tmp < end and ctx.isBlank(tmp)) tmp += 1;
                 if (tmp > off) {
                     ret = mdText(ctx, c.MD_TEXT_HTML, ctx.str(off), tmp - off);
                     if (ret != 0) return ret;
@@ -2235,8 +2224,8 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                     if (enforce_hardbreak != 0 or (ctx.parser.flags & c.MD_FLAG_HARD_SOFT_BREAKS != 0)) {
                         break_type = c.MD_TEXT_BR;
                     } else {
-                        while (off < ctx.size and ISBLANK(ctx, off)) off += 1;
-                        if (off >= line.*.end + 2 and ctx.ch(off - 2) == ' ' and ctx.ch(off - 1) == ' ' and ISNEWLINE(ctx, off))
+                        while (off < ctx.size and ctx.isBlank(off)) off += 1;
+                        if (off >= line.*.end + 2 and ctx.ch(off - 2) == ' ' and ctx.ch(off - 1) == ' ' and ctx.isNewline(off))
                             break_type = c.MD_TEXT_BR;
                     }
                 }
