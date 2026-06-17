@@ -89,6 +89,7 @@ test/
     seed-corpus/       # Seed inputs (commonmark, gfm, frontmatter, components, etc.)
 scripts/
   run-tests.ts            # Main test runner (runs all suites)
+  diff-corpus.sh          # Output-parity harness (sha256 of all 6 renderer formats over the corpus)
   build-entity-map.ts     # Generates entity.c from WHATWG spec
   build-folding-map.ts    # Unicode case folding map generator
   build-punct-map.ts      # Punctuation character map generator

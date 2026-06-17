@@ -20,6 +20,9 @@
 - **C → Zig migration**: The entire library implementation (parser, all renderers, entity table, and wasm/napi glue) was ported from C to Zig for memory safety. The C ABI and all output are byte-for-byte unchanged; the public ABI headers and the CLI driver remain C.
 - Extracted the shared component-property parser and JSON writer / YAML-to-JSON helpers into reusable Zig modules (`md4x-props.zig`, `md4x-json.zig`).
 - Fixed a pre-existing parser bug that produced nondeterministic output on orphaned block-component (`::`) and setext edge cases.
+- **Performance**: Built all Zig modules with `single_threaded = true` (the library is single-threaded by design), dropping thread-local/atomic scaffolding from native codegen. WASM size is unchanged (already single-threaded).
+- **Performance**: Vectorized the HTML renderer's escape scan with a 16-wide SIMD compare (`render_html_escaped`), moving the Zig port ~1.22x ahead of the original C scalar scan on the medium benchmark. Output is byte-for-byte unchanged.
+- Added `scripts/diff-corpus.sh`, an output-parity harness hashing all six renderer formats over the spec/extension/regression suites plus the fuzzer seed corpus.
 
 ## v0.0.11
 
