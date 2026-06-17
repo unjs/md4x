@@ -19,6 +19,7 @@ const FALSE = types.FALSE;
 const MD_CTX = types.MD_CTX;
 const MD_LINE = types.MD_LINE;
 const MD_REF_DEF = types.MD_REF_DEF;
+const c_allocator = types.c_allocator;
 const MD_REF_DEF_LIST = types.MD_REF_DEF_LIST;
 
 const ISNEWLINE_ = util.ISNEWLINE_;
@@ -209,10 +210,10 @@ pub fn md_ref_def_cmp_for_sort(a: ?*const anyopaque, b: ?*const anyopaque) callc
 
 // Faithful port of md_build_ref_def_hashtable (md4x.c ~1793). Returns 0 / -1.
 pub fn md_build_ref_def_hashtable(ctx: *MD_CTX) c_int {
-    if (ctx.n_ref_defs == 0)
+    if (ctx.ref_defs.items.len == 0)
         return 0;
 
-    ctx.ref_def_hashtable_size = @divTrunc(ctx.n_ref_defs * 5, 4);
+    ctx.ref_def_hashtable_size = @divTrunc(@as(c_int, @intCast(ctx.ref_defs.items.len)) * 5, 4);
     ctx.ref_def_hashtable = @ptrCast(@alignCast(std.c.malloc(@as(usize, @intCast(ctx.ref_def_hashtable_size)) * @sizeOf(?*anyopaque))));
     if (ctx.ref_def_hashtable == null) {
         ctx.log("malloc() failed.");
@@ -220,13 +221,13 @@ pub fn md_build_ref_def_hashtable(ctx: *MD_CTX) c_int {
     }
     @memset(ctx.ref_def_hashtable[0..@intCast(ctx.ref_def_hashtable_size)], null);
 
-    const ref_defs_base = @intFromPtr(ctx.ref_defs);
-    const ref_defs_end = @intFromPtr(ctx.ref_defs + @as(usize, @intCast(ctx.n_ref_defs)));
+    const ref_defs_base = @intFromPtr(ctx.ref_defs.items.ptr);
+    const ref_defs_end = @intFromPtr(ctx.ref_defs.items.ptr + ctx.ref_defs.items.len);
 
     // Build the buckets.
     var i: c_int = 0;
-    while (i < ctx.n_ref_defs) : (i += 1) {
-        const def: *MD_REF_DEF = @ptrCast(&ctx.ref_defs[@intCast(i)]);
+    while (i < @as(c_int, @intCast(ctx.ref_defs.items.len))) : (i += 1) {
+        const def: *MD_REF_DEF = @ptrCast(&ctx.ref_defs.items[@intCast(i)]);
 
         def.hash = md_link_label_hash(def.label, def.label_size);
         const slot: usize = @intCast(@mod(def.hash, @as(c_uint, @intCast(ctx.ref_def_hashtable_size))));
@@ -313,8 +314,8 @@ pub fn md_build_ref_def_hashtable(ctx: *MD_CTX) c_int {
 // Faithful port of md_free_ref_def_hashtable (md4x.c ~1907).
 pub fn md_free_ref_def_hashtable(ctx: *MD_CTX) void {
     if (ctx.ref_def_hashtable != null) {
-        const ref_defs_base = @intFromPtr(ctx.ref_defs);
-        const ref_defs_end = @intFromPtr(ctx.ref_defs + @as(usize, @intCast(ctx.n_ref_defs)));
+        const ref_defs_base = @intFromPtr(ctx.ref_defs.items.ptr);
+        const ref_defs_end = @intFromPtr(ctx.ref_defs.items.ptr + ctx.ref_defs.items.len);
 
         var i: c_int = 0;
         while (i < ctx.ref_def_hashtable_size) : (i += 1) {
@@ -345,8 +346,8 @@ pub fn md_lookup_ref_def(ctx: *MD_CTX, label: [*c]const CHAR, label_size: SZ) ?*
         return null;
     }
 
-    const ref_defs_base = @intFromPtr(ctx.ref_defs);
-    const ref_defs_end = @intFromPtr(ctx.ref_defs + @as(usize, @intCast(ctx.n_ref_defs)));
+    const ref_defs_base = @intFromPtr(ctx.ref_defs.items.ptr);
+    const ref_defs_end = @intFromPtr(ctx.ref_defs.items.ptr + ctx.ref_defs.items.len);
     const bucket_addr = @intFromPtr(bucket);
 
     if (ref_defs_base <= bucket_addr and bucket_addr < ref_defs_end) {
@@ -377,14 +378,14 @@ pub fn md_lookup_ref_def(ctx: *MD_CTX, label: [*c]const CHAR, label_size: SZ) ?*
 // Faithful port of md_free_ref_defs (md4x.c ~2491).
 pub fn md_free_ref_defs(ctx: *MD_CTX) void {
     var i: c_int = 0;
-    while (i < ctx.n_ref_defs) : (i += 1) {
-        const def: *MD_REF_DEF = @ptrCast(&ctx.ref_defs[@intCast(i)]);
+    while (i < @as(c_int, @intCast(ctx.ref_defs.items.len))) : (i += 1) {
+        const def: *MD_REF_DEF = @ptrCast(&ctx.ref_defs.items[@intCast(i)]);
         if (def.label_needs_free)
             std.c.free(def.label);
         if (def.title_needs_free)
             std.c.free(def.title);
     }
-    std.c.free(ctx.ref_defs);
+    ctx.ref_defs.deinit(c_allocator);
 }
 
 // ============================================================================
@@ -684,12 +685,14 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
         return FALSE;
 
     // So, it _is_ a reference definition. Remember it.
-    util.growArray(MD_REF_DEF, &ctx.ref_defs, &ctx.alloc_ref_defs, ctx.n_ref_defs, 16) catch {
+    // Reserve (but do not yet commit) one slot: the abort paths below must not
+    // leave a half-filled committed entry, so we only bump items.len on success.
+    ctx.ref_defs.ensureUnusedCapacity(c_allocator, 1) catch {
         ctx.log("realloc() failed.");
         // ret stays 0 → abort.
         return md_is_link_reference_definition_abort(def, ret);
     };
-    def = @as(*MD_REF_DEF, @ptrCast(&ctx.ref_defs[@intCast(ctx.n_ref_defs)]));
+    def = &ctx.ref_defs.items.ptr[ctx.ref_defs.items.len];
     @memset(std.mem.asBytes(def.?), 0);
 
     if (label_is_multiline) {
@@ -713,8 +716,8 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
     def.?.dest_beg = dest_contents_beg;
     def.?.dest_end = dest_contents_end;
 
-    // Success.
-    ctx.n_ref_defs += 1;
+    // Success: commit the reserved slot.
+    ctx.ref_defs.items.len += 1;
     return @as(c_int, @intCast(line_index)) + 1;
 }
 

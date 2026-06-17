@@ -238,10 +238,11 @@ pub const MD_CTX = struct {
     buffer: [*c]CHAR = null,
     alloc_buffer: c_uint = 0,
 
-    // Reference definitions.
-    ref_defs: [*c]MD_REF_DEF = null,
-    n_ref_defs: c_int = 0,
-    alloc_ref_defs: c_int = 0,
+    // Reference definitions. (PLAN 8.1: the flat ref-def array is an
+    // ArrayListUnmanaged; the hashtable still stores raw `&ref_defs.items[i]`
+    // pointers + the pointer-identity range check, valid because the table is
+    // built only after collection completes — no append moves the buffer after.)
+    ref_defs: std.ArrayListUnmanaged(MD_REF_DEF) = .empty,
     ref_def_hashtable: [*c]?*anyopaque = null,
     ref_def_hashtable_size: c_int = 0,
     max_ref_def_output: SZ = 0,

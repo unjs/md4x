@@ -467,9 +467,20 @@ stale-pointer risk):
   invariant as the old `[*c]` code. Verified incl. the ReleaseSafe Zig-native
   fuzz smoke (live bounds-checks) + html+ast libFuzzers (ASan/UBSan, 0
   crash/leak).
-- ⏳ remaining: `ref_defs`, `marks` (`ref_defs` interacts with the hashtable +
-  qsort/bsearch and the `MD_REF_DEF_LIST` flexible-array caveat; `marks` last —
-  the cached-`&marks[i]` stale-pointer hazard below).
+- ✅ **`ref_defs`** — the flat ref-def array (the hashtable's pointer-identity
+  trick made this delicate). The hashtable still stores raw `&ref_defs.items[i]`
+  pointers and the in-range/out-of-range check is recomputed from
+  `ctx.ref_defs.items.ptr` / `.items.len` — valid because the table is built
+  only after collection completes (no append moves the buffer afterward). The
+  add site reserves with `ensureUnusedCapacity` + writes the uncommitted slot at
+  `items.ptr[items.len]`, committing via `items.len += 1` **only on success** so
+  the merge-lines abort paths can't leave a half-filled committed entry. The
+  `MD_REF_DEF_LIST` flexible-array buckets are untouched (still manual
+  malloc/realloc + their own `n_ref_defs`/`alloc_ref_defs` header fields).
+  Verified incl. the ReleaseSafe Zig-native fuzz smoke + html+ast libFuzzers
+  (ASan/UBSan, 0 crash/leak).
+- ⏳ remaining: `marks` (last — the hottest array and the cached-`&marks[i]`
+  stale-pointer hazard below).
 
 - **Caveats (unchanged from §2.1):** `block_bytes` is a heterogeneous byte arena
   (interleaved packed `MD_BLOCK`/`MD_LINE`/`MD_VERBATIMLINE` by raw offset) — at
