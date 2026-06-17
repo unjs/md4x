@@ -291,7 +291,7 @@ fn md_parse_impl(alloc: std.mem.Allocator, text: [*c]const CHAR, size: SZ, parse
     // so it MUST be torn down before md_free_ref_defs frees/deinits ref_defs.
     md_free_ref_def_hashtable(&ctx);
     md_free_ref_defs(&ctx);
-    std.c.free(ctx.buffer);
+    util.free_array_a(CHAR, ctx.alloc, ctx.buffer, @intCast(ctx.alloc_buffer));
     ctx.marks.deinit(ctx.alloc);
     util.arena_free(ctx.alloc, ctx.block_bytes, @intCast(ctx.alloc_block_bytes));
     ctx.containers.deinit(ctx.alloc);
@@ -416,7 +416,7 @@ fn _test_run_inline(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ) 
     // Hashtable before ref_defs: it indexes into ctx.ref_defs (see md_parse_impl).
     md_free_ref_def_hashtable(&ctx);
     md_free_ref_defs(&ctx);
-    std.c.free(ctx.buffer);
+    util.free_array_a(CHAR, ctx.alloc, ctx.buffer, @intCast(ctx.alloc_buffer));
     ctx.marks.deinit(ctx.alloc);
     ctx.inline_attrs.deinit(ctx.alloc);
     return ret;
@@ -635,7 +635,7 @@ fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ,
     // Hashtable before ref_defs: it indexes into ctx.ref_defs (see md_parse_impl).
     md_free_ref_def_hashtable(&ctx);
     md_free_ref_defs(&ctx);
-    std.c.free(ctx.buffer);
+    util.free_array_a(CHAR, ctx.alloc, ctx.buffer, @intCast(ctx.alloc_buffer));
     ctx.marks.deinit(ctx.alloc);
     ctx.inline_attrs.deinit(ctx.alloc);
     return ret;
@@ -941,6 +941,7 @@ test "OOM: full md_parse sweep is crash- and leak-free under FailingAllocator" {
         "| a | b |\n|:--|--:|\n| 1 | 2 |\n| 3 | 4 |\n\n" ++
         "```js [app.js] {1-2,4} extra\ncode line\nmore code\n```\n\n" ++
         "::alert{type=\"info\"}\nNested **content** here.\n::\n\n" ++
+        "Mail me@example.com or visit www.example.org for details.\n\n" ++
         "- one\n- two\n  - nested\n\n> quote\n";
     var probe: AbortProbe = .{};
     var p = probe.parser();

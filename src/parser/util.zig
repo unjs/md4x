@@ -168,9 +168,10 @@ pub fn md_temp_buffer(ctx: *MD_CTX, sz: SZ) c_int {
     if (sz > ctx.alloc_buffer) {
         // C: new_size = ((sz) + (sz)/2 + 128) & ~127. Arithmetic in SZ (c_uint).
         const new_size: SZ = (sz +% sz / 2 +% 128) & ~@as(SZ, 127);
-        // Use raw libc realloc to mirror C exactly (realloc(ctx->buffer, new_size)).
-        // ctx.buffer may be null on first call, which realloc treats as malloc.
-        const new_buffer = c_realloc_array(CHAR, ctx.buffer, @intCast(new_size));
+        // Routed through ctx.alloc (exact old length = alloc_buffer). ctx.buffer
+        // is null on the first call, which realloc_array_a treats as a fresh
+        // alloc; on OOM it returns null leaving the old buffer intact.
+        const new_buffer = realloc_array_a(CHAR, ctx.alloc, ctx.buffer, @intCast(ctx.alloc_buffer), @intCast(new_size));
         if (new_buffer == null) {
             ctx.log("realloc() failed.");
             return -1;
