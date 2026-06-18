@@ -25,16 +25,9 @@
 
 const std = @import("std");
 
-const c = @cImport({
-    @cInclude("md4x.h");
-    @cInclude("md4x-html.h");
-    @cInclude("md4x-ast.h");
-    @cInclude("md4x-ansi.h");
-    @cInclude("md4x-meta.h");
-    @cInclude("md4x-text.h");
-    @cInclude("md4x-markdown.h");
-    @cInclude("md4x-heal.h");
-});
+// The md4x ABI surface (MD_* types/flags, parser + renderer entry points,
+// entity) now lives in the Zig-native abi module; libc comes from std.c.
+const c = @import("abi");
 
 // We manage the result/output buffer memory with libc malloc/realloc/free so
 // that the JS-side md4x_free(md4x_result_ptr()) (which frees the result buffer)

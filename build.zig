@@ -1,36 +1,19 @@
 const std = @import("std");
 const zon = @import("build.zig.zon");
 
-const version = std.SemanticVersion.parse(zon.version) catch unreachable;
-
 // --- Source files ---
 
-// Parser is now src/md4x.zig (ported from src/md4x.c), linked as its own static
-// lib (addParserLib) into every artifact, exporting the md4x.h C ABI (md_parse).
-// Entity table is now src/entity.zig (linked as its own static lib). No C
-// sources remain shared across all artifacts, so this base is empty.
-const renderer_sources = [_][]const u8{};
-const cli_sources = renderer_sources ++ .{ "src/cli/md4x-cli.c", "src/cli/cmdline.c" };
-// WASM/NAPI glue are now Zig (src/md4x-wasm.zig, src/md4x-napi.zig). They are the
-// root source of their respective artifacts; no C glue sources remain.
-
-// Renderers/utilities ported from C to Zig. Each is compiled as a static lib
-// from src/renderers/<name>.zig (via addZigRenderer) and linked into every
-// artifact (CLI exe, WASM, NAPI). Add a name here as each unit is migrated.
+// The entire library is Zig: parser (src/md4x.zig + src/parser/), renderers
+// (src/renderers/<name>.zig), entity table (src/entity.zig), CLI driver
+// (src/cli/md4x-cli.zig), and the WASM/NAPI glue. The only C compiled into any
+// artifact is the vendored libyaml dependency. The shared ABI types live in
+// src/abi.zig (added as the "abi" module to every Zig compile step).
+//
+// Each renderer/utility is compiled as a static lib (via addZigRenderer) and
+// linked into every artifact (CLI exe, WASM, NAPI).
 const zig_renderers = [_][]const u8{ "md4x-heal", "md4x-text", "md4x-markdown", "md4x-ansi", "md4x-meta", "md4x-ast", "md4x-html" };
 
 // --- Compiler flags ---
-
-const c_flags: []const []const u8 = &.{
-    std.fmt.comptimePrint("-DMD_VERSION_MAJOR={d}", .{version.major}),
-    std.fmt.comptimePrint("-DMD_VERSION_MINOR={d}", .{version.minor}),
-    std.fmt.comptimePrint("-DMD_VERSION_RELEASE={d}", .{version.patch}),
-    "-Wall",
-    "-Wextra",
-    "-Wshadow",
-    "-Wdeclaration-after-statement",
-    "-O2",
-};
 
 const libyaml_c_flags: []const []const u8 = &.{
     "-DYAML_DECLARE_STATIC",
@@ -112,9 +95,8 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run parser unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
-    // --- Fuzzer targets ---
+    // --- Fuzzer target (Zig-native, coverage-instrumented) ---
 
-    addFuzzers(b);
     addZigFuzzer(b, target, include_paths, libyaml_src);
 
     // --- WASM & NAPI targets ---
@@ -215,6 +197,7 @@ fn addWasm(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
         }),
     });
     md4x_wasm.rdynamic = true;
+    md4x_wasm.root_module.addImport("abi", b.createModule(.{ .root_source_file = b.path("src/abi.zig") }));
     md4x_wasm.root_module.addCSourceFiles(opts.libyaml_src);
     for (opts.include_paths) |p| md4x_wasm.root_module.addIncludePath(p);
     md4x_wasm.root_module.linkLibrary(addParserLib(b, wasm_target, opts.optimize, opts.strip, opts.include_paths));
@@ -292,6 +275,7 @@ fn addNapi(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
                 .single_threaded = true,
             }),
         });
+        napi_lib.root_module.addImport("abi", b.createModule(.{ .root_source_file = b.path("src/abi.zig") }));
         napi_lib.root_module.addCSourceFiles(opts.libyaml_src);
         for (opts.include_paths) |p| napi_lib.root_module.addIncludePath(p);
         // node_api.h lives outside the project tree (node_modules). Resolve to an
@@ -333,12 +317,6 @@ fn addNapi(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
     return napi_all_step;
 }
 
-fn addFuzzers(b: *std.Build) void {
-    const fuzz_build = b.addSystemCommand(&.{ "sh", "test/fuzzers/build.sh" });
-    const fuzz_step = b.step("fuzz", "Build all C/libFuzzer harnesses (requires clang)");
-    fuzz_step.dependOn(&fuzz_build.step);
-}
-
 /// Zig-native, coverage-instrumented fuzz harness (`src/fuzz.zig`), complementing
 /// the C/libFuzzer harnesses. It @imports the parser + renderer sources directly,
 /// so Zig's own fuzzer (`zig build fuzz-zig --fuzz`) instruments the library and
@@ -359,6 +337,7 @@ fn addZigFuzzer(b: *std.Build, target: std.Build.ResolvedTarget, include_paths: 
         }),
     });
     for (include_paths) |p| fuzz_tests.root_module.addIncludePath(p);
+    fuzz_tests.root_module.addImport("abi", b.createModule(.{ .root_source_file = b.path("src/abi.zig") }));
     fuzz_tests.root_module.addCSourceFiles(libyaml_src);
     const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
     const fuzz_zig_step = b.step("fuzz-zig", "Run the Zig-native fuzz harness (add --fuzz for coverage-guided fuzzing)");

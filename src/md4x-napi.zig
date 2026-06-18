@@ -25,17 +25,12 @@
 
 const std = @import("std");
 
+// node_api.h stays a @cImport (external); the md4x ABI surface (MD_* types/
+// flags + parser/renderer entry points) now comes from the Zig abi module.
 const c = @cImport({
     @cInclude("node_api.h");
-    @cInclude("md4x.h");
-    @cInclude("md4x-html.h");
-    @cInclude("md4x-ast.h");
-    @cInclude("md4x-ansi.h");
-    @cInclude("md4x-meta.h");
-    @cInclude("md4x-text.h");
-    @cInclude("md4x-markdown.h");
-    @cInclude("md4x-heal.h");
 });
+const abi = @import("abi");
 
 // Growable output buffer
 const napi_buf = struct {
@@ -45,7 +40,7 @@ const napi_buf = struct {
     err: c_int,
 };
 
-fn napi_buf_append(text: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) void {
+fn napi_buf_append(text: [*c]const abi.MD_CHAR, size: abi.MD_SIZE, userdata: ?*anyopaque) callconv(.c) void {
     const buf: *napi_buf = @ptrCast(@alignCast(userdata.?));
     if (buf.err != 0) return;
     if (buf.size + size > buf.cap) {
@@ -66,9 +61,9 @@ fn napi_buf_append(text: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyop
 
 // Generic renderer wrapper
 const md4x_render_fn = *const fn (
-    [*c]const c.MD_CHAR,
-    c.MD_SIZE,
-    ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) callconv(.c) void,
+    [*c]const abi.MD_CHAR,
+    abi.MD_SIZE,
+    ?*const fn ([*c]const abi.MD_CHAR, abi.MD_SIZE, ?*anyopaque) callconv(.c) void,
     ?*anyopaque,
     c_uint,
     c_uint,
@@ -105,7 +100,7 @@ fn render_impl(env: c.napi_env, info: c.napi_callback_info, fn_ptr: md4x_render_
 
     // Render with all extensions enabled
     var buf = napi_buf{ .data = null, .size = 0, .cap = 0, .err = 0 };
-    const ret = fn_ptr(@ptrCast(input), @intCast(input_size), napi_buf_append, &buf, c.MD_DIALECT_ALL, renderer_flags);
+    const ret = fn_ptr(@ptrCast(input), @intCast(input_size), napi_buf_append, &buf, abi.MD_DIALECT_ALL, renderer_flags);
     std.c.free(input);
 
     if (ret != 0 or buf.err != 0) {
@@ -153,7 +148,7 @@ fn md4x_napi_to_html(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c
 
     // Render
     var buf = napi_buf{ .data = null, .size = 0, .cap = 0, .err = 0 };
-    const ret = c.md_html(@ptrCast(input), @intCast(input_size), napi_buf_append, &buf, c.MD_DIALECT_ALL, renderer_flags);
+    const ret = abi.md_html(@ptrCast(input), @intCast(input_size), napi_buf_append, &buf, abi.MD_DIALECT_ALL, renderer_flags);
     std.c.free(input);
 
     if (ret != 0 or buf.err != 0) {
@@ -188,7 +183,7 @@ fn md4x_napi_to_html_meta(env: c.napi_env, info: c.napi_callback_info) callconv(
     _ = c.napi_get_value_string_utf8(env, argv[0], @ptrCast(input), input_size + 1, &input_size);
 
     var buf = napi_buf{ .data = null, .size = 0, .cap = 0, .err = 0 };
-    const ret = c.md_html(@ptrCast(input), @intCast(input_size), napi_buf_append, &buf, c.MD_DIALECT_ALL, c.MD_HTML_FLAG_CODE_META);
+    const ret = abi.md_html(@ptrCast(input), @intCast(input_size), napi_buf_append, &buf, abi.MD_DIALECT_ALL, abi.MD_HTML_FLAG_CODE_META);
     std.c.free(input);
 
     if (ret != 0) {
@@ -205,11 +200,11 @@ fn md4x_napi_to_html_meta(env: c.napi_env, info: c.napi_callback_info) callconv(
 }
 
 fn md4x_napi_to_ast(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
-    return render_impl(env, info, c.md_ast);
+    return render_impl(env, info, abi.md_ast);
 }
 
 fn md4x_napi_to_ansi(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
-    return render_impl(env, info, c.md_ansi);
+    return render_impl(env, info, abi.md_ansi);
 }
 
 fn md4x_napi_to_ansi_meta(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
@@ -232,7 +227,7 @@ fn md4x_napi_to_ansi_meta(env: c.napi_env, info: c.napi_callback_info) callconv(
     _ = c.napi_get_value_string_utf8(env, argv[0], @ptrCast(input), input_size + 1, &input_size);
 
     var buf = napi_buf{ .data = null, .size = 0, .cap = 0, .err = 0 };
-    const ret = c.md_ansi(@ptrCast(input), @intCast(input_size), napi_buf_append, &buf, c.MD_DIALECT_ALL, c.MD_ANSI_FLAG_CODE_META);
+    const ret = abi.md_ansi(@ptrCast(input), @intCast(input_size), napi_buf_append, &buf, abi.MD_DIALECT_ALL, abi.MD_ANSI_FLAG_CODE_META);
     std.c.free(input);
 
     if (ret != 0 or buf.err != 0) {
@@ -249,15 +244,15 @@ fn md4x_napi_to_ansi_meta(env: c.napi_env, info: c.napi_callback_info) callconv(
 }
 
 fn md4x_napi_to_meta(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
-    return render_impl(env, info, c.md_meta);
+    return render_impl(env, info, abi.md_meta);
 }
 
 fn md4x_napi_to_text(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
-    return render_impl(env, info, c.md_text);
+    return render_impl(env, info, abi.md_text);
 }
 
 fn md4x_napi_to_markdown(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
-    return render_impl(env, info, c.md_markdown);
+    return render_impl(env, info, abi.md_markdown);
 }
 
 fn md4x_napi_heal(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
@@ -280,7 +275,7 @@ fn md4x_napi_heal(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.na
     _ = c.napi_get_value_string_utf8(env, argv[0], @ptrCast(input), input_size + 1, &input_size);
 
     var buf = napi_buf{ .data = null, .size = 0, .cap = 0, .err = 0 };
-    const ret = c.md_heal(@ptrCast(input), @intCast(input_size), napi_buf_append, &buf);
+    const ret = abi.md_heal(@ptrCast(input), @intCast(input_size), napi_buf_append, &buf);
     std.c.free(input);
 
     if (ret != 0 or buf.err != 0) {

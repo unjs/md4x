@@ -1,7 +1,0 @@
-name: md4x CodeQL config
-
-paths-ignore:
-  - website
-  - packages
-  - scripts
-  - test/fuzzers

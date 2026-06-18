@@ -43,16 +43,10 @@ comptime {
     _ = @import("renderers/md4x-heal.zig");
 }
 
-const c = @cImport({
-    @cInclude("md4x.h");
-    @cInclude("md4x-html.h");
-    @cInclude("md4x-ast.h");
-    @cInclude("md4x-ansi.h");
-    @cInclude("md4x-text.h");
-    @cInclude("md4x-meta.h");
-    @cInclude("md4x-markdown.h");
-    @cInclude("md4x-heal.h");
-});
+// MD_* types + parser/renderer entry points come from the Zig abi module; the
+// definitions are pulled into this module by the `@import` statements above, so
+// abi's extern declarations resolve locally.
+const c = @import("abi");
 
 // Largest input handed to a harness per iteration. The parser has its own
 // linear-time guards; this just bounds per-iteration work.

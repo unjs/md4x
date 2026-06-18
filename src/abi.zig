@@ -231,3 +231,53 @@ pub const struct_ENTITY_tag = extern struct {
 };
 pub const ENTITY = struct_ENTITY_tag;
 pub extern fn entity_lookup(name: [*c]const u8, name_size: usize) [*c]const ENTITY;
+
+// ---------------------------------------------------------------------------
+// Renderer ABIs (formerly the md4x-*.h headers). Entry points are resolved at
+// link time against the renderer static libs. Flag values mirror the headers.
+// ---------------------------------------------------------------------------
+const ProcessOutput = ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void;
+
+pub const MD_HTML_OPTS = extern struct {
+    title: [*c]const u8 = null,
+    css_url: [*c]const u8 = null,
+};
+
+pub extern fn md_html(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
+pub extern fn md_html_ex(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint, opts: [*c]const MD_HTML_OPTS) c_int;
+pub extern fn md_ast(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
+pub extern fn md_ansi(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
+pub extern fn md_text(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
+pub extern fn md_markdown(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
+pub extern fn md_meta(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
+
+pub const MD_HTML_FLAG_DEBUG: c_uint = 0x0001;
+pub const MD_HTML_FLAG_VERBATIM_ENTITIES: c_uint = 0x0002;
+pub const MD_HTML_FLAG_SKIP_UTF8_BOM: c_uint = 0x0004;
+pub const MD_HTML_FLAG_FULL_HTML: c_uint = 0x0008;
+pub const MD_HTML_FLAG_CODE_META: c_uint = 0x0010;
+pub const MD_HTML_FLAG_HEAL: c_uint = 0x0100;
+
+pub const MD_ANSI_FLAG_DEBUG: c_uint = 0x0001;
+pub const MD_ANSI_FLAG_SKIP_UTF8_BOM: c_uint = 0x0002;
+pub const MD_ANSI_FLAG_NO_COLOR: c_uint = 0x0004;
+pub const MD_ANSI_FLAG_CODE_META: c_uint = 0x0008;
+pub const MD_ANSI_FLAG_SHOW_URLS: c_uint = 0x0010;
+pub const MD_ANSI_FLAG_SHOW_FRONTMATTER: c_uint = 0x0020;
+pub const MD_ANSI_FLAG_HEAL: c_uint = 0x0100;
+
+pub const MD_AST_FLAG_DEBUG: c_uint = 0x0001;
+pub const MD_AST_FLAG_SKIP_UTF8_BOM: c_uint = 0x0002;
+pub const MD_AST_FLAG_HEAL: c_uint = 0x0100;
+
+pub const MD_TEXT_FLAG_DEBUG: c_uint = 0x0001;
+pub const MD_TEXT_FLAG_SKIP_UTF8_BOM: c_uint = 0x0002;
+pub const MD_TEXT_FLAG_HEAL: c_uint = 0x0100;
+
+pub const MD_MARKDOWN_FLAG_DEBUG: c_uint = 0x0001;
+pub const MD_MARKDOWN_FLAG_SKIP_UTF8_BOM: c_uint = 0x0002;
+pub const MD_MARKDOWN_FLAG_HEAL: c_uint = 0x0100;
+
+pub const MD_META_FLAG_DEBUG: c_uint = 0x0001;
+pub const MD_META_FLAG_SKIP_UTF8_BOM: c_uint = 0x0002;
+pub const MD_META_FLAG_HEAL: c_uint = 0x0100;
