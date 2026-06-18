@@ -106,6 +106,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     for (include_paths) |p| unit_tests.root_module.addIncludePath(p);
+    unit_tests.root_module.addImport("abi", b.createModule(.{ .root_source_file = b.path("src/abi.zig") }));
     unit_tests.root_module.linkLibrary(addEntityLib(b, target, optimize, strip, include_paths));
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run parser unit tests");
@@ -148,6 +149,7 @@ fn addZigRenderer(b: *std.Build, name: []const u8, target: std.Build.ResolvedTar
         }),
     });
     for (include_paths) |p| lib.root_module.addIncludePath(p);
+    lib.root_module.addImport("abi", b.createModule(.{ .root_source_file = b.path("src/abi.zig") }));
     return lib;
 }
 
@@ -170,6 +172,7 @@ fn addParserLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.b
         }),
     });
     for (include_paths) |p| lib.root_module.addIncludePath(p);
+    lib.root_module.addImport("abi", b.createModule(.{ .root_source_file = b.path("src/abi.zig") }));
     return lib;
 }
 

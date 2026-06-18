@@ -14,9 +14,8 @@
 
 const std = @import("std");
 
-const c = @cImport({
-    @cInclude("md4x.h");
-});
+// MD_* types now come from the Zig-native abi module (replacing md4x.h).
+const c = @import("abi");
 
 pub const MD_MAX_PROPS: usize = 32;
 pub const MD_CLASS_BUF_SIZE: usize = 512;

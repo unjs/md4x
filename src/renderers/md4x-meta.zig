@@ -25,13 +25,12 @@
 
 const std = @import("std");
 
-const c = @cImport({
+// MD_* types + entity + md_parse/md_heal decls now come from the Zig-native
+// abi module (replacing md4x.h / entity.h / md4x-heal.h); only genuinely
+// external C headers stay in a @cImport, bound as `sys`.
+const c = @import("abi");
+const sys = @cImport({
     @cInclude("stdio.h");
-    @cInclude("md4x.h");
-    // The JSON writer and YAML-to-JSON conversion (which use libyaml) now live in
-    // the shared md4x-json.zig module, so this renderer no longer needs <yaml.h>.
-    @cInclude("md4x-heal.h");
-    @cInclude("entity.h");
 });
 
 const c_allocator = std.heap.c_allocator;
@@ -323,7 +322,7 @@ fn meta_text(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_
 
 fn meta_debug_log(msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
     _ = userdata;
-    _ = c.fprintf(c.stderr, "MD4X: %s\n", msg);
+    _ = sys.fprintf(sys.stderr, "MD4X: %s\n", msg);
 }
 
 // **************************************
@@ -366,7 +365,7 @@ fn meta_serialize(w: *JSON_WRITER, ctx: *META_CTX) void {
         if (i > 0) json_write(w, ",", 1);
 
         json_write_str(w, "{\"level\":");
-        _ = c.snprintf(&buf, buf.len, "%u", ctx.headings.?[idx].level);
+        _ = sys.snprintf(&buf, buf.len, "%u", ctx.headings.?[idx].level);
         json_write_str(w, @ptrCast(&buf));
 
         json_write_str(w, ",\"text\":");

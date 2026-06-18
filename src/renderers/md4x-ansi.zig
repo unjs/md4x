@@ -25,11 +25,12 @@
 
 const std = @import("std");
 
-const c = @cImport({
+// MD_* types + entity + md_parse/md_heal decls now come from the Zig-native
+// abi module (replacing md4x.h / entity.h / md4x-heal.h); only genuinely
+// external C headers stay in a @cImport, bound as `sys`.
+const c = @import("abi");
+const sys = @cImport({
     @cInclude("stdio.h");
-    @cInclude("md4x.h");
-    @cInclude("md4x-heal.h");
-    @cInclude("entity.h");
 });
 
 // Shared component property parser, from the shared md4x-props.zig module
@@ -976,7 +977,7 @@ fn text_callback(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c
 fn debug_log_callback(msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
     const r: *MD_ANSI = @ptrCast(@alignCast(userdata.?));
     if (r.flags & MD_ANSI_FLAG_DEBUG != 0)
-        _ = c.fprintf(c.stderr, "MD4X: %s\n", msg);
+        _ = sys.fprintf(sys.stderr, "MD4X: %s\n", msg);
 }
 
 // **************************************

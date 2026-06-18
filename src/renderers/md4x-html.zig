@@ -25,12 +25,13 @@
 
 const std = @import("std");
 
-const c = @cImport({
+// MD_* types + entity + md_parse/md_heal decls now come from the Zig-native
+// abi module (replacing md4x.h / entity.h / md4x-heal.h); only genuinely
+// external C headers stay in a @cImport, bound as `sys`.
+const c = @import("abi");
+const sys = @cImport({
     @cInclude("stdio.h");
     @cInclude("yaml.h");
-    @cInclude("md4x.h");
-    @cInclude("md4x-heal.h");
-    @cInclude("entity.h");
 });
 
 const c_allocator = std.heap.c_allocator;
@@ -615,71 +616,71 @@ fn comp_fm_flush_tag(r: *MD_HTML) void {
 
     // If we captured YAML, parse and emit as attributes.
     if (r.comp_fm_text != null and r.comp_fm_text_size > 0) {
-        var yp: c.yaml_parser_t = undefined;
-        var event: c.yaml_event_t = undefined;
+        var yp: sys.yaml_parser_t = undefined;
+        var event: sys.yaml_event_t = undefined;
 
-        if (c.yaml_parser_initialize(&yp) != 0) {
-            c.yaml_parser_set_input_string(&yp, @ptrCast(r.comp_fm_text.?), r.comp_fm_text_size);
+        if (sys.yaml_parser_initialize(&yp) != 0) {
+            sys.yaml_parser_set_input_string(&yp, @ptrCast(r.comp_fm_text.?), r.comp_fm_text_size);
 
             // STREAM_START
-            if (c.yaml_parser_parse(&yp, &event) != 0 and event.type == c.YAML_STREAM_START_EVENT) {
-                c.yaml_event_delete(&event);
+            if (sys.yaml_parser_parse(&yp, &event) != 0 and event.type == sys.YAML_STREAM_START_EVENT) {
+                sys.yaml_event_delete(&event);
                 // DOCUMENT_START
-                if (c.yaml_parser_parse(&yp, &event) != 0 and event.type == c.YAML_DOCUMENT_START_EVENT) {
-                    c.yaml_event_delete(&event);
+                if (sys.yaml_parser_parse(&yp, &event) != 0 and event.type == sys.YAML_DOCUMENT_START_EVENT) {
+                    sys.yaml_event_delete(&event);
                     // MAPPING_START
-                    if (c.yaml_parser_parse(&yp, &event) != 0 and event.type == c.YAML_MAPPING_START_EVENT) {
-                        c.yaml_event_delete(&event);
+                    if (sys.yaml_parser_parse(&yp, &event) != 0 and event.type == sys.YAML_MAPPING_START_EVENT) {
+                        sys.yaml_event_delete(&event);
                         // Iterate key-value pairs.
-                        while (c.yaml_parser_parse(&yp, &event) != 0) {
+                        while (sys.yaml_parser_parse(&yp, &event) != 0) {
                             var key_buf: [256]u8 = undefined;
-                            if (event.type == c.YAML_MAPPING_END_EVENT) {
-                                c.yaml_event_delete(&event);
+                            if (event.type == sys.YAML_MAPPING_END_EVENT) {
+                                sys.yaml_event_delete(&event);
                                 break;
                             }
-                            if (event.type != c.YAML_SCALAR_EVENT) {
-                                c.yaml_event_delete(&event);
+                            if (event.type != sys.YAML_SCALAR_EVENT) {
+                                sys.yaml_event_delete(&event);
                                 break;
                             }
                             var key_len: usize = event.data.scalar.length;
                             if (key_len >= key_buf.len) key_len = key_buf.len - 1;
                             @memcpy(key_buf[0..key_len], event.data.scalar.value[0..key_len]);
                             key_buf[key_len] = 0;
-                            c.yaml_event_delete(&event);
+                            sys.yaml_event_delete(&event);
 
                             // Read value.
-                            if (c.yaml_parser_parse(&yp, &event) == 0) break;
-                            if (event.type == c.YAML_SCALAR_EVENT) {
+                            if (sys.yaml_parser_parse(&yp, &event) == 0) break;
+                            if (event.type == sys.YAML_SCALAR_EVENT) {
                                 render_verbatim_lit(r, " ");
                                 render_html_escaped(r, &key_buf, @intCast(key_len));
                                 render_verbatim_lit(r, "=\"");
                                 render_html_escaped(r, @ptrCast(event.data.scalar.value), @intCast(event.data.scalar.length));
                                 render_verbatim_lit(r, "\"");
-                            } else if (event.type == c.YAML_MAPPING_START_EVENT or event.type == c.YAML_SEQUENCE_START_EVENT) {
+                            } else if (event.type == sys.YAML_MAPPING_START_EVENT or event.type == sys.YAML_SEQUENCE_START_EVENT) {
                                 // Skip nested structures.
                                 var depth: c_int = 1;
-                                c.yaml_event_delete(&event);
-                                while (depth > 0 and c.yaml_parser_parse(&yp, &event) != 0) {
-                                    if (event.type == c.YAML_MAPPING_START_EVENT or event.type == c.YAML_SEQUENCE_START_EVENT)
+                                sys.yaml_event_delete(&event);
+                                while (depth > 0 and sys.yaml_parser_parse(&yp, &event) != 0) {
+                                    if (event.type == sys.YAML_MAPPING_START_EVENT or event.type == sys.YAML_SEQUENCE_START_EVENT)
                                         depth += 1
-                                    else if (event.type == c.YAML_MAPPING_END_EVENT or event.type == c.YAML_SEQUENCE_END_EVENT)
+                                    else if (event.type == sys.YAML_MAPPING_END_EVENT or event.type == sys.YAML_SEQUENCE_END_EVENT)
                                         depth -= 1;
-                                    c.yaml_event_delete(&event);
+                                    sys.yaml_event_delete(&event);
                                 }
                                 continue;
                             }
-                            c.yaml_event_delete(&event);
+                            sys.yaml_event_delete(&event);
                         }
                     } else {
-                        c.yaml_event_delete(&event);
+                        sys.yaml_event_delete(&event);
                     }
                 } else {
-                    c.yaml_event_delete(&event);
+                    sys.yaml_event_delete(&event);
                 }
             } else {
-                c.yaml_event_delete(&event);
+                sys.yaml_event_delete(&event);
             }
-            c.yaml_parser_delete(&yp);
+            sys.yaml_parser_delete(&yp);
         }
     }
 
@@ -893,68 +894,68 @@ fn fm_append(r: *MD_HTML, text: [*]const u8, size: c.MD_SIZE) c_int {
 // Parse YAML frontmatter and extract title/description.
 // Caller must free *out_title and *out_description if non-NULL.
 fn parse_frontmatter_meta(text: [*]const u8, size: c.MD_SIZE, out_title: *?[*:0]u8, out_description: *?[*:0]u8) void {
-    var yp: c.yaml_parser_t = undefined;
-    var event: c.yaml_event_t = undefined;
+    var yp: sys.yaml_parser_t = undefined;
+    var event: sys.yaml_event_t = undefined;
 
     out_title.* = null;
     out_description.* = null;
 
-    if (c.yaml_parser_initialize(&yp) == 0)
+    if (sys.yaml_parser_initialize(&yp) == 0)
         return;
 
-    c.yaml_parser_set_input_string(&yp, @ptrCast(text), size);
+    sys.yaml_parser_set_input_string(&yp, @ptrCast(text), size);
 
     // Consume STREAM_START.
-    if (c.yaml_parser_parse(&yp, &event) == 0) {
-        c.yaml_parser_delete(&yp);
+    if (sys.yaml_parser_parse(&yp, &event) == 0) {
+        sys.yaml_parser_delete(&yp);
         return;
     }
-    if (event.type != c.YAML_STREAM_START_EVENT) {
-        c.yaml_event_delete(&event);
-        c.yaml_parser_delete(&yp);
+    if (event.type != sys.YAML_STREAM_START_EVENT) {
+        sys.yaml_event_delete(&event);
+        sys.yaml_parser_delete(&yp);
         return;
     }
-    c.yaml_event_delete(&event);
+    sys.yaml_event_delete(&event);
 
     // Consume DOCUMENT_START.
-    if (c.yaml_parser_parse(&yp, &event) == 0) {
-        c.yaml_parser_delete(&yp);
+    if (sys.yaml_parser_parse(&yp, &event) == 0) {
+        sys.yaml_parser_delete(&yp);
         return;
     }
-    if (event.type != c.YAML_DOCUMENT_START_EVENT) {
-        c.yaml_event_delete(&event);
-        c.yaml_parser_delete(&yp);
+    if (event.type != sys.YAML_DOCUMENT_START_EVENT) {
+        sys.yaml_event_delete(&event);
+        sys.yaml_parser_delete(&yp);
         return;
     }
-    c.yaml_event_delete(&event);
+    sys.yaml_event_delete(&event);
 
     // Expect top-level MAPPING_START.
-    if (c.yaml_parser_parse(&yp, &event) == 0) {
-        c.yaml_parser_delete(&yp);
+    if (sys.yaml_parser_parse(&yp, &event) == 0) {
+        sys.yaml_parser_delete(&yp);
         return;
     }
-    if (event.type != c.YAML_MAPPING_START_EVENT) {
-        c.yaml_event_delete(&event);
-        c.yaml_parser_delete(&yp);
+    if (event.type != sys.YAML_MAPPING_START_EVENT) {
+        sys.yaml_event_delete(&event);
+        sys.yaml_parser_delete(&yp);
         return;
     }
-    c.yaml_event_delete(&event);
+    sys.yaml_event_delete(&event);
 
     // Iterate top-level key-value pairs.
     while (true) {
         var target: ?*?[*:0]u8 = null;
 
-        if (c.yaml_parser_parse(&yp, &event) == 0) {
-            c.yaml_parser_delete(&yp);
+        if (sys.yaml_parser_parse(&yp, &event) == 0) {
+            sys.yaml_parser_delete(&yp);
             return;
         }
-        if (event.type == c.YAML_MAPPING_END_EVENT) {
-            c.yaml_event_delete(&event);
+        if (event.type == sys.YAML_MAPPING_END_EVENT) {
+            sys.yaml_event_delete(&event);
             break;
         }
-        if (event.type != c.YAML_SCALAR_EVENT) {
-            c.yaml_event_delete(&event);
-            c.yaml_parser_delete(&yp);
+        if (event.type != sys.YAML_SCALAR_EVENT) {
+            sys.yaml_event_delete(&event);
+            sys.yaml_parser_delete(&yp);
             return;
         }
 
@@ -964,15 +965,15 @@ fn parse_frontmatter_meta(text: [*]const u8, size: c.MD_SIZE, out_title: *?[*:0]
         } else if (event.data.scalar.length == 11 and std.mem.eql(u8, event.data.scalar.value[0..11], "description")) {
             target = out_description;
         }
-        c.yaml_event_delete(&event);
+        sys.yaml_event_delete(&event);
 
         // Read the value.
-        if (c.yaml_parser_parse(&yp, &event) == 0) {
-            c.yaml_parser_delete(&yp);
+        if (sys.yaml_parser_parse(&yp, &event) == 0) {
+            sys.yaml_parser_delete(&yp);
             return;
         }
 
-        if (target != null and event.type == c.YAML_SCALAR_EVENT and event.data.scalar.length > 0) {
+        if (target != null and event.type == sys.YAML_SCALAR_EVENT and event.data.scalar.length > 0) {
             const len: usize = event.data.scalar.length;
             const s = c_allocator.allocSentinel(u8, len, 0) catch null;
             if (s) |buf| {
@@ -980,27 +981,27 @@ fn parse_frontmatter_meta(text: [*]const u8, size: c.MD_SIZE, out_title: *?[*:0]
                 if (target.?.*) |old| c_allocator.free(std.mem.span(old));
                 target.?.* = buf.ptr;
             }
-        } else if (event.type == c.YAML_MAPPING_START_EVENT or event.type == c.YAML_SEQUENCE_START_EVENT) {
+        } else if (event.type == sys.YAML_MAPPING_START_EVENT or event.type == sys.YAML_SEQUENCE_START_EVENT) {
             // Skip nested structures.
             var depth: c_int = 1;
-            c.yaml_event_delete(&event);
+            sys.yaml_event_delete(&event);
             while (depth > 0) {
-                if (c.yaml_parser_parse(&yp, &event) == 0) {
-                    c.yaml_parser_delete(&yp);
+                if (sys.yaml_parser_parse(&yp, &event) == 0) {
+                    sys.yaml_parser_delete(&yp);
                     return;
                 }
-                if (event.type == c.YAML_MAPPING_START_EVENT or event.type == c.YAML_SEQUENCE_START_EVENT)
+                if (event.type == sys.YAML_MAPPING_START_EVENT or event.type == sys.YAML_SEQUENCE_START_EVENT)
                     depth += 1
-                else if (event.type == c.YAML_MAPPING_END_EVENT or event.type == c.YAML_SEQUENCE_END_EVENT)
+                else if (event.type == sys.YAML_MAPPING_END_EVENT or event.type == sys.YAML_SEQUENCE_END_EVENT)
                     depth -= 1;
-                c.yaml_event_delete(&event);
+                sys.yaml_event_delete(&event);
             }
             continue;
         }
-        c.yaml_event_delete(&event);
+        sys.yaml_event_delete(&event);
     }
 
-    c.yaml_parser_delete(&yp);
+    sys.yaml_parser_delete(&yp);
 }
 
 // Emit the <!DOCTYPE html><html><head>...<body> preamble.
@@ -1314,7 +1315,7 @@ fn text_callback(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c
 fn debug_log_callback(msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
     const r: *MD_HTML = @ptrCast(@alignCast(userdata.?));
     if (r.flags & MD_HTML_FLAG_DEBUG != 0)
-        _ = c.fprintf(c.stderr, "MD4X: %s\n", msg);
+        _ = sys.fprintf(sys.stderr, "MD4X: %s\n", msg);
 }
 
 // **************************************

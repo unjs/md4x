@@ -15,10 +15,12 @@
 
 const std = @import("std");
 
-const c = @cImport({
+// MD_* types now come from the Zig-native abi module (replacing md4x.h);
+// genuinely external C headers (if any) stay in a @cImport bound as `sys`.
+const c = @import("abi");
+const sys = @cImport({
     @cInclude("stdio.h");
     @cInclude("yaml.h");
-    @cInclude("md4x.h");
 });
 
 pub const ProcessOutputFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) callconv(.c) void;
@@ -63,7 +65,7 @@ pub fn json_write_escaped(w: *JsonWriter, str: [*]const u8, size: c.MD_SIZE) voi
             '\t' => replacement = "\\t",
             else => {
                 if (ch < 0x20) {
-                    _ = c.snprintf(&esc, esc.len, "\\u%04x", @as(c_uint, ch));
+                    _ = sys.snprintf(&esc, esc.len, "\\u%04x", @as(c_uint, ch));
                     replacement = &esc;
                     esc_len = 6;
                 }
@@ -136,13 +138,13 @@ fn yaml_is_number(s: [*]const u8, len: c.MD_SIZE) bool {
 }
 
 // Write a YAML scalar as a typed JSON value (YAML 1.1 resolution for plain scalars).
-fn json_write_yaml_scalar(w: *JsonWriter, event: *const c.yaml_event_t) void {
+fn json_write_yaml_scalar(w: *JsonWriter, event: *const sys.yaml_event_t) void {
     const val: [*]const u8 = @ptrCast(event.data.scalar.value);
     const len: c.MD_SIZE = @intCast(event.data.scalar.length);
     const style = event.data.scalar.style;
 
     // Quoted scalars are always strings.
-    if (style == c.YAML_SINGLE_QUOTED_SCALAR_STYLE or style == c.YAML_DOUBLE_QUOTED_SCALAR_STYLE) {
+    if (style == sys.YAML_SINGLE_QUOTED_SCALAR_STYLE or style == sys.YAML_DOUBLE_QUOTED_SCALAR_STYLE) {
         json_write_string(w, val, len);
         return;
     }
@@ -175,21 +177,21 @@ fn json_write_yaml_scalar(w: *JsonWriter, event: *const c.yaml_event_t) void {
 
 // Write a YAML mapping as JSON object key-value pairs (without outer braces).
 // Assumes MAPPING_START consumed. Returns number of pairs, or -1 on error.
-fn json_write_yaml_mapping(w: *JsonWriter, yp: *c.yaml_parser_t) c_int {
-    var event: c.yaml_event_t = undefined;
+fn json_write_yaml_mapping(w: *JsonWriter, yp: *sys.yaml_parser_t) c_int {
+    var event: sys.yaml_event_t = undefined;
     var n: c_int = 0;
 
     while (true) {
-        if (c.yaml_parser_parse(yp, &event) == 0)
+        if (sys.yaml_parser_parse(yp, &event) == 0)
             return -1;
 
-        if (event.type == c.YAML_MAPPING_END_EVENT) {
-            c.yaml_event_delete(&event);
+        if (event.type == sys.YAML_MAPPING_END_EVENT) {
+            sys.yaml_event_delete(&event);
             break;
         }
 
-        if (event.type != c.YAML_SCALAR_EVENT) {
-            c.yaml_event_delete(&event);
+        if (event.type != sys.YAML_SCALAR_EVENT) {
+            sys.yaml_event_delete(&event);
             return -1;
         }
 
@@ -200,7 +202,7 @@ fn json_write_yaml_mapping(w: *JsonWriter, yp: *c.yaml_parser_t) c_int {
         json_write(w, "\"", 1);
         json_write_escaped(w, @ptrCast(event.data.scalar.value), @intCast(event.data.scalar.length));
         json_write_str(w, "\":");
-        c.yaml_event_delete(&event);
+        sys.yaml_event_delete(&event);
 
         // Write value (recursive).
         if (json_write_yaml_value(w, yp) < 0)
@@ -213,39 +215,39 @@ fn json_write_yaml_mapping(w: *JsonWriter, yp: *c.yaml_parser_t) c_int {
 
 // Write a YAML sequence as a JSON array.
 // Assumes SEQUENCE_START consumed. Returns 0 on success, -1 on error.
-fn json_write_yaml_sequence(w: *JsonWriter, yp: *c.yaml_parser_t) c_int {
-    var event: c.yaml_event_t = undefined;
+fn json_write_yaml_sequence(w: *JsonWriter, yp: *sys.yaml_parser_t) c_int {
+    var event: sys.yaml_event_t = undefined;
     var n: c_int = 0;
 
     json_write(w, "[", 1);
 
     while (true) {
-        if (c.yaml_parser_parse(yp, &event) == 0)
+        if (sys.yaml_parser_parse(yp, &event) == 0)
             return -1;
 
-        if (event.type == c.YAML_SEQUENCE_END_EVENT) {
-            c.yaml_event_delete(&event);
+        if (event.type == sys.YAML_SEQUENCE_END_EVENT) {
+            sys.yaml_event_delete(&event);
             break;
         }
 
         if (n > 0)
             json_write(w, ",", 1);
 
-        if (event.type == c.YAML_SCALAR_EVENT) {
+        if (event.type == sys.YAML_SCALAR_EVENT) {
             json_write_yaml_scalar(w, &event);
-            c.yaml_event_delete(&event);
-        } else if (event.type == c.YAML_MAPPING_START_EVENT) {
-            c.yaml_event_delete(&event);
+            sys.yaml_event_delete(&event);
+        } else if (event.type == sys.YAML_MAPPING_START_EVENT) {
+            sys.yaml_event_delete(&event);
             json_write(w, "{", 1);
             if (json_write_yaml_mapping(w, yp) < 0)
                 return -1;
             json_write(w, "}", 1);
-        } else if (event.type == c.YAML_SEQUENCE_START_EVENT) {
-            c.yaml_event_delete(&event);
+        } else if (event.type == sys.YAML_SEQUENCE_START_EVENT) {
+            sys.yaml_event_delete(&event);
             if (json_write_yaml_sequence(w, yp) < 0)
                 return -1;
         } else {
-            c.yaml_event_delete(&event);
+            sys.yaml_event_delete(&event);
             return -1;
         }
 
@@ -258,91 +260,91 @@ fn json_write_yaml_sequence(w: *JsonWriter, yp: *c.yaml_parser_t) c_int {
 
 // Write the next YAML value (scalar, mapping, or sequence) as JSON.
 // Returns 0 on success, -1 on error.
-fn json_write_yaml_value(w: *JsonWriter, yp: *c.yaml_parser_t) c_int {
-    var event: c.yaml_event_t = undefined;
+fn json_write_yaml_value(w: *JsonWriter, yp: *sys.yaml_parser_t) c_int {
+    var event: sys.yaml_event_t = undefined;
 
-    if (c.yaml_parser_parse(yp, &event) == 0)
+    if (sys.yaml_parser_parse(yp, &event) == 0)
         return -1;
 
-    if (event.type == c.YAML_SCALAR_EVENT) {
+    if (event.type == sys.YAML_SCALAR_EVENT) {
         json_write_yaml_scalar(w, &event);
-        c.yaml_event_delete(&event);
+        sys.yaml_event_delete(&event);
         return 0;
     }
-    if (event.type == c.YAML_MAPPING_START_EVENT) {
-        c.yaml_event_delete(&event);
+    if (event.type == sys.YAML_MAPPING_START_EVENT) {
+        sys.yaml_event_delete(&event);
         json_write(w, "{", 1);
         if (json_write_yaml_mapping(w, yp) < 0)
             return -1;
         json_write(w, "}", 1);
         return 0;
     }
-    if (event.type == c.YAML_SEQUENCE_START_EVENT) {
-        c.yaml_event_delete(&event);
+    if (event.type == sys.YAML_SEQUENCE_START_EVENT) {
+        sys.yaml_event_delete(&event);
         return json_write_yaml_sequence(w, yp);
     }
-    if (event.type == c.YAML_ALIAS_EVENT) {
-        c.yaml_event_delete(&event);
+    if (event.type == sys.YAML_ALIAS_EVENT) {
+        sys.yaml_event_delete(&event);
         json_write_str(w, "null");
         return 0;
     }
 
-    c.yaml_event_delete(&event);
+    sys.yaml_event_delete(&event);
     return -1;
 }
 
 // Write parsed YAML frontmatter as JSON props using libyaml.
 // Returns number of top-level props written.
 pub fn json_write_yaml_props(w: *JsonWriter, text: [*]const u8, size: c.MD_SIZE) c_int {
-    var yp: c.yaml_parser_t = undefined;
-    var event: c.yaml_event_t = undefined;
+    var yp: sys.yaml_parser_t = undefined;
+    var event: sys.yaml_event_t = undefined;
     var n_written: c_int = 0;
 
-    if (c.yaml_parser_initialize(&yp) == 0)
+    if (sys.yaml_parser_initialize(&yp) == 0)
         return 0;
 
-    c.yaml_parser_set_input_string(&yp, @ptrCast(text), size);
+    sys.yaml_parser_set_input_string(&yp, @ptrCast(text), size);
 
     // Consume STREAM_START.
-    if (c.yaml_parser_parse(&yp, &event) == 0) {
-        c.yaml_parser_delete(&yp);
+    if (sys.yaml_parser_parse(&yp, &event) == 0) {
+        sys.yaml_parser_delete(&yp);
         return n_written;
     }
-    if (event.type != c.YAML_STREAM_START_EVENT) {
-        c.yaml_event_delete(&event);
-        c.yaml_parser_delete(&yp);
+    if (event.type != sys.YAML_STREAM_START_EVENT) {
+        sys.yaml_event_delete(&event);
+        sys.yaml_parser_delete(&yp);
         return n_written;
     }
-    c.yaml_event_delete(&event);
+    sys.yaml_event_delete(&event);
 
     // Consume DOCUMENT_START.
-    if (c.yaml_parser_parse(&yp, &event) == 0) {
-        c.yaml_parser_delete(&yp);
+    if (sys.yaml_parser_parse(&yp, &event) == 0) {
+        sys.yaml_parser_delete(&yp);
         return n_written;
     }
-    if (event.type != c.YAML_DOCUMENT_START_EVENT) {
-        c.yaml_event_delete(&event);
-        c.yaml_parser_delete(&yp);
+    if (event.type != sys.YAML_DOCUMENT_START_EVENT) {
+        sys.yaml_event_delete(&event);
+        sys.yaml_parser_delete(&yp);
         return n_written;
     }
-    c.yaml_event_delete(&event);
+    sys.yaml_event_delete(&event);
 
     // Expect top-level MAPPING_START.
-    if (c.yaml_parser_parse(&yp, &event) == 0) {
-        c.yaml_parser_delete(&yp);
+    if (sys.yaml_parser_parse(&yp, &event) == 0) {
+        sys.yaml_parser_delete(&yp);
         return n_written;
     }
-    if (event.type != c.YAML_MAPPING_START_EVENT) {
-        c.yaml_event_delete(&event);
-        c.yaml_parser_delete(&yp);
+    if (event.type != sys.YAML_MAPPING_START_EVENT) {
+        sys.yaml_event_delete(&event);
+        sys.yaml_parser_delete(&yp);
         return n_written;
     }
-    c.yaml_event_delete(&event);
+    sys.yaml_event_delete(&event);
 
     n_written = json_write_yaml_mapping(w, &yp);
     if (n_written < 0)
         n_written = 0;
 
-    c.yaml_parser_delete(&yp);
+    sys.yaml_parser_delete(&yp);
     return n_written;
 }

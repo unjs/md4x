@@ -25,12 +25,14 @@
 
 const std = @import("std");
 
-const c = @cImport({
+// MD_* types + entity + md_parse/md_heal decls now come from the Zig-native
+// abi module (replacing md4x.h / entity.h / md4x-heal.h); only genuinely
+// external C headers stay in a @cImport, bound as `sys`.
+const c = @import("abi");
+const sys = @cImport({
     @cInclude("stdio.h");
     @cInclude("string.h");
     @cInclude("yaml.h");
-    @cInclude("md4x.h");
-    @cInclude("md4x-heal.h");
 });
 
 const c_allocator = std.heap.c_allocator;
@@ -876,7 +878,7 @@ fn isLeafContainer(kind: TagKind) bool {
 
 fn jsonDebugLog(msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
     _ = userdata;
-    _ = c.fprintf(c.stderr, "MD4X: %s\n", msg);
+    _ = sys.fprintf(sys.stderr, "MD4X: %s\n", msg);
 }
 
 fn jsonAlignStr(align_v: c_int) ?[*:0]const u8 {
@@ -948,7 +950,7 @@ fn jsonWriteComponentProps(w: *JsonWriter, raw: [*]const u8, size: c.MD_SIZE) c_
 }
 
 fn strlenZ(s: [*:0]const u8) c.MD_SIZE {
-    return @intCast(c.strlen(@ptrCast(s)));
+    return @intCast(sys.strlen(@ptrCast(s)));
 }
 
 // Write the props object for an element node.
@@ -986,7 +988,7 @@ fn jsonWriteProps(w: *JsonWriter, node: *const JsonNode) void {
         .ol => {
             if (node.detail.ol_start != 1) {
                 var buf: [32]u8 = undefined;
-                _ = c.snprintf(&buf, buf.len, "\"start\":%u", node.detail.ol_start);
+                _ = sys.snprintf(&buf, buf.len, "\"start\":%u", node.detail.ol_start);
                 jsonWriteStrZ(w, @ptrCast(&buf));
                 has_prop = 1;
             }
@@ -1017,7 +1019,7 @@ fn jsonWriteProps(w: *JsonWriter, node: *const JsonNode) void {
                 var hi: c_uint = 0;
                 while (hi < node.detail.code_highlight_count) : (hi += 1) {
                     if (hi > 0) jsonWrite(w, ",", 1);
-                    _ = c.snprintf(&buf, buf.len, "%u", node.detail.code_highlights.?[hi]);
+                    _ = sys.snprintf(&buf, buf.len, "%u", node.detail.code_highlights.?[hi]);
                     jsonWriteStrZ(w, @ptrCast(&buf));
                 }
                 jsonWrite(w, "]", 1);

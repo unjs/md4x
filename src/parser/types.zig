@@ -8,10 +8,10 @@
 const std = @import("std");
 const util = @import("util.zig");
 
-pub const c = @cImport({
-    @cInclude("md4x.h");
-    @cInclude("entity.h");
-});
+// The shared ABI types (formerly @cImport of md4x.h + entity.h) now live in
+// the Zig-native src/abi.zig. Re-exported as `c` so all parser modules
+// (`const c = types.c`) keep their existing `c.MD_*` / `c.entity_lookup` refs.
+pub const c = @import("abi");
 
 pub const c_allocator = std.heap.c_allocator;
 
