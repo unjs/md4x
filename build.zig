@@ -55,18 +55,6 @@ pub fn build(b: *std.Build) void {
 
     const strip = optimize != .Debug;
 
-    const mod_opts: std.Build.Module.CreateOptions = .{
-        .target = target,
-        .optimize = optimize,
-        .strip = strip,
-        .link_libc = true,
-        // The whole library is single-threaded by design (one parse/render call
-        // is self-contained; no module-level mutable state is shared across
-        // threads). This drops thread-local/atomic scaffolding for a smaller
-        // WASM binary and a small speed win everywhere.
-        .single_threaded = true,
-    };
-
     // --- libyaml (YAML parser for frontmatter) ---
 
     const libyaml = b.dependency("libyaml", .{});
@@ -82,9 +70,21 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "md4x",
-        .root_module = b.createModule(mod_opts),
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/cli/md4x-cli.zig"),
+            .target = target,
+            .optimize = optimize,
+            .strip = strip,
+            .link_libc = true,
+            .single_threaded = true,
+        }),
     });
-    exe.root_module.addCSourceFiles(.{ .files = &cli_sources, .flags = c_flags });
+    exe.root_module.addImport("abi", b.createModule(.{ .root_source_file = b.path("src/abi.zig") }));
+    const cli_options = b.addOptions();
+    cli_options.addOption([]const u8, "version", zon.version);
+    exe.root_module.addOptions("build_options", cli_options);
+    // libyaml is still compiled into the exe: the html/ast/meta renderer libs
+    // reference its symbols at final link.
     exe.root_module.addCSourceFiles(libyaml_src);
     for (include_paths) |p| exe.root_module.addIncludePath(p);
     exe.root_module.linkLibrary(addParserLib(b, target, optimize, strip, include_paths));
