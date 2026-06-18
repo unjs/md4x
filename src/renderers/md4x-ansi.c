@@ -106,6 +106,13 @@ typedef struct MD_ANSI_CODE_META {
     MD_SIZE prefix_size;
 } MD_ANSI_CODE_META;
 
+/* Math span metadata entry (heap-allocated when MD_ANSI_FLAG_CODE_META is set) */
+typedef struct MD_ANSI_MATH_META {
+    MD_SIZE start;              /* Byte offset of math content start (after DIM) */
+    MD_SIZE end;                /* Byte offset of math content end (before DIM_OFF) */
+    int display;                /* 1 if display math, 0 if inline math */
+} MD_ANSI_MATH_META;
+
 typedef struct MD_ANSI_tag MD_ANSI;
 struct MD_ANSI_tag {
     void (*process_output)(const MD_CHAR*, MD_SIZE, void*);
@@ -129,6 +136,12 @@ struct MD_ANSI_tag {
     MD_ANSI_CODE_META* code_blocks;
     int n_code_blocks;
     int code_blocks_cap;
+
+    /* Math metadata tracking (only active when MD_ANSI_FLAG_CODE_META is set) */
+    int in_math_span;
+    MD_ANSI_MATH_META* math_blocks;
+    int n_math_blocks;
+    int math_blocks_cap;
 };
 
 
@@ -361,6 +374,27 @@ ansi_code_meta_cleanup(MD_ANSI* r)
             free(r->code_blocks[i].highlights);
         free(r->code_blocks);
     }
+    if(r->math_blocks != NULL) {
+        free(r->math_blocks);
+    }
+}
+
+static MD_ANSI_MATH_META*
+ansi_math_meta_push(MD_ANSI* r)
+{
+    if(r->math_blocks == NULL) {
+        r->math_blocks = (MD_ANSI_MATH_META*) malloc(8 * sizeof(MD_ANSI_MATH_META));
+        if(r->math_blocks == NULL) return NULL;
+        r->math_blocks_cap = 8;
+    } else if(r->n_math_blocks >= r->math_blocks_cap) {
+        int new_cap = r->math_blocks_cap * 2;
+        MD_ANSI_MATH_META* p = (MD_ANSI_MATH_META*) realloc(r->math_blocks, new_cap * sizeof(MD_ANSI_MATH_META));
+        if(p == NULL) return NULL;
+        r->math_blocks = p;
+        r->math_blocks_cap = new_cap;
+    }
+    memset(&r->math_blocks[r->n_math_blocks], 0, sizeof(MD_ANSI_MATH_META));
+    return &r->math_blocks[r->n_math_blocks];
 }
 
 /* Capture buffer for redirecting output to capture the indent prefix. */
@@ -425,7 +459,7 @@ render_ansi_code_meta_json(MD_ANSI* r)
     int i, n;
 
     out("\0", 1, ud);
-    out("[", 1, ud);
+    out("{\"c\":[", 6, ud);
     for(i = 0; i < r->n_code_blocks; i++) {
         MD_ANSI_CODE_META* m = &r->code_blocks[i];
         if(i > 0) out(",", 1, ud);
@@ -458,7 +492,21 @@ render_ansi_code_meta_json(MD_ANSI* r)
         }
         out("}", 1, ud);
     }
-    out("]", 1, ud);
+    out("],\"m\":[", 7, ud);
+    for(i = 0; i < r->n_math_blocks; i++) {
+        MD_ANSI_MATH_META* m = &r->math_blocks[i];
+        if(i > 0) out(",", 1, ud);
+
+        n = snprintf(buf, sizeof(buf), "{\"s\":%u,\"e\":%u",
+                     (unsigned)m->start, (unsigned)m->end);
+        out(buf, (MD_SIZE)n, ud);
+        
+        if(m->display) {
+            out(",\"d\":1", 6, ud);
+        }
+        out("}", 1, ud);
+    }
+    out("]}", 2, ud);
 }
 
 
@@ -890,8 +938,28 @@ enter_span_callback(MD_SPANTYPE type, void* detail, void* userdata)
             break;
         case MD_SPAN_CODE:              render_ansi(r, ANSI_COLOR_CYAN); break;
         case MD_SPAN_DEL:               render_ansi(r, ANSI_STRIKETHROUGH); break;
-        case MD_SPAN_LATEXMATH:         render_ansi(r, ANSI_COLOR_YELLOW); break;
-        case MD_SPAN_LATEXMATH_DISPLAY: render_ansi(r, ANSI_COLOR_YELLOW); break;
+        case MD_SPAN_LATEXMATH:
+            render_ansi(r, ANSI_COLOR_YELLOW);
+            if(r->flags & MD_ANSI_FLAG_CODE_META) {
+                MD_ANSI_MATH_META* meta = ansi_math_meta_push(r);
+                if(meta != NULL) {
+                    meta->start = r->output_offset;
+                    meta->display = 0;
+                    r->in_math_span = 1;
+                }
+            }
+            break;
+        case MD_SPAN_LATEXMATH_DISPLAY:
+            render_ansi(r, ANSI_COLOR_YELLOW);
+            if(r->flags & MD_ANSI_FLAG_CODE_META) {
+                MD_ANSI_MATH_META* meta = ansi_math_meta_push(r);
+                if(meta != NULL) {
+                    meta->start = r->output_offset;
+                    meta->display = 1;
+                    r->in_math_span = 1;
+                }
+            }
+            break;
         case MD_SPAN_WIKILINK:          render_ansi(r, ANSI_LINK); break;
         case MD_SPAN_COMPONENT:         render_ansi(r, ANSI_COLOR_CYAN); break;
         case MD_SPAN_SPAN:              break;  /* Transparent: no special styling */
@@ -935,8 +1003,15 @@ leave_span_callback(MD_SPANTYPE type, void* detail, void* userdata)
             break;
         case MD_SPAN_CODE:              render_ansi(r, ANSI_COLOR_DEFAULT); break;
         case MD_SPAN_DEL:               render_ansi(r, ANSI_STRIKE_OFF); break;
-        case MD_SPAN_LATEXMATH:         render_ansi(r, ANSI_COLOR_DEFAULT); break;
-        case MD_SPAN_LATEXMATH_DISPLAY: render_ansi(r, ANSI_COLOR_DEFAULT); break;
+        case MD_SPAN_LATEXMATH:         /*fall through*/
+        case MD_SPAN_LATEXMATH_DISPLAY:
+            if((r->flags & MD_ANSI_FLAG_CODE_META) && r->in_math_span) {
+                r->math_blocks[r->n_math_blocks].end = r->output_offset;
+                r->n_math_blocks++;
+                r->in_math_span = 0;
+            }
+            render_ansi(r, ANSI_COLOR_DEFAULT);
+            break;
         case MD_SPAN_WIKILINK:          render_ansi(r, ANSI_RESET); break;
         case MD_SPAN_COMPONENT:         render_ansi(r, ANSI_COLOR_DEFAULT); break;
         case MD_SPAN_SPAN:              break;  /* Transparent: no special styling */

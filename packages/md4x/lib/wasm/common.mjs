@@ -92,7 +92,7 @@ export function renderToHtml(input, opts) {
   let flags = opts?.full ? 0x0008 : 0;
   if (opts?.heal) flags |= HEAL_FLAG;
   const exports = _getExports();
-  if (!opts?.highlighter) {
+  if (!opts?.highlighter && !opts?.math) {
     return render(exports, exports.md4x_to_html, input, flags);
   }
   const { bytes, outPtr } = renderMetaBytes(
@@ -100,7 +100,7 @@ export function renderToHtml(input, opts) {
     exports.md4x_to_html_meta,
     input,
   );
-  const result = parseHtmlWithHighlighting(bytes, opts.highlighter);
+  const result = parseHtmlWithHighlighting(bytes, opts?.highlighter, opts?.math);
   exports.md4x_free(outPtr);
   return result;
 }
@@ -120,7 +120,7 @@ export function renderToAnsi(input, opts) {
   if (opts?.showUrls) flags |= 0x0010;
   if (opts?.showFrontmatter) flags |= 0x0020;
   const exports = _getExports();
-  if (!opts?.highlighter) {
+  if (!opts?.highlighter && !opts?.math) {
     return render(exports, exports.md4x_to_ansi, input, flags);
   }
   const s = opts?.heal ? heal(str(input)) : str(input);
@@ -129,7 +129,7 @@ export function renderToAnsi(input, opts) {
     exports.md4x_to_ansi_meta,
     s,
   );
-  const result = parseAnsiWithHighlighting(bytes, opts.highlighter);
+  const result = parseAnsiWithHighlighting(bytes, opts?.highlighter, opts?.math);
   exports.md4x_free(outPtr);
   return result;
 }

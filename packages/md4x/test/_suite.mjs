@@ -1340,6 +1340,51 @@ export function defineSuite({
     });
   });
 
+  describe("renderToHtml with math", () => {
+    it("renders inline math with math callback", async () => {
+      const html = await renderToHtml("This is $E=mc^2$", {
+        math: (code, display) => {
+          return display ? `<div class="math-display">${code}</div>` : `<span class="math-inline">${code}</span>`;
+        }
+      });
+      expect(html).toContain('<span class="math-inline">E=mc^2</span>');
+    });
+
+    it("renders display math with math callback", async () => {
+      const html = await renderToHtml("$$\n\\sum_{i=1}^n i\n$$", {
+        math: (code, display) => {
+          return display ? `<div class="math-display">${code}</div>` : `<span class="math-inline">${code}</span>`;
+        }
+      });
+      expect(html).toContain('<div class="math-display"> \\sum_{i=1}^n i </div>');
+    });
+
+    it("falls back to default rendering when math callback returns undefined", async () => {
+      const html = await renderToHtml("$x$", {
+        math: () => undefined
+      });
+      expect(html).toContain("<x-equation>x</x-equation>");
+    });
+
+    it("tracks multiple math blocks in order", async () => {
+      const html = await renderToHtml("$a$ and $b$", {
+        math: (code) => `[math:${code}]`
+      });
+      expect(html).toContain("[math:a] and [math:b]");
+    });
+
+    it("interleaves math blocks and code blocks", async () => {
+      const md = "$math1$\n```js\ncode\n```\n$math2$";
+      const html = await renderToHtml(md, {
+        math: (code) => `[m:${code.trim()}]`,
+        highlighter: (code) => `<pre><code>[c:${code.trim()}]</code></pre>\n`
+      });
+      expect(html).toContain("[m:math1]");
+      expect(html).toContain("[c:code]");
+      expect(html).toContain("[m:math2]");
+    });
+  });
+
   describe("renderToAnsi", () => {
     it("renders heading with ansi codes", async () => {
       expect(await renderToAnsi("# Hello")).toContain("Hello");
@@ -1347,6 +1392,22 @@ export function defineSuite({
 
     it("renders empty input", async () => {
       expect(await renderToAnsi("")).toBe("");
+    });
+  });
+
+  describe("renderToAnsi with math", () => {
+    it("renders inline math with math callback", async () => {
+      const ansi = await renderToAnsi("This is $E=mc^2$", {
+        math: (code, display) => display ? `[MATH:${code}]` : `[math:${code}]`
+      });
+      expect(ansi).toContain('This is [math:E=mc^2]');
+    });
+
+    it("renders display math with math callback", async () => {
+      const ansi = await renderToAnsi("$$\n\\sum_{i=1}^n i\n$$", {
+        math: (code, display) => display ? `[MATH:${code}]` : `[math:${code}]`
+      });
+      expect(ansi).toContain('[MATH: \\sum_{i=1}^n i ]');
     });
   });
 

@@ -63,6 +63,14 @@ typedef struct MD_HTML_CODE_META {
     unsigned highlight_count;
 } MD_HTML_CODE_META;
 
+/* Math span metadata entry (heap-allocated when MD_HTML_FLAG_CODE_META is set) */
+typedef struct MD_HTML_MATH_META {
+    MD_SIZE start;              /* Byte offset of math content start (after <x-equation...>) */
+    MD_SIZE end;                /* Byte offset of math content end (before </x-equation>) */
+    int display;                /* 1 if display math, 0 if inline math */
+} MD_HTML_MATH_META;
+
+
 typedef struct MD_HTML_tag MD_HTML;
 struct MD_HTML_tag {
     void (*process_output)(const MD_CHAR*, MD_SIZE, void*);
@@ -103,6 +111,12 @@ struct MD_HTML_tag {
     MD_HTML_CODE_META* code_blocks;
     int n_code_blocks;
     int code_blocks_cap;
+
+    /* Math metadata tracking (only active when MD_HTML_FLAG_CODE_META is set) */
+    int in_math_span;
+    MD_HTML_MATH_META* math_blocks;
+    int n_math_blocks;
+    int math_blocks_cap;
 };
 
 #define NEED_HTML_ESC_FLAG   0x1
@@ -745,6 +759,27 @@ code_meta_cleanup(MD_HTML* r)
             free(r->code_blocks[i].highlights);
         free(r->code_blocks);
     }
+    if(r->math_blocks != NULL) {
+        free(r->math_blocks);
+    }
+}
+
+static MD_HTML_MATH_META*
+math_meta_push(MD_HTML* r)
+{
+    if(r->math_blocks == NULL) {
+        r->math_blocks = (MD_HTML_MATH_META*) malloc(8 * sizeof(MD_HTML_MATH_META));
+        if(r->math_blocks == NULL) return NULL;
+        r->math_blocks_cap = 8;
+    } else if(r->n_math_blocks >= r->math_blocks_cap) {
+        int new_cap = r->math_blocks_cap * 2;
+        MD_HTML_MATH_META* p = (MD_HTML_MATH_META*) realloc(r->math_blocks, new_cap * sizeof(MD_HTML_MATH_META));
+        if(p == NULL) return NULL;
+        r->math_blocks = p;
+        r->math_blocks_cap = new_cap;
+    }
+    memset(&r->math_blocks[r->n_math_blocks], 0, sizeof(MD_HTML_MATH_META));
+    return &r->math_blocks[r->n_math_blocks];
 }
 
 static void
@@ -790,7 +825,7 @@ render_code_meta_json(MD_HTML* r)
     int i, n;
 
     out("\0", 1, ud);
-    out("[", 1, ud);
+    out("{\"c\":[", 6, ud);
     for(i = 0; i < r->n_code_blocks; i++) {
         MD_HTML_CODE_META* m = &r->code_blocks[i];
         if(i > 0) out(",", 1, ud);
@@ -819,7 +854,21 @@ render_code_meta_json(MD_HTML* r)
         }
         out("}", 1, ud);
     }
-    out("]", 1, ud);
+    out("],\"m\":[", 7, ud);
+    for(i = 0; i < r->n_math_blocks; i++) {
+        MD_HTML_MATH_META* m = &r->math_blocks[i];
+        if(i > 0) out(",", 1, ud);
+
+        n = snprintf(buf, sizeof(buf), "{\"s\":%u,\"e\":%u",
+                     (unsigned)m->start, (unsigned)m->end);
+        out(buf, (MD_SIZE)n, ud);
+        
+        if(m->display) {
+            out(",\"d\":1", 6, ud);
+        }
+        out("}", 1, ud);
+    }
+    out("]}", 2, ud);
 }
 
 
@@ -1201,8 +1250,28 @@ enter_span_callback(MD_SPANTYPE type, void* detail, void* userdata)
             else
                 RENDER_VERBATIM(r, "<del>");
             break;
-        case MD_SPAN_LATEXMATH:         RENDER_VERBATIM(r, "<x-equation>"); break;
-        case MD_SPAN_LATEXMATH_DISPLAY: RENDER_VERBATIM(r, "<x-equation type=\"display\">"); break;
+        case MD_SPAN_LATEXMATH:
+            RENDER_VERBATIM(r, "<x-equation>");
+            if(r->flags & MD_HTML_FLAG_CODE_META) {
+                MD_HTML_MATH_META* meta = math_meta_push(r);
+                if(meta != NULL) {
+                    meta->start = r->output_offset;
+                    meta->display = 0;
+                    r->in_math_span = 1;
+                }
+            }
+            break;
+        case MD_SPAN_LATEXMATH_DISPLAY:
+            RENDER_VERBATIM(r, "<x-equation type=\"display\">");
+            if(r->flags & MD_HTML_FLAG_CODE_META) {
+                MD_HTML_MATH_META* meta = math_meta_push(r);
+                if(meta != NULL) {
+                    meta->start = r->output_offset;
+                    meta->display = 1;
+                    r->in_math_span = 1;
+                }
+            }
+            break;
         case MD_SPAN_WIKILINK:          render_open_wikilink_span(r, (MD_SPAN_WIKILINK_DETAIL*) detail); break;
         case MD_SPAN_COMPONENT:         render_open_component_span(r, (MD_SPAN_COMPONENT_DETAIL*) detail); break;
         case MD_SPAN_SPAN:              render_open_span_span(r, (MD_SPAN_SPAN_DETAIL*) detail); break;
@@ -1230,7 +1299,14 @@ leave_span_callback(MD_SPANTYPE type, void* detail, void* userdata)
         case MD_SPAN_CODE:              RENDER_VERBATIM(r, "</code>"); break;
         case MD_SPAN_DEL:               RENDER_VERBATIM(r, "</del>"); break;
         case MD_SPAN_LATEXMATH:         /*fall through*/
-        case MD_SPAN_LATEXMATH_DISPLAY: RENDER_VERBATIM(r, "</x-equation>"); break;
+        case MD_SPAN_LATEXMATH_DISPLAY:
+            if((r->flags & MD_HTML_FLAG_CODE_META) && r->in_math_span) {
+                r->math_blocks[r->n_math_blocks].end = r->output_offset;
+                r->n_math_blocks++;
+                r->in_math_span = 0;
+            }
+            RENDER_VERBATIM(r, "</x-equation>");
+            break;
         case MD_SPAN_WIKILINK:          RENDER_VERBATIM(r, "</x-wikilink>"); break;
         case MD_SPAN_COMPONENT:         render_close_component_span(r, (MD_SPAN_COMPONENT_DETAIL*) detail); break;
         case MD_SPAN_SPAN:              RENDER_VERBATIM(r, "</span>"); break;

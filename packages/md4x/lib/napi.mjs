@@ -45,13 +45,14 @@ const HEAL_FLAG = 0x0100;
 export function renderToHtml(input, opts) {
   let flags = opts?.full ? 0x0008 : 0;
   if (opts?.heal) flags |= HEAL_FLAG;
-  if (!opts?.highlighter) {
+  if (!opts?.highlighter && !opts?.math) {
     return getBinding().renderToHtml(str(input), flags);
   }
   const buf = getBinding().renderToHtmlMeta(str(input));
   return parseHtmlWithHighlighting(
     new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength),
-    opts.highlighter,
+    opts?.highlighter,
+    opts?.math
   );
 }
 
@@ -68,14 +69,15 @@ export function renderToAnsi(input, opts) {
   let flags = opts?.heal ? HEAL_FLAG : 0;
   if (opts?.showUrls) flags |= 0x0010;
   if (opts?.showFrontmatter) flags |= 0x0020;
-  if (!opts?.highlighter) {
+  if (!opts?.highlighter && !opts?.math) {
     return getBinding().renderToAnsi(str(input), flags);
   }
   const s = opts?.heal ? getBinding().heal(str(input)) : str(input);
   const buf = getBinding().renderToAnsiMeta(s);
   return parseAnsiWithHighlighting(
     new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength),
-    opts.highlighter,
+    opts?.highlighter,
+    opts?.math
   );
 }
 

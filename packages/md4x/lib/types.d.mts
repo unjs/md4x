@@ -32,6 +32,8 @@ export type ComarkMeta = {
 export interface RenderOptions {
   /** Heal incomplete/streaming Markdown before rendering. */
   heal?: boolean;
+  /** Custom math renderer */
+  math?: (math: string, display: boolean) => string | undefined;
 }
 
 export interface AnsiOptions extends RenderOptions {
