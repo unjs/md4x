@@ -1,64 +1,194 @@
-# MD4X — Zig Idiomatization: Remaining Work & Next Steps
+# MD4X — Drop the External C ABI: Remaining Work & Next Steps
 
-> **Goal (unchanged):** evolve the faithful C→Zig transliteration into idiomatic,
-> safe Zig **without changing observable output** — every renderer must remain
-> byte-for-byte identical to the `feat/zig-port` baseline.
+> **Goal (owner decision, 2026-06-18):** MD4X becomes a **Zig library + JS
+> bindings only**. The external C ABI (public `.h` headers + stable exported
+> symbols, drop-in md4c compatibility) is **dropped**. The CLI is rewritten in
+> Zig; the only C-callable surface left is the wasm/napi edge exports. This
+> supersedes the earlier "autonomous Zig idiomatization" track (whose landed
+> work — §8.1 array migration, §8.5 injectable allocator, the full OOM matrix —
+> is recorded in `CHANGELOG.md` + git history and remains in place).
 >
-> All work happens on **`feat/zig-port`**. This file now tracks only what's
-> **left**; for what's already landed see `CHANGELOG.md` + git history.
+> **Compatibility surface to preserve (the new contract):** byte-for-byte
+> output of every renderer (`md_html`/`md_ast`/`md_ansi`/`md_meta`/`md_text`/
+> `md_markdown`/`md_heal`), the CLI's stdout for every format/flag, the
+> wasm/napi exported function set + the Comark AST JSON shape consumed by the JS
+> package. The *internal* calling convention is no longer frozen — idiomatizing
+> it is the point.
+>
+> All work happens on **`feat/zig-port`**, committed per phase.
 
 ---
 
-## Done (for context)
+## Done (committed, each gated against the verification gate below)
 
-Phases 0–2 and the selected Phase 3 work, plus these §8 leftovers:
+- **Phase 1 — `abi.zig` + flip parser/renderers off headers** (`14314d3`).
+  Created `src/abi.zig`: a Zig-native single source of truth for the shared
+  `MD_*` types/enums/flags, `MD_PARSER`, and (initially `extern`) cross-module
+  declarations. The type/struct/flag decls are a verbatim transcription of
+  `zig translate-c md4x.h`, so they are layout-identical to the old
+  `@cImport`. The parser (`parser/types.zig`) and all renderers (+ shared
+  `json`/`props`) now `@import("abi")`; genuinely-external headers (stdio/yaml/
+  string) stay in a `sys` `@cImport`. `abi` is registered as a named build
+  module on every Zig compile step. Later extended with the renderer ABI
+  (entry-point externs + flag values + `MD_HTML_OPTS`) so the JS roots and CLI
+  share it.
+- **Phase 2 — Zig CLI** (`c6a02e1`). `src/cli/md4x-cli.c` + `cmdline.c` replaced
+  by `src/cli/md4x-cli.zig`: imports `abi`, declares the renderer entry points
+  `extern`, faithfully reproduces the option parser (`-o/-t/-f/-s/-h/-v/--heal/
+  --html-title/--html-css/--replay-fuzz`, `--stat` timing, full-html opts, fuzz
+  replay). File I/O via a thin libc binding; argv via `std.process.Init`;
+  version injected from `build.zig.zon` via a build-options module.
+- **Phase 3 — drop the C scaffolding** (`83abae9`). Deleted **all** md4x-owned
+  headers (`md4x.h`, `entity.h`, the 8 `renderers/md4x-*.h`), the orphaned C CLI
+  sources, the C/libFuzzer harnesses + scripts (the Zig `fuzz-zig` harness
+  covers the surface; `seed-corpus/`+`corpus/` kept), and the C-only CodeQL
+  workflow (it referenced nonexistent `.c` and CodeQL has no Zig support).
+  Flipped the last `@cImport`ers (`md4x-wasm.zig`, `md4x-napi.zig`, `fuzz.zig`)
+  onto `@import("abi")` (`node_api.h` stays external for napi). `build.zig`: abi
+  module on wasm/napi/fuzz steps, removed the C-fuzzer step + unused
+  `cli_sources`/`c_flags`/`version` consts. **Only C left in any artifact: the
+  vendored libyaml.** Remaining `@cImport`: `node_api.h`, `stdio.h`,
+  `string.h`, `yaml.h` — all external.
 
-- **§8.1** — all seven typed `MD_CTX` growable arrays (`marks`, `containers`,
-  `ref_defs`, `block_component_info`, `slot_info`, `block_alert_info`,
-  `inline_attrs`) migrated to `std.ArrayListUnmanaged(T)` + `c_allocator`; every
-  `n_*`/`alloc_*` field and all 8 `util.growArray` call sites gone.
-- **§8.3** (partial) — Unicode classifiers + `ISUNICODE*` wrappers → `bool`.
-- **§8.5** — injectable `ctx.alloc` + `FailingAllocator` OOM native tests.
-- **§C (fuller OOM matrix, mostly done)** — the three raw byte arenas
-  (`block_bytes`, the ref-def hashtable array, and the `MD_REF_DEF_LIST` buckets)
-  route through `ctx.alloc` via `util.arena_alloc`/`arena_realloc`/`arena_free`;
-  the typed buffers — `md_build_attribute`'s `text`/`substr_types`/
-  `substr_offsets` (length now recorded in `MD_ATTRIBUTE_BUILD.text_alloc` +
-  `substr_alloc`) and `process.zig`'s per-row scratch (`pipe_offs`, `align_arr`)
-  - code-block `meta_buf`/`meta_copy` (`det.code.meta`) — route through the new
-    `util.alloc_array_a`/`realloc_array_a`/`free_array_a` typed helpers. `md_parse`
-    split into `md_parse_impl(alloc, …)` + a full-parse `FailingAllocator` sweep
-    (now covering ref-defs, table, code-meta, link-title-with-entity, and component
-    paths; `zig build test` = 14/14, Debug + ReleaseFast). This work surfaced and
-    fixed a latent cleanup-ordering UB (hashtable freed after `ref_defs`; see
-    CHANGELOG Fixes). The last buffer — `md_parse_highlights`'s
-    `det.code.highlights` — now routes through `ctx.alloc` too, with a
-    shrink-to-fit so the freed length equals the stored `highlight_count` (shrink
-    OOM drops highlights cleanly). **The OOM matrix is complete.** The `ctx.buffer`
-    (`md_temp_buffer`) scratch — the one buffer outside the original matrix — was
-    then routed through `ctx.alloc` too (sweep extended with email/www autolinks to
-    drive its `md_temp_buffer` OOM path). **Still on libc** (outside the matrix, not
-    yet routed): the `md_merge_lines_alloc` buffers — ref-def label/title and merged
-    autolink/link-label strings — which `c_allocator.alloc` and free via either
-    `*_needs_free` (length-tracked) or the `ptr_stack` (frees by raw pointer with
-    **no** length). Routing them needs the highlights-style shrink-to-fit _plus_ a
-    length-carrying `ptr_stack` free, so it is a separate, larger follow-on (see §C).
-- **§8.7** (partial) — ctx-first `ISxxx(ctx,off)` char-class predicates → `MD_CTX` methods (`ctx.isWhitespace(off)`, …).
-- **§8.8** (partial) — dropped `MD_LINETYPE`'s explicit `c_int` backing.
-- **§8.9** — corrected the stale AST-renderer "union safety" premise (the C-union footgun was already designed out: flat `Detail` struct + arena; **do not** convert to `union(enum)`).
-- **§8.10** — "count ignored / trusted" audit: clean, no bug found.
-- **§8.11** — Zig-native coverage-instrumented fuzz harness (`zig build fuzz-zig`).
+**Net state after Phase 3:** the external C ABI *commitment* is gone (no headers,
+no stable-symbol promise, Zig CLI, Zig-only consumers) with **zero observable
+output change**. What remains is purely *internal*: the parser, renderers, and
+entity table are still compiled as **separate static libs that communicate via
+C-ABI symbols** (`md_parse`, `md_html`, `entity_lookup`, … as `export` /
+`callconv(.c)`), and `abi.zig` still declares those cross-lib functions
+`extern`. The SAX interface still passes details as `?*anyopaque` into
+`extern struct`s. Idiomatizing that is Phase 4.
 
 ---
 
-## Hard constraints (apply to ALL remaining work)
+## Remaining work — Phase 4: de-extern the internals (idiomatic Zig)
 
-1. **Byte-for-byte output parity** for `md_html`/`md_ast`/`md_ansi`/`md_meta`/`md_text`/`md_markdown`/`md_heal`.
-2. **C ABI frozen** — public `.h`, exported symbols, and `extern struct` layouts keep their exact C shape. Idiomatize internals only.
-3. **Generated files off-limits** — `unicode_tables.zig`, `entity.zig` (change the generator if output must change; it shouldn't).
-4. **No Debug-vs-Release behavior**; no `unreachable` on adversarial-reachable paths (prefer defensive guards).
-5. **Do not touch engine logic** — the mark-resolution / emphasis mod-3 engine (`inlines.zig`) and the block-analysis state machine (`blocks.zig`/`process.zig`): refactor _plumbing_ (allocation, types) only, never logic or ordering. Also leave the `qsort`/`bsearch`/`memcmp` libc externs (glibc tie-break parity).
-6. **Keep docs in sync** — `AGENTS.md` / `docs/*.md` / `CHANGELOG.md`.
+> **This is the large, engine-adjacent phase.** It "spends" the freedom Phases
+> 1–3 bought. Do it **incrementally and test-first**, gating every step against
+> the full verification gate (output must stay byte-identical). 4a/4b are
+> moderate and low output-risk; **4c is the deep, highest-risk step** — it
+> touches the block-analysis emission path that constraint #5 fences off and
+> rewrites ~35 renderer callbacks.
+
+### 4a — Collapse the static-lib graph into one Zig module per artifact
+
+**Why:** de-externing `md_parse`/entry points/callbacks is impossible while the
+parser and renderers are separate libs linked by C-ABI symbols — a direct Zig
+call requires they live in one compilation. `src/fuzz.zig` already proves the
+single-module pattern (it `@import`s the parser + every renderer + entity into
+one module and works).
+
+**Steps:**
+1. Decide the aggregation shape. Option A (recommended): an `md4x.zig`-level
+   library root that `@import`s the parser + renderers + entity and re-exports
+   their entry points, so each artifact imports *one* module. Option B: each
+   artifact imports the pieces it needs directly (what fuzz.zig does).
+2. In `build.zig`, stop building/​linking `addParserLib` / `addEntityLib` /
+   `addZigRenderer` as separate static libs for the CLI/wasm/napi; instead add
+   their sources to each artifact's module graph via imports (libyaml stays the
+   only C compiled in). Keep per-artifact `target`/`optimize`/`strip`.
+3. Replace `abi.zig`'s `pub extern fn md_parse/md_heal/entity_lookup/md_html/…`
+   with re-exports of the real Zig definitions (e.g.
+   `pub const md_parse = @import("…").md_parse;`), now that they're in-module.
+   Watch for: a file imported twice in one artifact is deduped by Zig (same
+   module) — fine; `export` kept on the defs is harmless within one artifact.
+4. Confirm no duplicate-symbol errors per artifact and that wasm `--export`
+   list + napi registration still resolve.
+
+**Risk:** moderate (build graph), low output-risk (calling convention still
+`callconv(.c)` internally at this step). **Gate:** corpus + all tests + wasm +
+napi + fuzz-zig.
+
+### 4b — De-extern `md_parse` + renderer entry points
+
+**Steps:**
+1. Drop `export` + `callconv(.c)` from `md_parse`, `md_html`/`md_html_ex`,
+   `md_ast`, `md_ansi`, `md_text`, `md_markdown`, `md_meta`, `md_heal`,
+   `entity_lookup` → plain `pub fn`. Update `abi.zig` re-exports accordingly.
+2. Keep `export` + `callconv(.c)` **only** at the true edges: the wasm exports
+   (`md4x_to_html`, `md4x_alloc`, …) and the napi exports
+   (`napi_register_module_v1`, the registered callbacks). These are real C/JS
+   ABI boundaries and must stay.
+3. The internal `process_output` sink: today
+   `?*const fn([*c]const u8, MD_SIZE, ?*anyopaque) callconv(.c) void`. It may
+   become a Zig fn pointer internally; the wasm/napi/CLI sinks are Zig fns that
+   can keep `callconv(.c)` only if still handed to an edge.
+
+**Risk:** low; output unchanged. **Gate:** full.
+
+### 4c — Idiomatize the SAX interface (deep, highest-risk)
+
+**Scope:** replace the `?*anyopaque` + `extern struct` detail mechanism and the
+`callconv(.c) c_int` callbacks with idiomatic Zig, across the parser emission
+path **and all 7 renderers (5 callbacks each ≈ 35 implementations)**, with
+byte-identical output.
+
+**Steps (test-first):**
+1. **Strengthen the abort/OOM matrix first.** The abort-code contract is md4c
+   parity: a NEGATIVE callback code is propagated verbatim, a POSITIVE one
+   returns 0 (pinned by the abort-matrix native test in `md4x.zig`). OOM and a
+   callback returning `-1` are intentionally unified as `-1`. Add tests that
+   freeze this for every callback kind **before** changing signatures.
+2. **Detail representation:** convert the `extern struct` detail types
+   (`MD_BLOCK_*_DETAIL`, `MD_SPAN_*_DETAIL`, `MD_ATTRIBUTE`) to idiomatic Zig —
+   a `union(enum)` of typed details (exhaustive `switch`, no type confusion) or
+   typed pointers. `MD_ATTRIBUTE`'s `substr_types`/`substr_offsets` `[*c]`
+   arrays become slices.
+3. **Callbacks:** `MD_PARSER`'s 5 callbacks lose `callconv(.c)` and take the
+   Zig detail type instead of `?*anyopaque`. Return type: fold in the deferred
+   **§8.2** decision — either keep an abort `c_int`/enum, or move to
+   `error{OutOfMemory}!enum{ok,abort:i32}`-style. Must preserve the abort
+   semantics from step 1.
+4. **Parser emission call sites (`process.zig`, `inlines.zig`):** rework where
+   details are constructed and callbacks invoked to build the union/typed value.
+   **Constraint #5 still applies — change packaging only, never the
+   ordering/logic of the mark-resolution/emphasis engine or block state
+   machine.**
+5. **Renderers:** convert each renderer's callbacks to take the Zig types and
+   `switch` on the union instead of `@ptrCast(?*anyopaque)`. **Convert and gate
+   one renderer at a time** against the corpus.
+6. Re-confirm the AST renderer's flat-`Detail` + arena design and the
+   `tag_is_dynamic`-first dispatch rule still hold (see `AGENTS.md` §8.9 note).
+
+**Risk:** **highest in the project** — engine-adjacent, ~35 call sites, output
+parity across 6 renderers + the abort matrix. Realistically a multi-session
+effort. **Gate after every renderer + the emission change:** full gate, both
+Debug and ReleaseFast.
+
+### Folded-in cleanups (do alongside 4c where natural)
+
+These earlier deferred items become free once the internals are Zig-native:
+- **§8.2 OOM/abort result type** — see 4c step 3.
+- **`TRUE`/`FALSE` → `bool`** where genuinely two-state (tri-state recognizers
+  excepted).
+- **Naming (§3.1/§8.6), `MD_LINETYPE` member rename (§8.8), `MD_MARK_*`
+  namespacing (§8.7)** — now that upstream-md4c grep-ability is no longer a
+  hard requirement (the C source it cross-referenced is gone), these become
+  ordinary idiomatization. The `MD_MARK_*` work still lives in the sensitive
+  mark engine — bundle with 4c, never standalone.
+
+---
+
+## Hard constraints (apply to all Phase 4 work)
+
+1. **Byte-for-byte output parity** for all 6 renderers + `md_heal`, the CLI's
+   stdout per format/flag, and the wasm/napi/Comark-AST JS surface.
+2. **Edge ABI stays C:** the wasm exported function set and the napi module
+   registration are real boundaries — keep `export`/`callconv(.c)` there.
+   (The *internal* convention is now free — that is the goal.)
+3. **Generated files off-limits** — `unicode_tables.zig`, `entity.zig` (change
+   the generator if output must change; it shouldn't).
+4. **No Debug-vs-Release behavior**; no `unreachable` on adversarial-reachable
+   paths (prefer defensive guards).
+5. **Do not touch engine logic** — the mark-resolution/emphasis mod-3 engine
+   (`inlines.zig`) and the block-analysis state machine (`blocks.zig`/
+   `process.zig`): in 4c, change detail *packaging* at the emission boundary
+   only, never the logic or ordering. Leave the `qsort`/`bsearch`/`memcmp`
+   libc externs (glibc tie-break parity).
+6. **Keep docs in sync** — `AGENTS.md` / `docs/*.md` / `CHANGELOG.md`. **These
+   are currently STALE after Phases 1–3** (they still describe a frozen C ABI,
+   `.h` headers, and a C CLI). Updating them is the immediate next task
+   regardless of Phase 4 (see below).
 
 ## Verification gate (run after every change)
 
@@ -66,116 +196,33 @@ Phases 0–2 and the selected Phase 3 work, plus these §8 leftovers:
 bun fmt
 zig build
 zig build test                                      # ReleaseFast (default)
-zig build test -Doptimize=Debug                     # undefined-fill + allocator length checks (catches OOM/cleanup UB)
-bun scripts/run-tests.ts
+zig build test -Doptimize=Debug                     # undefined-fill + allocator length checks
+bun scripts/run-tests.ts                            # spec suites (CLI-driven)
 python3 test/pathological-tests.py -p zig-out/bin/md4x
-bash scripts/diff-corpus.sh > /tmp/md4x-now.sha   # diff vs baseline — MUST be empty
+bash scripts/diff-corpus.sh > /tmp/md4x-now.sha     # diff vs /tmp/md4x-baseline.sha — MUST be empty
 # Memory-touching changes also:
-zig build fuzz-zig                                  # ReleaseSafe, live bounds-checks
-./test/fuzzers/build.sh html ast && for h in html ast; do ./test/fuzzers/run.sh $h --timeout 90; done   # ASan/UBSan
-# JS bindings:
+zig build fuzz-zig                                  # ReleaseSafe smoke (the C/libFuzzer harnesses are gone)
 zig build wasm && bun vitest run packages/md4x/test/wasm.test.mjs
+zig build napi-linux-x64 -Dnapi-include=node_modules/node-api-headers/include \
+  && bun vitest run packages/md4x/test/napi.test.mjs
 ```
 
-Any non-empty corpus diff is a **stop-the-line** regression — bisect, fix or revert.
+Capture the baseline from the Phase-3 commit (`83abae9`) before starting:
+`bash scripts/diff-corpus.sh > /tmp/md4x-baseline.sha`. Any non-empty diff is a
+**stop-the-line** regression — bisect, fix or revert.
 
 ---
 
-## Remaining work
+## Immediate next task (independent of Phase 4): doc sync
 
-### A. Deferred — owner decision needed (do NOT do autonomously)
-
-These trade upstream-md4c grep-ability (the source is full of `md4x.c ~NNNN`
-cross-refs) for cosmetic Zig idiom. Revisit only if the project decides to stop
-tracking upstream md4c.
-
-- **Naming (§3.1 / §8.6):** rename screaming-case helpers (`ISALNUM_`,
-  `ISANYOF2_`, `MD_TEMP_BUFFER`, `MD_CHECK`-style). `md_*` function names should
-  stay regardless.
-- **Internal-enum member rename (§8.8):** `MD_LINETYPE` members `MD_LINE_BLANK` →
-  `.blank`, … (backing already dropped; only the member names remain).
-- **`MD_MARK_*` constant namespacing (§8.7):** group into a struct
-  (`mark_flags.resolved`, …). Lives in the sensitive mark engine — bundle with
-  future engine work, never standalone.
-
-### B. Declined re-architecture — needs deliberate, test-first, reviewed work
-
-- **OOM/abort result type (§8.2):** replace the `c_int` `-1`/abort-code
-  convention on the emission path with an explicit
-  `union(enum){ ok, oom, abort: c_int }` (or `error{OutOfMemory}!enum`). Today
-  OOM and a callback aborting with `-1` are **intentionally unified** (pinned by
-  the `md_parse` abort-matrix native test in `md4x.zig`). Large and
-  semantics-adjacent: attempt **only** behind a strengthened abort/OOM test
-  matrix, and reconcile `docs/parser-api.md`'s aspirational "returns the
-  aborting callback's code" contract with actual md4c-parity behavior.
-
-### C. Lower-value / out of original scope (safe, but modest payoff)
-
-- **Fuller OOM matrix (extends §8.5/§8.1) — DONE.** All parser allocations that
-  the matrix targeted now route through `ctx.alloc`: the three byte arenas,
-  `md_build_attribute`'s typed buffers, `process.zig`'s `pipe_offs`/`align_arr`/
-  `meta_buf`/`meta_copy`, and `md_parse_highlights`'s `det.code.highlights`
-  (shrink-to-fit so the freed length matches `highlight_count`). The `md_parse`
-  `FailingAllocator` sweep covers ref-defs, table, code-meta + highlights,
-  link-title-with-entity, component, and (now) email/www-autolink paths.
-  `ctx.buffer` (`md_temp_buffer`) was also routed. **Still on libc** (a separate,
-  larger follow-on, not part of the original matrix): the `md_merge_lines_alloc`
-  buffers — ref-def label/title + merged autolink/link-label strings. They
-  `c_allocator.alloc` a buffer of `end-beg` but keep only the logical (collapsed)
-  `*_size`, and some are freed via the `ptr_stack` which stores **no** length. To
-  route them: shrink-to-fit to the logical size after merge (like highlights), and
-  give the `ptr_stack` a parallel size store (or length-tag the buffer) so the
-  generic `md_mark_get_ptr` free can pass an exact length. Touches the sensitive
-  mark/ptr-stack plumbing — do it deliberately, Debug-gated.
-- **Renderers (§8.9) — largely a non-starter (premise was stale).** Verified
-  2026-06-17: **all** renderers already allocate via `c_allocator` with sized
-  slices — there is **zero** raw `std.c.malloc`/`realloc`/`free` in
-  `src/renderers/`, and the shared `md4x-props.zig`/`md4x-json.zig` are already
-  idiomatic. The remaining `c_int` returns and `[*c]` params are the **ABI-mandated**
-  SAX-callback signatures (`callconv(.c) c_int`) and C string pointers, which
-  constraint #2 (frozen C ABI) requires keeping. So there is no safe, in-scope
-  idiomatization left here. (AST renderer: arena + Zig allocator; see §8.9 "do not
-  convert to union(enum)".)
-- **`TRUE`/`FALSE` retirement (rest of §8.3):** still pervasive; convert to `bool`
-  where genuinely two-state. Nuanced — many feed `c_int` ABI-ish fields. The
-  tri-state recognizers (`md_is_link_reference_definition`, `md_is_autolink`)
-  must stay `c_int` (or wait for §8.2's result type).
-- **Test-visibility cleanup (§8.10):** `md4x.zig` keeps a `_testing` re-export
-  struct + `_ = &fn;` suppression refs; a tidier scheme (`pub` behind a build
-  option) could remove them.
-- **`@intCast`/`@ptrCast` density (§8.10):** mostly intrinsic to mirroring C's
-  integer model at the scalar boundary — **not worth a dedicated pass**.
-
----
-
-## Suggested next step
-
-**The autonomous idiomatization track is effectively done.** Over its run it
-landed the full §8.1 array migration, §8.5 injectable allocator, and the entire
-**"fuller OOM matrix" (§C) — every parser allocation the matrix targeted, plus
-`ctx.buffer`, now routes through `ctx.alloc`** with a full-parse `FailingAllocator`
-sweep (Debug + ReleaseFast), and it surfaced+fixed a latent cleanup-ordering UB
-along the way. There is **no remaining clean, safe, in-scope autonomous work**:
-
-- **`md_merge_lines_alloc` buffers** (the last libc allocations in the parser) —
-  routing them requires giving the mark-engine `ptr_stack` a length to free by,
-  i.e. repurposing mark fields / parallel size store. That's **engine plumbing
-  under constraint #5** — needs a deliberate, reviewed change, not autonomous.
-- **Renderers (§8.9)** — premise was stale: allocation is **already** idiomatic
-  (`c_allocator` + sized slices, zero raw malloc); the leftover `c_int`/`[*c]` are
-  ABI-mandated (constraint #2). Nothing safe to do.
-- Everything else is an **owner judgment call (A)** or **deliberate, reviewed
-  design (B)** — explicitly not autonomous.
-
-So: hand back to the owner. The natural next decisions are (B) the §8.2 OOM/abort
-result-type rework (behind a strengthened abort/OOM test matrix), or (A) the
-cosmetic renames — both want human review. If `md_merge_lines_alloc` coverage is
-wanted, scope it as a small reviewed PR (shrink-to-fit + a length-carrying
-`ptr_stack`), gated in **both Debug and ReleaseFast** (`zig build test
--Doptimize=Debug`).
-
-Everything else is an **owner judgment call (A)** or needs **deliberate,
-human-reviewed design (B)**. Pick up (1)/(2) only if explicitly continued. Always
-run the gate in **both Debug and ReleaseFast** (`zig build test -Doptimize=Debug`);
-Debug's `undefined`-fill + allocator length validation is what catches the
-length-tracking / cleanup-ordering bugs this class is prone to (it found one).
+Phases 1–3 are committed but `AGENTS.md` / `docs/*.md` / `CHANGELOG.md` still
+describe the old C-ABI architecture (frozen `.h`, C ABI "preserved unchanged",
+C CLI driver, C/libFuzzer harnesses, `lib/include` outputs). Update them to the
+Zig-library-only reality:
+- Architecture/Structure: no `.h` headers; `src/abi.zig` is the ABI types
+  module; CLI is `src/cli/md4x-cli.zig`; entry points are Zig.
+- Building: no installed static libs / headers (only `bin/md4x` + wasm/napi).
+- Fuzzing: C/libFuzzer harnesses removed; `zig build fuzz-zig` is the harness.
+- CHANGELOG: a user-facing entry for "dropped the C ABI / public headers /
+  static-lib + header outputs / C CLI / C fuzzers".
+- Drop or rewrite the "C ABI frozen" framing throughout (it's now inverted).
