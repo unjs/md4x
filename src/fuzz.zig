@@ -86,33 +86,24 @@ test "md_parse" {
             var buf: [max_input]u8 = undefined;
             const input = buf[0..smith.slice(&buf)];
             if (!accept(input)) return;
-            var p: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER);
+            var p: c.Parser = .{};
             p.flags = c.MD_DIALECT_ALL;
-            p.enter_block = struct {
-                fn f(_: c.MD_BLOCKTYPE, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) c_int {
+            const nop = struct {
+                fn block(_: *const c.BlockDetail, _: ?*anyopaque) c.CallbackResult {
                     return 0;
                 }
-            }.f;
-            p.leave_block = struct {
-                fn f(_: c.MD_BLOCKTYPE, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) c_int {
+                fn span(_: *const c.SpanDetail, _: ?*anyopaque) c.CallbackResult {
                     return 0;
                 }
-            }.f;
-            p.enter_span = struct {
-                fn f(_: c.MD_SPANTYPE, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) c_int {
+                fn text(_: c.TextType, _: []const c.MD_CHAR, _: ?*anyopaque) c.CallbackResult {
                     return 0;
                 }
-            }.f;
-            p.leave_span = struct {
-                fn f(_: c.MD_SPANTYPE, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) c_int {
-                    return 0;
-                }
-            }.f;
-            p.text = struct {
-                fn f(_: c.MD_TEXTTYPE, _: [*c]const c.MD_CHAR, _: c.MD_SIZE, _: ?*anyopaque) callconv(.c) c_int {
-                    return 0;
-                }
-            }.f;
+            };
+            p.enter_block = nop.block;
+            p.leave_block = nop.block;
+            p.enter_span = nop.span;
+            p.leave_span = nop.span;
+            p.text = nop.text;
             _ = lib.md_parse(@ptrCast(input.ptr), @intCast(input.len), &p, null);
         }
     }.one, .{});

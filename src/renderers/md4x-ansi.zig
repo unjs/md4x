@@ -278,7 +278,7 @@ fn render_entity(r: *MD_ANSI, text: [*]const u8, size: c.MD_SIZE, fn_append: App
     fn_append(r, text, size);
 }
 
-fn render_attribute(r: *MD_ANSI, attr: *const c.MD_ATTRIBUTE, fn_append: AppendFn) void {
+fn render_attribute(r: *MD_ANSI, attr: *const c.Attribute, fn_append: AppendFn) void {
     const total = attr.size();
     var i: usize = 0;
     while (i < attr.substr_types.len and attr.substr_offsets[i] < total) : (i += 1) {
@@ -288,8 +288,8 @@ fn render_attribute(r: *MD_ANSI, attr: *const c.MD_ATTRIBUTE, fn_append: AppendF
         const text: [*]const u8 = attr.text.ptr + off;
 
         switch (ttype) {
-            c.MD_TEXT_NULLCHAR => render_utf8_codepoint(r, 0x0000, render_verbatim),
-            c.MD_TEXT_ENTITY => render_entity(r, text, size, fn_append),
+            c.TextType.nullchar => render_utf8_codepoint(r, 0x0000, render_verbatim),
+            c.TextType.entity => render_entity(r, text, size, fn_append),
             else => fn_append(r, text, size),
         }
     }
@@ -454,13 +454,13 @@ fn render_ansi_code_meta_json(r: *MD_ANSI) void {
 // ***  ANSI renderer implementation  ***
 // **************************************
 
-fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_ANSI = @ptrCast(@alignCast(userdata.?));
 
-    switch (block_type) {
-        c.MD_BLOCK_DOC => {},
+    switch (detail.*) {
+        .doc => {},
 
-        c.MD_BLOCK_QUOTE => {
+        .quote => {
             if (r.need_newline != 0) {
                 render_separator(r);
                 r.need_newline = 0;
@@ -468,24 +468,22 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.quote_depth += 1;
         },
 
-        c.MD_BLOCK_UL => {
+        .ul => {
             if (r.need_newline != 0 and r.list_depth == 0) {
                 render_separator(r);
                 r.need_newline = 0;
             }
         },
 
-        c.MD_BLOCK_OL => {
+        .ol => |*ol| {
             if (r.need_newline != 0 and r.list_depth == 0) {
                 render_separator(r);
                 r.need_newline = 0;
             }
-            const ol: *const c.MD_BLOCK_OL_DETAIL = @ptrCast(@alignCast(detail.?));
             r.ol_counter = @intCast(ol.start);
         },
 
-        c.MD_BLOCK_LI => {
-            const li: *const c.MD_BLOCK_LI_DETAIL = @ptrCast(@alignCast(detail.?));
+        .li => |*li| {
             render_indent(r);
             if (li.is_task) {
                 if (li.task_mark == 'x' or li.task_mark == 'X') {
@@ -514,7 +512,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.li_opened = 1;
         },
 
-        c.MD_BLOCK_HR => {
+        .hr => {
             if (r.need_newline != 0) {
                 render_separator(r);
                 r.need_newline = 0;
@@ -527,7 +525,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_H => {
+        .h => {
             if (r.need_newline != 0) {
                 render_separator(r);
                 r.need_newline = 0;
@@ -536,7 +534,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             render_ansi(r, ANSI_HEADING);
         },
 
-        c.MD_BLOCK_CODE => {
+        .code => |*code_det| {
             if (r.need_newline != 0) {
                 render_separator(r);
                 r.need_newline = 0;
@@ -546,7 +544,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             if (r.flags & MD_ANSI_FLAG_CODE_META != 0) {
                 const meta_opt = ansi_code_meta_push(r);
                 if (meta_opt) |meta| {
-                    const det: *const c.MD_BLOCK_CODE_DETAIL = @ptrCast(@alignCast(detail.?));
+                    const det = code_det;
                     meta.start = r.output_offset;
                     if (det.lang.text.len > 0) {
                         const lang_size = det.lang.size();
@@ -590,9 +588,9 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             render_ansi(r, ANSI_DIM);
         },
 
-        c.MD_BLOCK_HTML => {},
+        .html => {},
 
-        c.MD_BLOCK_P => {
+        .p => {
             if (r.need_newline != 0 and r.li_opened == 0) {
                 render_separator(r);
                 r.need_newline = 0;
@@ -602,28 +600,28 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.li_opened = 0;
         },
 
-        c.MD_BLOCK_TABLE => {
+        .table => {
             if (r.need_newline != 0) {
                 render_separator(r);
                 r.need_newline = 0;
             }
         },
 
-        c.MD_BLOCK_THEAD => {},
+        .thead => {},
 
-        c.MD_BLOCK_TBODY => {},
+        .tbody => {},
 
-        c.MD_BLOCK_TR => {
+        .tr => {
             render_indent(r);
         },
 
-        c.MD_BLOCK_TH => {
+        .th => {
             render_ansi(r, ANSI_BOLD);
         },
 
-        c.MD_BLOCK_TD => {},
+        .td => {},
 
-        c.MD_BLOCK_FRONTMATTER => {
+        .frontmatter => {
             if (r.component_nesting > 0) {
                 r.in_comp_frontmatter = 1;
             } else if (r.flags & MD_ANSI_FLAG_SHOW_FRONTMATTER != 0) {
@@ -633,8 +631,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             }
         },
 
-        c.MD_BLOCK_COMPONENT => {
-            const comp: *const c.MD_BLOCK_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
+        .component => |*comp| {
             var color = alert_type_color(comp.tag_name.text.ptr, comp.tag_name.size());
             var title: []const u8 = comp.tag_name.text;
 
@@ -683,8 +680,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             }
         },
 
-        c.MD_BLOCK_ALERT => {
-            const det: *const c.MD_BLOCK_ALERT_DETAIL = @ptrCast(@alignCast(detail.?));
+        .alert => |*det| {
             var color = alert_type_color(det.type_name.text.ptr, det.type_name.size());
             if (color == null) color = ANSI_COLOR_YELLOW;
             if (r.need_newline != 0) {
@@ -706,54 +702,50 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.in_alert = 1;
         },
 
-        c.MD_BLOCK_TEMPLATE => {
+        .template => {
             // Transparent — content renders normally within parent component.
         },
-
-        else => {},
     }
 
     return 0;
 }
 
-fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_ANSI = @ptrCast(@alignCast(userdata.?));
 
-    _ = detail;
+    switch (std.meta.activeTag(detail.*)) {
+        .doc => {},
 
-    switch (block_type) {
-        c.MD_BLOCK_DOC => {},
-
-        c.MD_BLOCK_QUOTE => {
+        .quote => {
             r.quote_depth -= 1;
         },
 
-        c.MD_BLOCK_UL => {
+        .ul => {
             r.ol_counter = 0;
             r.li_opened = 0;
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_OL => {
+        .ol => {
             r.ol_counter = 0;
             r.li_opened = 0;
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_LI => {
+        .li => {
             r.list_depth -= 1;
             render_newline(r);
         },
 
-        c.MD_BLOCK_HR => {},
+        .hr => {},
 
-        c.MD_BLOCK_H => {
+        .h => {
             render_ansi(r, ANSI_RESET);
             render_newline(r);
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_CODE => {
+        .code => {
             render_ansi(r, ANSI_DIM_OFF);
             if (r.flags & MD_ANSI_FLAG_CODE_META != 0 and r.n_code_blocks < r.code_blocks_cap) {
                 r.code_blocks.?[@intCast(r.n_code_blocks)].end = r.output_offset;
@@ -763,18 +755,18 @@ fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_HTML => {},
+        .html => {},
 
-        c.MD_BLOCK_P => {
+        .p => {
             render_newline(r);
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_TABLE => {
+        .table => {
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_THEAD => {
+        .thead => {
             render_indent(r);
             render_ansi(r, ANSI_DIM);
             render_verbatim_lit(r, HORIZONTAL_RULE);
@@ -782,22 +774,22 @@ fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             render_newline(r);
         },
 
-        c.MD_BLOCK_TBODY => {},
+        .tbody => {},
 
-        c.MD_BLOCK_TR => {
+        .tr => {
             render_newline(r);
         },
 
-        c.MD_BLOCK_TH => {
+        .th => {
             render_ansi(r, ANSI_BOLD_OFF);
             render_verbatim_lit(r, "\t");
         },
 
-        c.MD_BLOCK_TD => {
+        .td => {
             render_verbatim_lit(r, "\t");
         },
 
-        c.MD_BLOCK_FRONTMATTER => {
+        .frontmatter => {
             if (r.in_comp_frontmatter != 0) {
                 r.in_comp_frontmatter = 0;
             } else {
@@ -806,7 +798,7 @@ fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             }
         },
 
-        c.MD_BLOCK_COMPONENT => {
+        .component => {
             r.component_nesting -= 1;
             if (r.in_alert != 0) {
                 r.in_alert = 0;
@@ -817,37 +809,34 @@ fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_ALERT => {
+        .alert => {
             r.in_alert = 0;
             r.alert_color = null;
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_TEMPLATE => {
+        .template => {
             // Transparent — no output needed.
         },
-
-        else => {},
     }
 
     return 0;
 }
 
-fn enter_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn enter_span_callback(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_ANSI = @ptrCast(@alignCast(userdata.?));
 
-    if (span_type == c.MD_SPAN_IMG)
+    if (detail.* == .img)
         r.image_nesting_level += 1;
 
-    if (r.image_nesting_level > 0 and span_type != c.MD_SPAN_IMG)
+    if (r.image_nesting_level > 0 and detail.* != .img)
         return 0;
 
-    switch (span_type) {
-        c.MD_SPAN_EM => render_ansi(r, ANSI_ITALIC),
-        c.MD_SPAN_STRONG => render_ansi(r, ANSI_BOLD),
-        c.MD_SPAN_U => render_ansi(r, ANSI_UNDERLINE),
-        c.MD_SPAN_A => {
-            const a: *const c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(detail.?));
+    switch (detail.*) {
+        .em => render_ansi(r, ANSI_ITALIC),
+        .strong => render_ansi(r, ANSI_BOLD),
+        .u => render_ansi(r, ANSI_UNDERLINE),
+        .a => |*a| {
             // OSC 8 hyperlink: makes text clickable in supported terminals
             if (r.flags & MD_ANSI_FLAG_NO_COLOR == 0 and a.href.text.len > 0) {
                 render_verbatim_lit(r, ANSI_HYPERLINK_OPEN);
@@ -856,37 +845,35 @@ fn enter_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: 
             }
             render_ansi(r, ANSI_LINK);
         },
-        c.MD_SPAN_IMG => {
+        .img => {
             // Images are suppressed — alt text is silently skipped via image_nesting_level
         },
-        c.MD_SPAN_CODE => render_ansi(r, ANSI_COLOR_CYAN),
-        c.MD_SPAN_DEL => render_ansi(r, ANSI_STRIKETHROUGH),
-        c.MD_SPAN_LATEXMATH => render_ansi(r, ANSI_COLOR_YELLOW),
-        c.MD_SPAN_LATEXMATH_DISPLAY => render_ansi(r, ANSI_COLOR_YELLOW),
-        c.MD_SPAN_WIKILINK => render_ansi(r, ANSI_LINK),
-        c.MD_SPAN_COMPONENT => render_ansi(r, ANSI_COLOR_CYAN),
-        c.MD_SPAN_SPAN => {}, // Transparent: no special styling
-        else => {},
+        .code => render_ansi(r, ANSI_COLOR_CYAN),
+        .del => render_ansi(r, ANSI_STRIKETHROUGH),
+        .latexmath => render_ansi(r, ANSI_COLOR_YELLOW),
+        .latexmath_display => render_ansi(r, ANSI_COLOR_YELLOW),
+        .wikilink => render_ansi(r, ANSI_LINK),
+        .component => render_ansi(r, ANSI_COLOR_CYAN),
+        .span => {}, // Transparent: no special styling
     }
 
     return 0;
 }
 
-fn leave_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn leave_span_callback(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_ANSI = @ptrCast(@alignCast(userdata.?));
 
-    if (span_type == c.MD_SPAN_IMG)
+    if (detail.* == .img)
         r.image_nesting_level -= 1;
 
     if (r.image_nesting_level > 0)
         return 0;
 
-    switch (span_type) {
-        c.MD_SPAN_EM => render_ansi(r, ANSI_ITALIC_OFF),
-        c.MD_SPAN_STRONG => render_ansi(r, ANSI_BOLD_OFF),
-        c.MD_SPAN_U => render_ansi(r, ANSI_UNDERLINE_OFF),
-        c.MD_SPAN_A => {
-            const a: *const c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(detail.?));
+    switch (detail.*) {
+        .em => render_ansi(r, ANSI_ITALIC_OFF),
+        .strong => render_ansi(r, ANSI_BOLD_OFF),
+        .u => render_ansi(r, ANSI_UNDERLINE_OFF),
+        .a => |*a| {
             render_ansi(r, ANSI_RESET);
             // Close OSC 8 hyperlink
             if (r.flags & MD_ANSI_FLAG_NO_COLOR == 0 and a.href.text.len > 0)
@@ -900,39 +887,39 @@ fn leave_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: 
                 render_ansi(r, ANSI_RESET);
             }
         },
-        c.MD_SPAN_IMG => {},
-        c.MD_SPAN_CODE => render_ansi(r, ANSI_COLOR_DEFAULT),
-        c.MD_SPAN_DEL => render_ansi(r, ANSI_STRIKE_OFF),
-        c.MD_SPAN_LATEXMATH => render_ansi(r, ANSI_COLOR_DEFAULT),
-        c.MD_SPAN_LATEXMATH_DISPLAY => render_ansi(r, ANSI_COLOR_DEFAULT),
-        c.MD_SPAN_WIKILINK => render_ansi(r, ANSI_RESET),
-        c.MD_SPAN_COMPONENT => render_ansi(r, ANSI_COLOR_DEFAULT),
-        c.MD_SPAN_SPAN => {}, // Transparent: no special styling
-        else => {},
+        .img => {},
+        .code => render_ansi(r, ANSI_COLOR_DEFAULT),
+        .del => render_ansi(r, ANSI_STRIKE_OFF),
+        .latexmath => render_ansi(r, ANSI_COLOR_DEFAULT),
+        .latexmath_display => render_ansi(r, ANSI_COLOR_DEFAULT),
+        .wikilink => render_ansi(r, ANSI_RESET),
+        .component => render_ansi(r, ANSI_COLOR_DEFAULT),
+        .span => {}, // Transparent: no special styling
     }
 
     return 0;
 }
 
-fn text_callback(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
+fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_ANSI = @ptrCast(@alignCast(userdata.?));
-    const text: [*]const u8 = @ptrCast(text_in);
+    const text: [*]const u8 = text_slice.ptr;
+    const size: c.MD_SIZE = @intCast(text_slice.len);
 
     // Suppress component frontmatter text.
     if (r.in_comp_frontmatter != 0)
         return 0;
 
     switch (text_type) {
-        c.MD_TEXT_NULLCHAR => {
+        .nullchar => {
             render_utf8_codepoint(r, 0x0000, render_verbatim);
         },
 
-        c.MD_TEXT_BR => {
+        .br => {
             render_newline(r);
             render_indent(r);
         },
 
-        c.MD_TEXT_SOFTBR => {
+        .softbr => {
             if (r.image_nesting_level == 0) {
                 render_newline(r);
                 render_indent(r);
@@ -941,15 +928,15 @@ fn text_callback(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c
             }
         },
 
-        c.MD_TEXT_HTML => {
+        .html => {
             // Raw HTML: suppress in terminal output
         },
 
-        c.MD_TEXT_ENTITY => {
+        .entity => {
             render_entity(r, text, size, render_verbatim);
         },
 
-        c.MD_TEXT_CODE => {
+        .code => {
             if (r.in_code_block != 0) {
                 // Inside code block: the parser sends each line and its \n
                 // as separate callbacks. We use need_indent to track when
@@ -979,10 +966,10 @@ fn text_callback(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c
     return 0;
 }
 
-fn debug_log_callback(msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
+fn debug_log_callback(msg: []const u8, userdata: ?*anyopaque) void {
     const r: *MD_ANSI = @ptrCast(@alignCast(userdata.?));
     if (r.flags & MD_ANSI_FLAG_DEBUG != 0)
-        _ = sys.fprintf(sys.stderr, "MD4X: %s\n", msg);
+        _ = sys.fprintf(sys.stderr, "MD4X: %.*s\n", @as(c_int, @intCast(msg.len)), msg.ptr);
 }
 
 // **************************************
@@ -1061,7 +1048,7 @@ pub fn md_ansi(
         return ret;
     }
 
-    var parser: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER);
+    var parser: c.Parser = .{};
     parser.flags = parser_flags;
     parser.enter_block = enter_block_callback;
     parser.leave_block = leave_block_callback;

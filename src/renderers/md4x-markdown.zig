@@ -68,7 +68,7 @@ const MD_MARKDOWN = struct {
     thead_done: c_int,
     current_col: c_int,
     col_count: c_int,
-    col_aligns: [128]c.MD_ALIGN,
+    col_aligns: [128]c.Align,
 
     // Code block fence
     fence_char: c.MD_CHAR,
@@ -177,7 +177,7 @@ fn render_entity(r: *MD_MARKDOWN, text: [*]const u8, size: c.MD_SIZE, fn_append:
     fn_append(r, text, size);
 }
 
-fn render_attribute(r: *MD_MARKDOWN, attr: *const c.MD_ATTRIBUTE, fn_append: AppendFn) void {
+fn render_attribute(r: *MD_MARKDOWN, attr: *const c.Attribute, fn_append: AppendFn) void {
     const total = attr.size();
     var i: usize = 0;
     while (i < attr.substr_types.len and attr.substr_offsets[i] < total) : (i += 1) {
@@ -187,8 +187,8 @@ fn render_attribute(r: *MD_MARKDOWN, attr: *const c.MD_ATTRIBUTE, fn_append: App
         const text: [*]const u8 = attr.text.ptr + off;
 
         switch (ttype) {
-            c.MD_TEXT_NULLCHAR => render_utf8_codepoint(r, 0x0000, render_verbatim),
-            c.MD_TEXT_ENTITY => render_entity(r, text, size, fn_append),
+            c.TextType.nullchar => render_utf8_codepoint(r, 0x0000, render_verbatim),
+            c.TextType.entity => render_entity(r, text, size, fn_append),
             else => fn_append(r, text, size),
         }
     }
@@ -200,9 +200,9 @@ fn render_table_separator(r: *MD_MARKDOWN) void {
     var i: c_int = 0;
     while (i < r.col_count) : (i += 1) {
         switch (r.col_aligns[@intCast(i)]) {
-            c.MD_ALIGN_LEFT => render_verbatim_lit(r, " :--- |"),
-            c.MD_ALIGN_CENTER => render_verbatim_lit(r, " :---: |"),
-            c.MD_ALIGN_RIGHT => render_verbatim_lit(r, " ---: |"),
+            c.Align.left => render_verbatim_lit(r, " :--- |"),
+            c.Align.center => render_verbatim_lit(r, " :---: |"),
+            c.Align.right => render_verbatim_lit(r, " ---: |"),
             else => render_verbatim_lit(r, " --- |"),
         }
     }
@@ -213,13 +213,13 @@ fn render_table_separator(r: *MD_MARKDOWN) void {
 // ***  Markdown renderer implementation  ***
 // ******************************************
 
-fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_MARKDOWN = @ptrCast(@alignCast(userdata.?));
 
-    switch (block_type) {
-        c.MD_BLOCK_DOC => {},
+    switch (detail.*) {
+        .doc => {},
 
-        c.MD_BLOCK_QUOTE => {
+        .quote => {
             if (r.need_newline != 0) {
                 render_newline(r);
                 r.need_newline = 0;
@@ -227,7 +227,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.quote_depth += 1;
         },
 
-        c.MD_BLOCK_UL => {
+        .ul => {
             if (r.need_newline != 0 and r.list_depth == 0) {
                 render_newline(r);
                 r.need_newline = 0;
@@ -235,17 +235,15 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.ol_counter = 0;
         },
 
-        c.MD_BLOCK_OL => {
+        .ol => |*ol| {
             if (r.need_newline != 0 and r.list_depth == 0) {
                 render_newline(r);
                 r.need_newline = 0;
             }
-            const ol: *const c.MD_BLOCK_OL_DETAIL = @ptrCast(@alignCast(detail.?));
             r.ol_counter = @intCast(ol.start);
         },
 
-        c.MD_BLOCK_LI => {
-            const li: *const c.MD_BLOCK_LI_DETAIL = @ptrCast(@alignCast(detail.?));
+        .li => |*li| {
             render_indent(r);
             if (li.is_task) {
                 if (li.task_mark == 'x' or li.task_mark == 'X') {
@@ -267,7 +265,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.li_opened = 1;
         },
 
-        c.MD_BLOCK_HR => {
+        .hr => {
             if (r.need_newline != 0) {
                 render_newline(r);
                 r.need_newline = 0;
@@ -278,8 +276,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_H => {
-            const h: *const c.MD_BLOCK_H_DETAIL = @ptrCast(@alignCast(detail.?));
+        .h => |*h| {
             const level = h.level;
             if (r.need_newline != 0) {
                 render_newline(r);
@@ -292,8 +289,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             render_verbatim_lit(r, " ");
         },
 
-        c.MD_BLOCK_CODE => {
-            const code: *const c.MD_BLOCK_CODE_DETAIL = @ptrCast(@alignCast(detail.?));
+        .code => |*code| {
             if (r.need_newline != 0) {
                 render_newline(r);
                 r.need_newline = 0;
@@ -315,11 +311,11 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.need_indent = 1;
         },
 
-        c.MD_BLOCK_HTML => {
+        .html => {
             // Strip raw HTML blocks
         },
 
-        c.MD_BLOCK_P => {
+        .p => {
             if (r.need_newline != 0 and r.li_opened == 0) {
                 render_newline(r);
                 r.need_newline = 0;
@@ -329,8 +325,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.li_opened = 0;
         },
 
-        c.MD_BLOCK_TABLE => {
-            const tbl: *const c.MD_BLOCK_TABLE_DETAIL = @ptrCast(@alignCast(detail.?));
+        .table => |*tbl| {
             if (r.need_newline != 0) {
                 render_newline(r);
                 r.need_newline = 0;
@@ -339,39 +334,37 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.col_count = @intCast(tbl.col_count);
             if (r.col_count > 128)
                 r.col_count = 128;
-            @memset(&r.col_aligns, 0);
+            @memset(&r.col_aligns, .default);
         },
 
-        c.MD_BLOCK_THEAD => {
+        .thead => {
             r.in_thead = 1;
             r.thead_done = 0;
         },
 
-        c.MD_BLOCK_TBODY => {},
+        .tbody => {},
 
-        c.MD_BLOCK_TR => {
+        .tr => {
             render_indent(r);
             render_verbatim_lit(r, "|");
             r.current_col = 0;
         },
 
-        c.MD_BLOCK_TH => {
-            const td: *const c.MD_BLOCK_TD_DETAIL = @ptrCast(@alignCast(detail.?));
+        .th => |*td| {
             render_verbatim_lit(r, " ");
             if (r.current_col < 128)
                 r.col_aligns[@intCast(r.current_col)] = td.@"align";
         },
 
-        c.MD_BLOCK_TD => {
+        .td => {
             render_verbatim_lit(r, " ");
         },
 
-        c.MD_BLOCK_FRONTMATTER => {
+        .frontmatter => {
             r.in_frontmatter = 1;
         },
 
-        c.MD_BLOCK_COMPONENT => {
-            const comp: *const c.MD_BLOCK_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
+        .component => |*comp| {
             if (r.need_newline != 0) {
                 render_newline(r);
                 r.need_newline = 0;
@@ -390,8 +383,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             render_newline(r);
         },
 
-        c.MD_BLOCK_ALERT => {
-            const det: *const c.MD_BLOCK_ALERT_DETAIL = @ptrCast(@alignCast(detail.?));
+        .alert => |*det| {
             if (r.need_newline != 0) {
                 render_newline(r);
                 r.need_newline = 0;
@@ -405,49 +397,47 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             render_newline(r);
         },
 
-        c.MD_BLOCK_TEMPLATE => {
+        .template => {
             // Transparent — render children normally
         },
-
-        else => {},
     }
 
     return 0;
 }
 
-fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_MARKDOWN = @ptrCast(@alignCast(userdata.?));
 
-    switch (block_type) {
-        c.MD_BLOCK_DOC => {},
+    switch (detail.*) {
+        .doc => {},
 
-        c.MD_BLOCK_QUOTE => {
+        .quote => {
             r.quote_depth -= 1;
         },
 
-        c.MD_BLOCK_UL => {
+        .ul => {
             r.ol_counter = 0;
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_OL => {
+        .ol => {
             r.ol_counter = 0;
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_LI => {
+        .li => {
             r.list_depth -= 1;
             render_newline(r);
         },
 
-        c.MD_BLOCK_HR => {},
+        .hr => {},
 
-        c.MD_BLOCK_H => {
+        .h => {
             render_newline(r);
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_CODE => {
+        .code => {
             render_indent(r);
             if (r.fence_char == '~') {
                 render_verbatim_lit(r, "~~~");
@@ -459,25 +449,25 @@ fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_HTML => {},
+        .html => {},
 
-        c.MD_BLOCK_P => {
+        .p => {
             render_newline(r);
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_TABLE => {
+        .table => {
             r.in_table = 0;
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_THEAD => {
+        .thead => {
             r.in_thead = 0;
         },
 
-        c.MD_BLOCK_TBODY => {},
+        .tbody => {},
 
-        c.MD_BLOCK_TR => {
+        .tr => {
             render_newline(r);
             if (r.in_thead != 0 and r.thead_done == 0) {
                 render_table_separator(r);
@@ -485,22 +475,21 @@ fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             }
         },
 
-        c.MD_BLOCK_TH => {
+        .th => {
             render_verbatim_lit(r, " |");
             r.current_col += 1;
         },
 
-        c.MD_BLOCK_TD => {
+        .td => {
             render_verbatim_lit(r, " |");
             r.current_col += 1;
         },
 
-        c.MD_BLOCK_FRONTMATTER => {
+        .frontmatter => {
             r.in_frontmatter = 0;
         },
 
-        c.MD_BLOCK_COMPONENT => {
-            const comp: *const c.MD_BLOCK_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
+        .component => |*comp| {
             render_indent(r);
             render_verbatim_lit(r, "</");
             if (comp.tag_name.text.len > 0)
@@ -510,99 +499,93 @@ fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_ALERT => {
+        .alert => {
             r.quote_depth -= 1;
             r.need_newline = 1;
         },
 
-        c.MD_BLOCK_TEMPLATE => {},
-
-        else => {},
+        .template => {},
     }
 
     return 0;
 }
 
-fn enter_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn enter_span_callback(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_MARKDOWN = @ptrCast(@alignCast(userdata.?));
 
-    switch (span_type) {
-        c.MD_SPAN_EM => {
+    switch (detail.*) {
+        .em => {
             render_verbatim_lit(r, "*");
         },
 
-        c.MD_SPAN_STRONG => {
+        .strong => {
             render_verbatim_lit(r, "**");
         },
 
-        c.MD_SPAN_A => {
+        .a => {
             render_verbatim_lit(r, "[");
         },
 
-        c.MD_SPAN_IMG => {
+        .img => {
             render_verbatim_lit(r, "![");
             r.image_nesting_level += 1;
         },
 
-        c.MD_SPAN_CODE => {
+        .code => {
             render_verbatim_lit(r, "`");
             r.in_code_span = 1;
         },
 
-        c.MD_SPAN_DEL => {
+        .del => {
             render_verbatim_lit(r, "~~");
         },
 
-        c.MD_SPAN_LATEXMATH => {
+        .latexmath => {
             render_verbatim_lit(r, "$");
         },
 
-        c.MD_SPAN_LATEXMATH_DISPLAY => {
+        .latexmath_display => {
             render_verbatim_lit(r, "$$");
         },
 
-        c.MD_SPAN_WIKILINK => {
+        .wikilink => {
             // Convert wiki link to regular link: [target](
             render_verbatim_lit(r, "[");
         },
 
-        c.MD_SPAN_U => {
+        .u => {
             // Underline has no standard markdown — use HTML tag
             render_verbatim_lit(r, "<u>");
         },
 
-        c.MD_SPAN_COMPONENT => {
-            const comp: *const c.MD_SPAN_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
+        .component => |*comp| {
             render_verbatim_lit(r, "<");
             if (comp.tag_name.text.len > 0)
                 render_attribute(r, &comp.tag_name, render_verbatim);
             render_verbatim_lit(r, ">");
         },
 
-        c.MD_SPAN_SPAN => {
+        .span => {
             // Generic span — transparent, just render content
         },
-
-        else => {},
     }
 
     return 0;
 }
 
-fn leave_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn leave_span_callback(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_MARKDOWN = @ptrCast(@alignCast(userdata.?));
 
-    switch (span_type) {
-        c.MD_SPAN_EM => {
+    switch (detail.*) {
+        .em => {
             render_verbatim_lit(r, "*");
         },
 
-        c.MD_SPAN_STRONG => {
+        .strong => {
             render_verbatim_lit(r, "**");
         },
 
-        c.MD_SPAN_A => {
-            const a: *const c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(detail.?));
+        .a => |*a| {
             render_verbatim_lit(r, "](");
             render_attribute(r, &a.href, render_verbatim);
             if (a.title.text.len > 0) {
@@ -613,8 +596,7 @@ fn leave_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: 
             render_verbatim_lit(r, ")");
         },
 
-        c.MD_SPAN_IMG => {
-            const img: *const c.MD_SPAN_IMG_DETAIL = @ptrCast(@alignCast(detail.?));
+        .img => |*img| {
             render_verbatim_lit(r, "](");
             render_attribute(r, &img.src, render_verbatim);
             if (img.title.text.len > 0) {
@@ -626,82 +608,79 @@ fn leave_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: 
             r.image_nesting_level -= 1;
         },
 
-        c.MD_SPAN_CODE => {
+        .code => {
             render_verbatim_lit(r, "`");
             r.in_code_span = 0;
         },
 
-        c.MD_SPAN_DEL => {
+        .del => {
             render_verbatim_lit(r, "~~");
         },
 
-        c.MD_SPAN_LATEXMATH => {
+        .latexmath => {
             render_verbatim_lit(r, "$");
         },
 
-        c.MD_SPAN_LATEXMATH_DISPLAY => {
+        .latexmath_display => {
             render_verbatim_lit(r, "$$");
         },
 
-        c.MD_SPAN_WIKILINK => {
-            const wl: *const c.MD_SPAN_WIKILINK_DETAIL = @ptrCast(@alignCast(detail.?));
+        .wikilink => |*wl| {
             render_verbatim_lit(r, "](");
             render_attribute(r, &wl.target, render_verbatim);
             render_verbatim_lit(r, ")");
         },
 
-        c.MD_SPAN_U => {
+        .u => {
             render_verbatim_lit(r, "</u>");
         },
 
-        c.MD_SPAN_COMPONENT => {
-            const comp: *const c.MD_SPAN_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
+        .component => |*comp| {
             render_verbatim_lit(r, "</");
             if (comp.tag_name.text.len > 0)
                 render_attribute(r, &comp.tag_name, render_verbatim);
             render_verbatim_lit(r, ">");
         },
 
-        c.MD_SPAN_SPAN => {},
-
-        else => {},
+        .span => {},
     }
 
     return 0;
 }
 
-fn text_callback(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
+fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_MARKDOWN = @ptrCast(@alignCast(userdata.?));
-    const text: [*]const u8 = @ptrCast(text_in);
+    const text: [*]const u8 = text_slice.ptr;
+    const size: c.MD_SIZE = @intCast(text_slice.len);
 
     if (r.in_frontmatter != 0)
         return 0;
 
     switch (text_type) {
-        c.MD_TEXT_NULLCHAR => {
+        .nullchar => {
             render_utf8_codepoint(r, 0xFFFD, render_verbatim);
         },
 
-        c.MD_TEXT_BR => {
+        .br => {
             render_verbatim_lit(r, "\\");
             render_newline(r);
             render_indent(r);
         },
 
-        c.MD_TEXT_SOFTBR => {
+        .softbr => {
             render_newline(r);
             render_indent(r);
         },
 
-        c.MD_TEXT_HTML => {
+        .html => {
             // Strip all raw HTML (comments, custom tags, etc.)
         },
 
-        c.MD_TEXT_ENTITY => {
+        .entity => {
             render_entity(r, text, size, render_verbatim);
         },
 
-        c.MD_TEXT_CODE => {
+        .code => {
             if (r.in_code_block != 0) {
                 if (size == 1 and text[0] == '\n') {
                     render_newline(r);
@@ -726,10 +705,10 @@ fn text_callback(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c
     return 0;
 }
 
-fn debug_log_callback(msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
+fn debug_log_callback(msg: []const u8, userdata: ?*anyopaque) void {
     const r: *MD_MARKDOWN = @ptrCast(@alignCast(userdata.?));
     if (r.flags & MD_MARKDOWN_FLAG_DEBUG != 0)
-        _ = sys.fprintf(sys.stderr, "MD4X: %s\n", msg);
+        _ = sys.fprintf(sys.stderr, "MD4X: %.*s\n", @as(c_int, @intCast(msg.len)), msg.ptr);
 }
 
 // **************************************
@@ -810,7 +789,7 @@ pub fn md_markdown(
         return ret;
     }
 
-    var parser: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER);
+    var parser: c.Parser = .{};
     parser.flags = parser_flags;
     parser.enter_block = enter_block_callback;
     parser.leave_block = leave_block_callback;

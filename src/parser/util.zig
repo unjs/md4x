@@ -133,7 +133,7 @@ pub inline fn md_ascii_eq(s1: [*c]const CHAR, s2: [*c]const CHAR, n: SZ) c_int {
 
 // `md_text_with_null_replacement` — split a run at NUL bytes, emitting
 // MD_TEXT_NULLCHAR for each. Returns the callback's non-zero code or 0.
-pub fn md_text_with_null_replacement(ctx: *MD_CTX, ttype: c.MD_TEXTTYPE, str_in: [*c]const CHAR, size_in: SZ) c_int {
+pub fn md_text_with_null_replacement(ctx: *MD_CTX, ttype: c.TextType, str_in: [*c]const CHAR, size_in: SZ) c_int {
     var str = str_in;
     var size = size_in;
     var off: OFF = 0;
@@ -143,7 +143,7 @@ pub fn md_text_with_null_replacement(ctx: *MD_CTX, ttype: c.MD_TEXTTYPE, str_in:
         while (off < size and str[off] != 0) off += 1;
 
         if (off > 0) {
-            ret = ctx.parser.text.?(ttype, str, off, ctx.userdata);
+            ret = ctx.parser.text.?(ttype, str[0..off], ctx.userdata);
             if (ret != 0) return ret;
             str += off;
             size -= off;
@@ -152,7 +152,7 @@ pub fn md_text_with_null_replacement(ctx: *MD_CTX, ttype: c.MD_TEXTTYPE, str_in:
 
         if (off >= size) return 0;
 
-        ret = ctx.parser.text.?(c.MD_TEXT_NULLCHAR, "", 1, ctx.userdata);
+        ret = ctx.parser.text.?(c.TextType.nullchar, "\x00", ctx.userdata);
         if (ret != 0) return ret;
         str += 1;
         size -= 1;
@@ -497,7 +497,7 @@ pub inline fn md_is_entity(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) bo
 
 pub const MD_ATTRIBUTE_BUILD = struct {
     text: [*c]CHAR = null,
-    substr_types: [*c]c.MD_TEXTTYPE = null,
+    substr_types: [*c]c.TextType = null,
     substr_offsets: [*c]OFF = null,
     substr_count: c_int = 0,
     substr_alloc: c_int = 0,
@@ -505,13 +505,13 @@ pub const MD_ATTRIBUTE_BUILD = struct {
     // freed through ctx.alloc (PLAN C). 0 when `text` is borrowed (trivial path)
     // or unset; md_free_attribute only frees `text` when this is > 0.
     text_alloc: usize = 0,
-    trivial_types: [1]c.MD_TEXTTYPE = .{0},
+    trivial_types: [1]c.TextType = .{.normal},
     trivial_offsets: [2]OFF = .{ 0, 0 },
 };
 
 pub const MD_BUILD_ATTR_NO_ESCAPES: c_uint = 0x0001;
 
-pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, ttype: c.MD_TEXTTYPE, off: OFF) error{OutOfMemory}!void {
+pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, ttype: c.TextType, off: OFF) error{OutOfMemory}!void {
     if (build.substr_count >= build.substr_alloc) {
         const old_alloc: usize = @intCast(build.substr_alloc);
         build.substr_alloc = if (build.substr_alloc > 0)
@@ -521,7 +521,7 @@ pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, tty
         const alloc_u: usize = @intCast(build.substr_alloc);
 
         // realloc substr_types (routed through ctx.alloc; exact old length passed).
-        const new_types = realloc_array_a(c.MD_TEXTTYPE, ctx.alloc, build.substr_types, old_alloc, alloc_u);
+        const new_types = realloc_array_a(c.TextType, ctx.alloc, build.substr_types, old_alloc, alloc_u);
         if (new_types == null) {
             ctx.log("realloc() failed.");
             return error.OutOfMemory;
@@ -547,7 +547,7 @@ pub fn md_free_attribute(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD) void {
     if (build.substr_alloc > 0) {
         const types_n: usize = @intCast(build.substr_alloc);
         free_array_a(CHAR, ctx.alloc, build.text, build.text_alloc);
-        free_array_a(c.MD_TEXTTYPE, ctx.alloc, build.substr_types, types_n);
+        free_array_a(c.TextType, ctx.alloc, build.substr_types, types_n);
         free_array_a(OFF, ctx.alloc, build.substr_offsets, types_n + 1);
         // Reset so a second call is a safe no-op. md_build_attribute() frees the
         // build itself on an OOM mid-build and returns -1; callers then also free
@@ -561,7 +561,7 @@ pub fn md_free_attribute(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD) void {
     }
 }
 
-pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, flags: c_uint, attr: *c.MD_ATTRIBUTE, build: *MD_ATTRIBUTE_BUILD) error{OutOfMemory}!void {
+pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, flags: c_uint, attr: *c.Attribute, build: *MD_ATTRIBUTE_BUILD) error{OutOfMemory}!void {
     var raw_off: OFF = 0;
     var off: OFF = 0;
 
@@ -585,7 +585,7 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
         build.substr_offsets = &build.trivial_offsets;
         build.substr_count = 1;
         build.substr_alloc = 0;
-        build.trivial_types[0] = c.MD_TEXT_NORMAL;
+        build.trivial_types[0] = c.TextType.normal;
         build.trivial_offsets[0] = 0;
         build.trivial_offsets[1] = raw_size;
         off = raw_size;
@@ -604,7 +604,7 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
 
         while (raw_off < raw_size) {
             if (raw_text[raw_off] == 0) {
-                md_build_attr_append_substr(ctx, build, c.MD_TEXT_NULLCHAR, off) catch {
+                md_build_attr_append_substr(ctx, build, c.TextType.nullchar, off) catch {
                     md_free_attribute(ctx, build);
                     return error.OutOfMemory;
                 };
@@ -617,7 +617,7 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
             if (raw_text[raw_off] == '&') {
                 var ent_end: OFF = undefined;
                 if (md_is_entity_str(ctx, raw_text, raw_off, raw_size, &ent_end)) {
-                    md_build_attr_append_substr(ctx, build, c.MD_TEXT_ENTITY, off) catch {
+                    md_build_attr_append_substr(ctx, build, c.TextType.entity, off) catch {
                         md_free_attribute(ctx, build);
                         return error.OutOfMemory;
                     };
@@ -629,8 +629,8 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
                 }
             }
 
-            if (build.substr_count == 0 or build.substr_types[@intCast(build.substr_count - 1)] != c.MD_TEXT_NORMAL) {
-                md_build_attr_append_substr(ctx, build, c.MD_TEXT_NORMAL, off) catch {
+            if (build.substr_count == 0 or build.substr_types[@intCast(build.substr_count - 1)] != c.TextType.normal) {
+                md_build_attr_append_substr(ctx, build, c.TextType.normal, off) catch {
                     md_free_attribute(ctx, build);
                     return error.OutOfMemory;
                 };

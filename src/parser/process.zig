@@ -56,20 +56,20 @@ const md_start_new_block = blocks.md_start_new_block;
 // ============================================================================
 
 // Block-level enter/leave helpers mirroring MD_ENTER_BLOCK / MD_LEAVE_BLOCK.
-pub inline fn mdEnterBlock(ctx: *MD_CTX, ty: c.MD_BLOCKTYPE, detail: ?*anyopaque) c_int {
-    const ret = ctx.parser.enter_block.?(ty, detail, ctx.userdata);
+pub inline fn mdEnterBlock(ctx: *MD_CTX, detail: *const c.BlockDetail) c_int {
+    const ret = ctx.parser.enter_block.?(detail, ctx.userdata);
     if (ret != 0) ctx.log("Aborted from enter_block() callback.");
     return ret;
 }
 
-pub inline fn mdLeaveBlock(ctx: *MD_CTX, ty: c.MD_BLOCKTYPE, detail: ?*anyopaque) c_int {
-    const ret = ctx.parser.leave_block.?(ty, detail, ctx.userdata);
+pub inline fn mdLeaveBlock(ctx: *MD_CTX, detail: *const c.BlockDetail) c_int {
+    const ret = ctx.parser.leave_block.?(detail, ctx.userdata);
     if (ret != 0) ctx.log("Aborted from leave_block() callback.");
     return ret;
 }
 
 // MD_TEXT_INSECURE — NUL-replacement text emission (md4x.c ~543).
-pub inline fn mdTextInsecure(ctx: *MD_CTX, ty: c.MD_TEXTTYPE, str: [*c]const CHAR, size: SZ) c_int {
+pub inline fn mdTextInsecure(ctx: *MD_CTX, ty: c.TextType, str: [*c]const CHAR, size: SZ) c_int {
     if (size > 0) {
         const ret = md_text_with_null_replacement(ctx, ty, str, size);
         if (ret != 0) {
@@ -81,8 +81,8 @@ pub inline fn mdTextInsecure(ctx: *MD_CTX, ty: c.MD_TEXTTYPE, str: [*c]const CHA
 }
 
 // md4x.c ~5205.
-pub fn md_analyze_table_alignment(ctx: *MD_CTX, beg: OFF, end: OFF, align_arr: [*c]c.MD_ALIGN, n_align_in: c_int) void {
-    const align_map = [_]c.MD_ALIGN{ c.MD_ALIGN_DEFAULT, c.MD_ALIGN_LEFT, c.MD_ALIGN_RIGHT, c.MD_ALIGN_CENTER };
+pub fn md_analyze_table_alignment(ctx: *MD_CTX, beg: OFF, end: OFF, align_arr: [*c]c.Align, n_align_in: c_int) void {
+    const align_map = [_]c.Align{ c.Align.default, c.Align.left, c.Align.right, c.Align.center };
     var off: OFF = beg;
     var n_align = n_align_in;
     var ai: usize = 0;
@@ -102,9 +102,8 @@ pub fn md_analyze_table_alignment(ctx: *MD_CTX, beg: OFF, end: OFF, align_arr: [
 }
 
 // md4x.c ~5232.
-pub fn md_process_table_cell(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, align_val: c.MD_ALIGN, beg_in: OFF, end_in: OFF) c_int {
+pub fn md_process_table_cell(ctx: *MD_CTX, cell_type: c.BlockType, align_val: c.Align, beg_in: OFF, end_in: OFF) c_int {
     var line: MD_LINE = undefined;
-    var det: c.MD_BLOCK_TD_DETAIL = undefined;
     var ret: c_int = 0;
     var beg = beg_in;
     var end = end_in;
@@ -112,21 +111,25 @@ pub fn md_process_table_cell(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, align_val:
     while (beg < end and ctx.isWhitespace(beg)) beg += 1;
     while (end > beg and ctx.isWhitespace(end - 1)) end -= 1;
 
-    det.@"align" = align_val;
+    // `cell_type` is `.th` or `.td`; both arms carry a BlockTdDetail.
+    const det: c.BlockDetail = switch (cell_type) {
+        .th => .{ .th = .{ .@"align" = align_val } },
+        else => .{ .td = .{ .@"align" = align_val } },
+    };
     line.beg = beg;
     line.end = end;
 
-    ret = mdEnterBlock(ctx, cell_type, &det);
+    ret = mdEnterBlock(ctx, &det);
     if (ret != 0) return ret;
     ret = md_process_normal_block_contents(ctx, @as([*]const MD_LINE, @ptrCast(&line))[0..1]);
     if (ret < 0) return ret;
-    ret = mdLeaveBlock(ctx, cell_type, &det);
+    ret = mdLeaveBlock(ctx, &det);
     if (ret != 0) return ret;
     return ret;
 }
 
 // md4x.c ~5256.
-pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, end: OFF, align_arr: [*c]const c.MD_ALIGN, col_count: c_int) c_int {
+pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.BlockType, beg: OFF, end: OFF, align_arr: [*c]const c.Align, col_count: c_int) c_int {
     var line: MD_LINE = undefined;
     var pipe_offs: [*c]OFF = null;
     var ret: c_int = 0;
@@ -164,7 +167,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
     j += 1;
 
     // Process cells.
-    ret = mdEnterBlock(ctx, c.MD_BLOCK_TR, null);
+    ret = mdEnterBlock(ctx, &.{ .tr = {} });
     if (ret != 0) {
         util.free_array_a(OFF, ctx.alloc, pipe_offs, @intCast(n));
         ctx.table_cell_boundaries_head = -1;
@@ -199,7 +202,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
             return ret;
         }
     }
-    ret = mdLeaveBlock(ctx, c.MD_BLOCK_TR, null);
+    ret = mdLeaveBlock(ctx, &.{ .tr = {} });
 
     util.free_array_a(OFF, ctx.alloc, pipe_offs, @intCast(n));
     ctx.table_cell_boundaries_head = -1;
@@ -209,10 +212,10 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.MD_BLOCKTYPE, beg: OFF, e
 
 // md4x.c ~5311.
 pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: []const MD_LINE) c_int {
-    var align_arr: [*c]c.MD_ALIGN = null;
+    var align_arr: [*c]c.Align = null;
     var ret: c_int = 0;
 
-    align_arr = util.alloc_array_a(c.MD_ALIGN, ctx.alloc, @intCast(col_count));
+    align_arr = util.alloc_array_a(c.Align, ctx.alloc, @intCast(col_count));
     if (align_arr == null) {
         ctx.log("malloc() failed.");
         return -1;
@@ -220,44 +223,44 @@ pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: []
 
     md_analyze_table_alignment(ctx, lines[1].beg, lines[1].end, align_arr, col_count);
 
-    ret = mdEnterBlock(ctx, c.MD_BLOCK_THEAD, null);
+    ret = mdEnterBlock(ctx, &.{ .thead = {} });
     if (ret != 0) {
-        util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
+        util.free_array_a(c.Align, ctx.alloc, align_arr, @intCast(col_count));
         return ret;
     }
-    ret = md_process_table_row(ctx, c.MD_BLOCK_TH, lines[0].beg, lines[0].end, align_arr, col_count);
+    ret = md_process_table_row(ctx, c.BlockType.th, lines[0].beg, lines[0].end, align_arr, col_count);
     if (ret < 0) {
-        util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
+        util.free_array_a(c.Align, ctx.alloc, align_arr, @intCast(col_count));
         return ret;
     }
-    ret = mdLeaveBlock(ctx, c.MD_BLOCK_THEAD, null);
+    ret = mdLeaveBlock(ctx, &.{ .thead = {} });
     if (ret != 0) {
-        util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
+        util.free_array_a(c.Align, ctx.alloc, align_arr, @intCast(col_count));
         return ret;
     }
 
     if (lines.len > 2) {
-        ret = mdEnterBlock(ctx, c.MD_BLOCK_TBODY, null);
+        ret = mdEnterBlock(ctx, &.{ .tbody = {} });
         if (ret != 0) {
-            util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
+            util.free_array_a(c.Align, ctx.alloc, align_arr, @intCast(col_count));
             return ret;
         }
         var line_index: MD_SIZE = 2;
         while (line_index < lines.len) : (line_index += 1) {
-            ret = md_process_table_row(ctx, c.MD_BLOCK_TD, lines[line_index].beg, lines[line_index].end, align_arr, col_count);
+            ret = md_process_table_row(ctx, c.BlockType.td, lines[line_index].beg, lines[line_index].end, align_arr, col_count);
             if (ret < 0) {
-                util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
+                util.free_array_a(c.Align, ctx.alloc, align_arr, @intCast(col_count));
                 return ret;
             }
         }
-        ret = mdLeaveBlock(ctx, c.MD_BLOCK_TBODY, null);
+        ret = mdLeaveBlock(ctx, &.{ .tbody = {} });
         if (ret != 0) {
-            util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
+            util.free_array_a(c.Align, ctx.alloc, align_arr, @intCast(col_count));
             return ret;
         }
     }
 
-    util.free_array_a(c.MD_ALIGN, ctx.alloc, align_arr, @intCast(col_count));
+    util.free_array_a(c.Align, ctx.alloc, align_arr, @intCast(col_count));
     return ret;
 }
 
@@ -277,7 +280,7 @@ pub fn md_process_normal_block_contents(ctx: *MD_CTX, lines: []const MD_LINE) c_
 }
 
 // md4x.c ~5412.
-pub fn md_process_verbatim_block_contents(ctx: *MD_CTX, text_type: c.MD_TEXTTYPE, lines: []const MD_VERBATIMLINE) c_int {
+pub fn md_process_verbatim_block_contents(ctx: *MD_CTX, text_type: c.TextType, lines: []const MD_VERBATIMLINE) c_int {
     const indent_chunk_str: [*:0]const CHAR = "                ";
     const indent_chunk_size: SZ = 16;
     var ret: c_int = 0;
@@ -329,7 +332,7 @@ pub fn md_process_code_block_contents(ctx: *MD_CTX, is_fenced: c_int, lines_in: 
 
     if (lines.len == 0) return 0;
 
-    return md_process_verbatim_block_contents(ctx, c.MD_TEXT_CODE, lines);
+    return md_process_verbatim_block_contents(ctx, c.TextType.code, lines);
 }
 
 // md4x.c ~5473. Parse highlight ranges string (e.g. "1-3,5,7") into expanded
@@ -416,7 +419,7 @@ pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_coun
 }
 
 // md4x.c ~5544.
-pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c.MD_BLOCK_CODE_DETAIL, info_build: *MD_ATTRIBUTE_BUILD, lang_build: *MD_ATTRIBUTE_BUILD, filename_build: *MD_ATTRIBUTE_BUILD) c_int {
+pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c.BlockCodeDetail, info_build: *MD_ATTRIBUTE_BUILD, lang_build: *MD_ATTRIBUTE_BUILD, filename_build: *MD_ATTRIBUTE_BUILD) c_int {
     const fence_line: *const MD_VERBATIMLINE = @ptrCast(@alignCast(@as([*]const MD_BLOCK, @ptrCast(block)) + 1));
     var beg: OFF = fence_line.beg;
     var end: OFF = fence_line.end;
@@ -574,7 +577,7 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
 // Release the two heap buffers a fenced-code detail owns. Both are allocated
 // through `ctx.alloc` and freed by their exact element count: `meta` is stored
 // as a slice that excludes its trailing NUL, so it frees `len + 1`.
-fn md_free_code_detail(ctx: *MD_CTX, code: *const c.MD_BLOCK_CODE_DETAIL) void {
+fn md_free_code_detail(ctx: *MD_CTX, code: *const c.BlockCodeDetail) void {
     if (code.meta.len > 0)
         util.free_array_a(CHAR, ctx.alloc, @constCast(code.meta.ptr), code.meta.len + 1);
     if (code.highlights.len > 0)
@@ -583,26 +586,6 @@ fn md_free_code_detail(ctx: *MD_CTX, code: *const c.MD_BLOCK_CODE_DETAIL) void {
 
 // md4x.c ~5714.
 pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
-    // Formerly an `extern union` relying on every member sharing offset 0. The
-    // detail structs are ordinary Zig structs now, so the members live side by
-    // side and `detailPtr` selects the right one — reproducing the union's
-    // behavior exactly, including handing detail-less block types a non-null
-    // pointer the callback never reads.
-    const DetSet = struct {
-        header: c.MD_BLOCK_H_DETAIL = .{},
-        code: c.MD_BLOCK_CODE_DETAIL = .{},
-        table: c.MD_BLOCK_TABLE_DETAIL = .{},
-
-        fn detailPtr(self: *@This(), ty: c.MD_BLOCKTYPE) ?*anyopaque {
-            return switch (ty) {
-                c.MD_BLOCK_H => @ptrCast(&self.header),
-                c.MD_BLOCK_CODE => @ptrCast(&self.code),
-                c.MD_BLOCK_TABLE => @ptrCast(&self.table),
-                else => @ptrCast(self),
-            };
-        }
-    };
-    var det: DetSet = .{};
     var info_build: MD_ATTRIBUTE_BUILD = .{};
     var lang_build: MD_ATTRIBUTE_BUILD = .{};
     var filename_build: MD_ATTRIBUTE_BUILD = .{};
@@ -618,12 +601,16 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
     const btype = block.getType();
     const block_lines: [*]const MD_BLOCK = @ptrCast(block);
 
+    // The detail is the union arm named by the runtime block type; the switch
+    // below fills in whatever fields that arm actually carries. (This replaces
+    // the pre-4c `extern union` scratch slot + `?*anyopaque` selector.)
+    var det: c.BlockDetail = .default(btype);
+
     switch (btype) {
-        c.MD_BLOCK_H => det.header.level = block.bits.data,
-        c.MD_BLOCK_CODE => {
+        c.BlockType.h => det.h.level = block.bits.data,
+        c.BlockType.code => {
             // For fenced code block, we may need to set the info string.
             if (block.bits.data != 0) {
-                det.code = .{};
                 clean_fence_code_detail = true;
                 ret = md_setup_fenced_code_detail(ctx, block, &det.code, &info_build, &lang_build, &filename_build);
                 if (ret < 0) {
@@ -635,7 +622,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
                 }
             }
         },
-        c.MD_BLOCK_TABLE => {
+        c.BlockType.table => {
             det.table.col_count = block.bits.data;
             det.table.head_row_count = 1;
             det.table.body_row_count = block.n_lines - 2;
@@ -643,8 +630,8 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
         else => {},
     }
 
-    if (!is_in_tight_list or btype != c.MD_BLOCK_P) {
-        ret = mdEnterBlock(ctx, btype, det.detailPtr(btype));
+    if (!is_in_tight_list or btype != c.BlockType.p) {
+        ret = mdEnterBlock(ctx, &det);
         if (ret != 0) {
             if (clean_fence_code_detail) {
                 md_free_attribute(ctx, &info_build);
@@ -658,15 +645,15 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
 
     // Process the block contents according to its type.
     switch (btype) {
-        c.MD_BLOCK_HR => {},
-        c.MD_BLOCK_CODE => ret = md_process_code_block_contents(ctx, @intFromBool(block.bits.data != 0), @as([*]const MD_VERBATIMLINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
-        c.MD_BLOCK_HTML => ret = md_process_verbatim_block_contents(ctx, c.MD_TEXT_HTML, @as([*]const MD_VERBATIMLINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
-        c.MD_BLOCK_FRONTMATTER => {
+        c.BlockType.hr => {},
+        c.BlockType.code => ret = md_process_code_block_contents(ctx, @intFromBool(block.bits.data != 0), @as([*]const MD_VERBATIMLINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
+        c.BlockType.html => ret = md_process_verbatim_block_contents(ctx, c.TextType.html, @as([*]const MD_VERBATIMLINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
+        c.BlockType.frontmatter => {
             // Skip the opening fence line (first line is the --- opener).
             const vlines: [*]const MD_VERBATIMLINE = @ptrCast(@alignCast(block_lines + 1));
-            ret = md_process_verbatim_block_contents(ctx, c.MD_TEXT_NORMAL, (vlines + 1)[0 .. block.n_lines - 1]);
+            ret = md_process_verbatim_block_contents(ctx, c.TextType.normal, (vlines + 1)[0 .. block.n_lines - 1]);
         },
-        c.MD_BLOCK_TABLE => ret = md_process_table_block_contents(ctx, @intCast(block.bits.data), @as([*]const MD_LINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
+        c.BlockType.table => ret = md_process_table_block_contents(ctx, @intCast(block.bits.data), @as([*]const MD_LINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
         else => ret = md_process_normal_block_contents(ctx, @as([*]const MD_LINE, @ptrCast(@alignCast(block_lines + 1)))[0..block.n_lines]),
     }
     if (ret < 0) {
@@ -679,8 +666,8 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
         return ret;
     }
 
-    if (!is_in_tight_list or btype != c.MD_BLOCK_P) {
-        ret = mdLeaveBlock(ctx, btype, det.detailPtr(btype));
+    if (!is_in_tight_list or btype != c.BlockType.p) {
+        ret = mdLeaveBlock(ctx, &det);
         if (ret != 0) {
             if (clean_fence_code_detail) {
                 md_free_attribute(ctx, &info_build);
@@ -713,47 +700,27 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
 
     while (byte_off < ctx.n_block_bytes) {
         const block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + @as(usize, @intCast(byte_off))));
-        // Formerly an `extern union` (see md_process_leaf_block for why this is
-        // a struct + selector now).
-        const DetSet = struct {
-            ul: c.MD_BLOCK_UL_DETAIL = .{},
-            ol: c.MD_BLOCK_OL_DETAIL = .{},
-            li: c.MD_BLOCK_LI_DETAIL = .{},
-            component: c.MD_BLOCK_COMPONENT_DETAIL = .{},
-            tmpl: c.MD_BLOCK_TEMPLATE_DETAIL = .{},
-            alert: c.MD_BLOCK_ALERT_DETAIL = .{},
-
-            fn detailPtr(self: *@This(), ty: c.MD_BLOCKTYPE) ?*anyopaque {
-                return switch (ty) {
-                    c.MD_BLOCK_UL => @ptrCast(&self.ul),
-                    c.MD_BLOCK_OL => @ptrCast(&self.ol),
-                    c.MD_BLOCK_LI => @ptrCast(&self.li),
-                    c.MD_BLOCK_COMPONENT => @ptrCast(&self.component),
-                    c.MD_BLOCK_TEMPLATE => @ptrCast(&self.tmpl),
-                    c.MD_BLOCK_ALERT => @ptrCast(&self.alert),
-                    else => @ptrCast(self),
-                };
-            }
-        };
-        var det: DetSet = .{};
-
         const btype = block.getType();
+        // The detail is the union arm named by the runtime block type (see
+        // md_process_leaf_block); the switch below fills in its fields.
+        var det: c.BlockDetail = .default(btype);
+
         switch (btype) {
-            c.MD_BLOCK_UL => {
+            c.BlockType.ul => {
                 det.ul.is_tight = (block.bits.flags & @as(u8, @truncate(MD_BLOCK_LOOSE_LIST))) == 0;
                 det.ul.mark = @intCast(block.bits.data);
             },
-            c.MD_BLOCK_OL => {
+            c.BlockType.ol => {
                 det.ol.start = block.n_lines;
                 det.ol.is_tight = (block.bits.flags & @as(u8, @truncate(MD_BLOCK_LOOSE_LIST))) == 0;
                 det.ol.mark_delimiter = @intCast(block.bits.data);
             },
-            c.MD_BLOCK_LI => {
+            c.BlockType.li => {
                 det.li.is_task = block.bits.data != 0;
                 det.li.task_mark = @intCast(block.bits.data);
                 det.li.task_mark_offset = @intCast(block.n_lines);
             },
-            c.MD_BLOCK_COMPONENT => {
+            c.BlockType.component => {
                 const comp_idx: c_int = @intCast(block.bits.data);
                 if (comp_idx >= 0 and comp_idx < @as(c_int, @intCast(ctx.block_component_info.items.len))) {
                     const info = &ctx.block_component_info.items[@intCast(comp_idx)];
@@ -779,7 +746,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     }
                 }
             },
-            c.MD_BLOCK_TEMPLATE => {
+            c.BlockType.template => {
                 const slot_idx: c_int = @intCast(block.bits.data);
                 if (slot_idx >= 0 and slot_idx < @as(c_int, @intCast(ctx.slot_info.items.len))) {
                     const info = &ctx.slot_info.items[@intCast(slot_idx)];
@@ -787,14 +754,14 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     const name_end = info.name_end;
 
                     comp_name_build = .{};
-                    md_build_attribute(ctx, ctx.str(name_beg), name_end - name_beg, 0, &det.tmpl.name, &comp_name_build) catch {
+                    md_build_attribute(ctx, ctx.str(name_beg), name_end - name_beg, 0, &det.template.name, &comp_name_build) catch {
                         md_free_attribute(ctx, &comp_name_build);
                         return -1;
                     };
                     clean_component_detail = true;
                 }
             },
-            c.MD_BLOCK_ALERT => {
+            c.BlockType.alert => {
                 const alert_idx: c_int = @intCast(block.bits.data);
                 if (alert_idx >= 0 and alert_idx < @as(c_int, @intCast(ctx.block_alert_info.items.len))) {
                     const info = &ctx.block_alert_info.items[@intCast(alert_idx)];
@@ -814,27 +781,27 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
 
         if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER))) != 0) {
             if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER_CLOSER))) != 0) {
-                ret = mdLeaveBlock(ctx, btype, det.detailPtr(btype));
+                ret = mdLeaveBlock(ctx, &det);
                 if (ret != 0) {
                     if (clean_component_detail) md_free_attribute(ctx, &comp_name_build);
                     return ret;
                 }
 
-                if (btype == c.MD_BLOCK_UL or btype == c.MD_BLOCK_OL or btype == c.MD_BLOCK_QUOTE or btype == c.MD_BLOCK_COMPONENT or btype == c.MD_BLOCK_TEMPLATE or btype == c.MD_BLOCK_ALERT)
+                if (btype == c.BlockType.ul or btype == c.BlockType.ol or btype == c.BlockType.quote or btype == c.BlockType.component or btype == c.BlockType.template or btype == c.BlockType.alert)
                     ctx.containers.items.len -= 1;
             }
 
             if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER_OPENER))) != 0) {
-                ret = mdEnterBlock(ctx, btype, det.detailPtr(btype));
+                ret = mdEnterBlock(ctx, &det);
                 if (ret != 0) {
                     if (clean_component_detail) md_free_attribute(ctx, &comp_name_build);
                     return ret;
                 }
 
-                if (btype == c.MD_BLOCK_UL or btype == c.MD_BLOCK_OL or btype == c.MD_BLOCK_QUOTE or
-                    btype == c.MD_BLOCK_COMPONENT or btype == c.MD_BLOCK_TEMPLATE or btype == c.MD_BLOCK_ALERT)
+                if (btype == c.BlockType.ul or btype == c.BlockType.ol or btype == c.BlockType.quote or
+                    btype == c.BlockType.component or btype == c.BlockType.template or btype == c.BlockType.alert)
                 {
-                    const is_loose: u8 = if (btype == c.MD_BLOCK_UL or btype == c.MD_BLOCK_OL)
+                    const is_loose: u8 = if (btype == c.BlockType.ul or btype == c.BlockType.ol)
                         @intCast(block.bits.flags & @as(u8, @truncate(MD_BLOCK_LOOSE_LIST)))
                     else
                         @intFromBool(TRUE != 0);
@@ -853,7 +820,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                 return ret;
             }
 
-            if (btype == c.MD_BLOCK_CODE or btype == c.MD_BLOCK_HTML or btype == c.MD_BLOCK_FRONTMATTER)
+            if (btype == c.BlockType.code or btype == c.BlockType.html or btype == c.BlockType.frontmatter)
                 byte_off += @intCast(block.n_lines * @sizeOf(MD_VERBATIMLINE))
             else
                 byte_off += @intCast(block.n_lines * @sizeOf(MD_LINE));
@@ -907,7 +874,7 @@ pub fn md_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, 
 
     // MD_LINE_SETEXTUNDERLINE changes meaning of current block and ends it.
     if (line.type == .MD_LINE_SETEXTUNDERLINE) {
-        ctx.current_block.*.setType(c.MD_BLOCK_H);
+        ctx.current_block.*.setType(c.BlockType.h);
         ctx.current_block.*.bits.data = @truncate(line.data);
         ctx.current_block.*.bits.flags |= @as(u8, @truncate(MD_BLOCK_SETEXT_HEADER));
         ret = md_add_line_into_current_block(ctx, line);
@@ -925,7 +892,7 @@ pub fn md_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, 
 
     // MD_LINE_TABLEUNDERLINE changes meaning of current block.
     if (line.type == .MD_LINE_TABLEUNDERLINE) {
-        ctx.current_block.*.setType(c.MD_BLOCK_TABLE);
+        ctx.current_block.*.setType(c.BlockType.table);
         ctx.current_block.*.bits.data = @truncate(line.data);
         @as(*MD_LINE_ANALYSIS, @constCast(pivot_line)).type = .MD_LINE_TABLE;
         ret = md_add_line_into_current_block(ctx, line);
@@ -964,7 +931,7 @@ pub fn md_process_doc(ctx: *MD_CTX) c_int {
     var off: OFF = 0;
     var ret: c_int = 0;
 
-    ret = mdEnterBlock(ctx, c.MD_BLOCK_DOC, null);
+    ret = mdEnterBlock(ctx, &.{ .doc = {} });
     if (ret != 0) return ret;
 
     while (off < ctx.size) {
@@ -988,7 +955,7 @@ pub fn md_process_doc(ctx: *MD_CTX) c_int {
     ret = md_process_all_blocks(ctx);
     if (ret < 0) return ret;
 
-    ret = mdLeaveBlock(ctx, c.MD_BLOCK_DOC, null);
+    ret = mdLeaveBlock(ctx, &.{ .doc = {} });
     if (ret != 0) return ret;
 
     return ret;

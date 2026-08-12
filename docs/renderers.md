@@ -1,11 +1,19 @@
 # Renderers
 
+> Every renderer implements the five SAX callbacks of `abi.Parser`
+> (`enter_block` / `leave_block` / `enter_span` / `leave_span` / `text`). Since
+> Phase 4c those are plain Zig functions — no `callconv(.c)` — and the block or
+> span type arrives as the active tag of a `*const abi.BlockDetail` /
+> `*const abi.SpanDetail`, which each renderer resolves with an exhaustive
+> `switch (detail.*)`. `text` takes a `[]const u8` slice, and `debug_log` a
+> `[]const u8` message. See `docs/parser-api.md` for the callback table.
+
 ## HTML Renderer API (`src/renderers/md4x-html.zig`)
 
 Convenience library that wraps `md_parse()` and produces HTML output:
 
 ```zig
-pub extern fn md_html(
+pub fn md_html(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
     process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
@@ -25,7 +33,7 @@ pub const MD_HTML_OPTS = extern struct {
     css_url: [*c]const u8 = null, // CSS stylesheet URL (null = omit)
 };
 
-pub extern fn md_html_ex(
+pub fn md_html_ex(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
     process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
@@ -92,7 +100,7 @@ All `key`/`value` pointers are zero-copy references into the original raw string
 Renders Markdown into a Comark AST (array-based JSON format):
 
 ```zig
-pub extern fn md_ast(
+pub fn md_ast(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
     process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
@@ -104,7 +112,7 @@ pub extern fn md_ast(
 
 Produces `{"nodes":[...],"frontmatter":{...},"meta":{}}` where each node is either a plain JSON string (text) or a tuple array `["tag", {props}, ...children]`. Frontmatter YAML is parsed into the top-level `frontmatter` object (not included in `nodes`). HTML comments are represented as `[null, {}, "comment body"]`.
 
-**Internal architecture:** Unlike the streaming HTML/ANSI renderers, the AST renderer builds an in-memory tree of `JsonNode` structs during parsing, then serializes the tree to JSON. The whole tree is **arena-allocated** (`JsonCtx.arena`) and freed wholesale, so there is no per-node free. Each node carries a **flat `Detail` struct** — one field per variant, not a union — which structurally rules out the type-confusion bug class the C renderer suffered from. Nodes with `tag_is_dynamic = true` are user-defined components. All tag dispatch (`jsonWriteProps`, `jsonSerializeNode`) must still resolve `tag_is_dynamic` / `tag_kind` **first**, so a component whose name collides with a built-in tag reads the right `Detail` field. See `AGENTS.md` for the full rule.
+**Internal architecture:** Unlike the streaming HTML/ANSI renderers, the AST renderer builds an in-memory tree of `JsonNode` structs during parsing, then serializes the tree to JSON. The whole tree is **arena-allocated** (`JsonCtx.arena`) and freed wholesale, so there is no per-node free. Each node carries a **flat `Detail` struct** — one field per variant, not a union — which structurally rules out the type-confusion bug class the C renderer suffered from. Nodes with `tag_is_dynamic = true` are user-defined components. All tag dispatch (`jsonWriteProps`, `jsonSerializeNode`) must still resolve `tag_is_dynamic` / `tag_kind` **first**, so a component whose name collides with a built-in tag reads the right `Detail` field. See `AGENTS.md` for the full rule. On the input side, `jsonEnterBlock` / `jsonEnterSpan` switch on the incoming `abi.BlockDetail` / `abi.SpanDetail` union and resolve the dynamic-component arm before any built-in tag, so the same rule holds where the node is built.
 
 ### AST Renderer Flags (`MD_AST_FLAG_*`)
 
@@ -118,7 +126,7 @@ Produces `{"nodes":[...],"frontmatter":{...},"meta":{}}` where each node is eith
 Renders Markdown into ANSI terminal output with escape codes for styling:
 
 ```zig
-pub extern fn md_ansi(
+pub fn md_ansi(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
     process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
@@ -182,7 +190,7 @@ const json = @import("md4x-json.zig");
 Lightweight metadata extractor that parses frontmatter and headings from Markdown:
 
 ```zig
-pub extern fn md_meta(
+pub fn md_meta(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
     process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
@@ -227,7 +235,7 @@ Produces a flat JSON object with frontmatter properties spread at the top level 
 Strips markdown formatting and produces plain text output:
 
 ```zig
-pub extern fn md_text(
+pub fn md_text(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
     process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
@@ -271,7 +279,7 @@ Fixes incomplete/streaming Markdown text so it renders correctly mid-stream. Thi
 Inspired by [remend](https://github.com/vercel/streamdown/tree/main/packages/remend).
 
 ```zig
-pub extern fn md_heal(
+pub fn md_heal(
     input: [*c]const u8,
     input_size: c_uint,
     process_output: ?*const fn ([*c]const u8, c_uint, ?*anyopaque) callconv(.c) void,

@@ -96,11 +96,27 @@ pub const MD_BLOCK = extern struct {
         data: u16 = 0,
     };
 
-    pub inline fn getType(self: *const MD_BLOCK) c.MD_BLOCKTYPE {
-        return @intCast(self.bits.type);
+    // Only valid on a pointer that really is an MD_BLOCK header: `bits.type`
+    // then holds a value written by `setType` (the zeroed default being
+    // `.doc`), so the ordinal is always in range. Use `typeIsRaw` where the
+    // pointer may instead land on an interleaved MD_LINE payload.
+    pub inline fn getType(self: *const MD_BLOCK) c.BlockType {
+        return @enumFromInt(self.bits.type);
     }
-    pub inline fn setType(self: *MD_BLOCK, t: c.MD_BLOCKTYPE) void {
-        self.bits.type = @intCast(t);
+    pub inline fn setType(self: *MD_BLOCK, t: c.BlockType) void {
+        self.bits.type = @intCast(@intFromEnum(t));
+    }
+
+    /// Compare the raw type byte without decoding it into a `BlockType`.
+    ///
+    /// `md_analyze_line`'s two-blank-lines hack peeks at `block_bytes`'s last
+    /// `@sizeOf(MD_BLOCK)` bytes, which are a block header only if a header was
+    /// the most recent push — otherwise they are part of an `MD_LINE` /
+    /// `MD_VERBATIMLINE` and the byte is arbitrary line-offset data. md4c reads
+    /// it as a plain int and lets the comparison simply fail; `@enumFromInt`
+    /// would instead be illegal behavior there, so those sites use this.
+    pub inline fn typeIsRaw(self: *const MD_BLOCK, t: c.BlockType) bool {
+        return self.bits.type == @as(u8, @intCast(@intFromEnum(t)));
     }
 };
 
@@ -233,7 +249,7 @@ pub const MD_CTX = struct {
     // Immutable stuff (parameters of md_parse()).
     text: [*c]const CHAR = null,
     size: SZ = 0,
-    parser: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER),
+    parser: c.Parser = .{},
     userdata: ?*anyopaque = null,
 
     // When this is true, it allows some optimizations.
@@ -414,7 +430,7 @@ pub const MD_CTX = struct {
 
     // `MD_LOG(msg)` — call ctx->parser.debug_log if set. The C macro reads `ctx`
     // from the enclosing scope; here it is a method on *MD_CTX.
-    pub inline fn log(self: *MD_CTX, msg: [*:0]const u8) void {
+    pub inline fn log(self: *MD_CTX, msg: []const u8) void {
         if (self.parser.debug_log) |cb| {
             cb(msg, self.userdata);
         }

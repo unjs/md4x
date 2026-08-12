@@ -108,12 +108,12 @@ pub fn md_start_new_block(ctx: *MD_CTX, line: *const MD_LINE_ANALYSIS) c_int {
     const block: *MD_BLOCK = @ptrCast(@alignCast(block_raw));
 
     switch (line.type) {
-        .MD_LINE_HR => block.setType(c.MD_BLOCK_HR),
-        .MD_LINE_ATXHEADER, .MD_LINE_SETEXTHEADER => block.setType(c.MD_BLOCK_H),
-        .MD_LINE_FENCEDCODE, .MD_LINE_INDENTEDCODE => block.setType(c.MD_BLOCK_CODE),
-        .MD_LINE_TEXT => block.setType(c.MD_BLOCK_P),
-        .MD_LINE_HTML => block.setType(c.MD_BLOCK_HTML),
-        .MD_LINE_FRONTMATTER => block.setType(c.MD_BLOCK_FRONTMATTER),
+        .MD_LINE_HR => block.setType(c.BlockType.hr),
+        .MD_LINE_ATXHEADER, .MD_LINE_SETEXTHEADER => block.setType(c.BlockType.h),
+        .MD_LINE_FENCEDCODE, .MD_LINE_INDENTEDCODE => block.setType(c.BlockType.code),
+        .MD_LINE_TEXT => block.setType(c.BlockType.p),
+        .MD_LINE_HTML => block.setType(c.BlockType.html),
+        .MD_LINE_FRONTMATTER => block.setType(c.BlockType.frontmatter),
         // MD_LINE_BLANK / SETEXTUNDERLINE / TABLEUNDERLINE / default: MD_UNREACHABLE.
         else => unreachable,
     }
@@ -170,8 +170,8 @@ pub fn md_end_current_block(ctx: *MD_CTX) c_int {
         return ret;
 
     // Check whether there is a reference definition.
-    if (ctx.current_block.*.getType() == c.MD_BLOCK_P or
-        (ctx.current_block.*.getType() == c.MD_BLOCK_H and (ctx.current_block.*.bits.flags & MD_BLOCK_SETEXT_HEADER != 0)))
+    if (ctx.current_block.*.getType() == c.BlockType.p or
+        (ctx.current_block.*.getType() == c.BlockType.h and (ctx.current_block.*.bits.flags & MD_BLOCK_SETEXT_HEADER != 0)))
     {
         const lines: [*c]MD_LINE = @ptrCast(@alignCast(ctx.current_block + 1));
         if (lines[0].beg < ctx.size and ctx.ch(lines[0].beg) == '[') {
@@ -182,7 +182,7 @@ pub fn md_end_current_block(ctx: *MD_CTX) c_int {
         }
     }
 
-    if (ctx.current_block.*.getType() == c.MD_BLOCK_H and (ctx.current_block.*.bits.flags & MD_BLOCK_SETEXT_HEADER != 0)) {
+    if (ctx.current_block.*.getType() == c.BlockType.h and (ctx.current_block.*.bits.flags & MD_BLOCK_SETEXT_HEADER != 0)) {
         const n_lines: MD_SIZE = ctx.current_block.*.n_lines;
 
         if (n_lines > 1) {
@@ -191,7 +191,7 @@ pub fn md_end_current_block(ctx: *MD_CTX) c_int {
             ctx.n_block_bytes -= @sizeOf(MD_LINE);
         } else {
             // Only the underline has left after eating the ref. defs.
-            ctx.current_block.*.setType(c.MD_BLOCK_P);
+            ctx.current_block.*.setType(c.BlockType.p);
             return 0;
         }
     }
@@ -205,7 +205,7 @@ pub fn md_end_current_block(ctx: *MD_CTX) c_int {
 pub fn md_add_line_into_current_block(ctx: *MD_CTX, analysis: *const MD_LINE_ANALYSIS) c_int {
     // MD_ASSERT(ctx->current_block != NULL);
     const bt = ctx.current_block.*.getType();
-    if (bt == c.MD_BLOCK_CODE or bt == c.MD_BLOCK_HTML or bt == c.MD_BLOCK_FRONTMATTER) {
+    if (bt == c.BlockType.code or bt == c.BlockType.html or bt == c.BlockType.frontmatter) {
         const line_raw = md_push_block_bytes(ctx, @sizeOf(MD_VERBATIMLINE));
         if (line_raw == null)
             return -1;
@@ -226,7 +226,7 @@ pub fn md_add_line_into_current_block(ctx: *MD_CTX, analysis: *const MD_LINE_ANA
     return 0;
 }
 
-pub fn md_push_container_bytes(ctx: *MD_CTX, ty: c.MD_BLOCKTYPE, start: c_uint, data: c_uint, flags: c_uint) c_int {
+pub fn md_push_container_bytes(ctx: *MD_CTX, ty: c.BlockType, start: c_uint, data: c_uint, flags: c_uint) c_int {
     var ret: c_int = 0;
 
     ret = md_end_current_block(ctx);
@@ -817,9 +817,9 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
                 _ = md_end_current_block(ctx);
                 cont.block_byte_off = @intCast(ctx.n_block_bytes);
 
-                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.MD_BLOCK_OL else c.MD_BLOCK_UL, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.BlockType.ol else c.BlockType.ul, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
             },
             '-', '+', '*' => {
@@ -827,24 +827,24 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
                 _ = md_end_current_block(ctx);
                 cont.block_byte_off = @intCast(ctx.n_block_bytes);
 
-                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.MD_BLOCK_OL else c.MD_BLOCK_UL, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.BlockType.ol else c.BlockType.ul, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
             },
             '>' => {
                 if (cont.is_alert != 0)
-                    ret = md_push_container_bytes(ctx, c.MD_BLOCK_ALERT, 0, cont.start, MD_BLOCK_CONTAINER_OPENER)
+                    ret = md_push_container_bytes(ctx, c.BlockType.alert, 0, cont.start, MD_BLOCK_CONTAINER_OPENER)
                 else
-                    ret = md_push_container_bytes(ctx, c.MD_BLOCK_QUOTE, 0, 0, MD_BLOCK_CONTAINER_OPENER);
+                    ret = md_push_container_bytes(ctx, c.BlockType.quote, 0, 0, MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
             },
             ':' => {
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_COMPONENT, 0, cont.start, MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, c.BlockType.component, 0, cont.start, MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
             },
             '#' => {
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_TEMPLATE, 0, cont.start, MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, c.BlockType.template, 0, cont.start, MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
             },
             else => unreachable,
@@ -864,31 +864,31 @@ pub fn md_leave_child_containers(ctx: *MD_CTX, n_keep: c_int) c_int {
         switch (cont.ch) {
             ')', '.' => {
                 is_ordered_list = TRUE;
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
-                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.MD_BLOCK_OL else c.MD_BLOCK_UL, 0, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.BlockType.ol else c.BlockType.ul, 0, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
             },
             '-', '+', '*' => {
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
-                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.MD_BLOCK_OL else c.MD_BLOCK_UL, 0, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.BlockType.ol else c.BlockType.ul, 0, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
             },
             '>' => {
                 if (cont.is_alert != 0)
-                    ret = md_push_container_bytes(ctx, c.MD_BLOCK_ALERT, 0, cont.start, MD_BLOCK_CONTAINER_CLOSER)
+                    ret = md_push_container_bytes(ctx, c.BlockType.alert, 0, cont.start, MD_BLOCK_CONTAINER_CLOSER)
                 else
-                    ret = md_push_container_bytes(ctx, c.MD_BLOCK_QUOTE, 0, 0, MD_BLOCK_CONTAINER_CLOSER);
+                    ret = md_push_container_bytes(ctx, c.BlockType.quote, 0, 0, MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
             },
             ':' => {
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_COMPONENT, 0, cont.start, MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, c.BlockType.component, 0, cont.start, MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
                 ctx.block_component_nesting -= 1;
             },
             '#' => {
-                ret = md_push_container_bytes(ctx, c.MD_BLOCK_TEMPLATE, 0, cont.start, MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, c.BlockType.template, 0, cont.start, MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
             },
             else => unreachable,
@@ -1245,7 +1245,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                     ctx.n_block_bytes > @as(c_int, @sizeOf(MD_BLOCK)))
                 {
                     const top_block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + @as(usize, @intCast(ctx.n_block_bytes - @sizeOf(MD_BLOCK)))));
-                    if (top_block.getType() == c.MD_BLOCK_LI)
+                    if (top_block.typeIsRaw(c.BlockType.li))
                         ctx.last_list_item_starts_with_two_blank_lines = TRUE;
                 }
             }
@@ -1259,7 +1259,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                     ctx.n_block_bytes > @as(c_int, @sizeOf(MD_BLOCK)))
                 {
                     const top_block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + @as(usize, @intCast(ctx.n_block_bytes - @sizeOf(MD_BLOCK)))));
-                    if (top_block.getType() == c.MD_BLOCK_LI) {
+                    if (top_block.typeIsRaw(c.BlockType.li)) {
                         n_parents -= 1;
 
                         line.indent = total_indent;
@@ -1701,9 +1701,9 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     // Enter any container we found a mark for.
     if (n_brothers > 0) {
         // MD_ASSERT(n_brothers == 1);
-        ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, ctx.containers.items[@intCast(n_parents)].task_mark_off, if (ctx.containers.items[@intCast(n_parents)].is_task != 0) @intCast(uval(ctx.ch(ctx.containers.items[@intCast(n_parents)].task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
+        ret = md_push_container_bytes(ctx, c.BlockType.li, ctx.containers.items[@intCast(n_parents)].task_mark_off, if (ctx.containers.items[@intCast(n_parents)].is_task != 0) @intCast(uval(ctx.ch(ctx.containers.items[@intCast(n_parents)].task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
         if (ret < 0) return ret;
-        ret = md_push_container_bytes(ctx, c.MD_BLOCK_LI, container.task_mark_off, if (container.is_task != 0) @intCast(uval(ctx.ch(container.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
+        ret = md_push_container_bytes(ctx, c.BlockType.li, container.task_mark_off, if (container.is_task != 0) @intCast(uval(ctx.ch(container.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
         if (ret < 0) return ret;
         ctx.containers.items[@intCast(n_parents)].is_task = container.is_task;
         ctx.containers.items[@intCast(n_parents)].task_mark_off = container.task_mark_off;

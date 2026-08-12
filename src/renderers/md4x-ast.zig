@@ -238,7 +238,7 @@ fn jsonNodeFree(node_opt: ?*JsonNode) void {
 // version, whose `text == NULL` test was equivalent: md_build_attribute only
 // ever leaves `text` empty when the attribute is unset or was built from zero
 // bytes, and never produces a non-empty pointer with a zero size.
-fn jsonAttrToStr(attr: *const c.MD_ATTRIBUTE) ?[*:0]u8 {
+fn jsonAttrToStr(attr: *const c.Attribute) ?[*:0]u8 {
     if (attr.text.len == 0)
         return null;
 
@@ -360,91 +360,92 @@ fn jsonIsHtmlComment(text: [*]const u8, size: c.MD_SIZE, body: *[*]const u8, bod
 
 const heading_tags = [_][*:0]const u8{ "h0", "h1", "h2", "h3", "h4", "h5", "h6" };
 
-fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn jsonEnterBlock(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.CallbackResult {
     const ctx: *JsonCtx = @ptrCast(@alignCast(userdata.?));
+    const block_type = std.meta.activeTag(detail.*);
     var node: ?*JsonNode = null;
     var tag: ?[*:0]const u8 = null;
 
-    switch (block_type) {
-        c.MD_BLOCK_DOC => tag = null,
-        c.MD_BLOCK_QUOTE => tag = "blockquote",
-        c.MD_BLOCK_UL => tag = "ul",
-        c.MD_BLOCK_OL => tag = "ol",
-        c.MD_BLOCK_LI => tag = "li",
-        c.MD_BLOCK_HR => tag = "hr",
-        c.MD_BLOCK_H => {
-            const d: *const c.MD_BLOCK_H_DETAIL = @ptrCast(@alignCast(detail.?));
+    switch (detail.*) {
+        .doc => tag = null,
+        .quote => tag = "blockquote",
+        .ul => tag = "ul",
+        .ol => tag = "ol",
+        .li => tag = "li",
+        .hr => tag = "hr",
+        .h => |*d| {
             tag = if (d.level >= 1 and d.level <= 6) heading_tags[d.level] else "h1";
         },
-        c.MD_BLOCK_CODE => tag = "pre",
-        c.MD_BLOCK_HTML => tag = "html_block",
-        c.MD_BLOCK_P => tag = "p",
-        c.MD_BLOCK_TABLE => tag = "table",
-        c.MD_BLOCK_THEAD => tag = "thead",
-        c.MD_BLOCK_TBODY => tag = "tbody",
-        c.MD_BLOCK_TR => tag = "tr",
-        c.MD_BLOCK_TH => tag = "th",
-        c.MD_BLOCK_TD => tag = "td",
-        c.MD_BLOCK_FRONTMATTER => tag = "frontmatter",
-        c.MD_BLOCK_COMPONENT => tag = null, // handled below
-        c.MD_BLOCK_TEMPLATE => tag = null, // handled below
-        c.MD_BLOCK_ALERT => tag = "alert",
-        else => tag = "unknown",
+        .code => tag = "pre",
+        .html => tag = "html_block",
+        .p => tag = "p",
+        .table => tag = "table",
+        .thead => tag = "thead",
+        .tbody => tag = "tbody",
+        .tr => tag = "tr",
+        .th => tag = "th",
+        .td => tag = "td",
+        .frontmatter => tag = "frontmatter",
+        .component => tag = null, // handled below
+        .template => tag = null, // handled below
+        .alert => tag = "alert",
     }
 
-    if (block_type == c.MD_BLOCK_DOC) {
-        node = jsonNodeNew(null, .document);
-    } else if (block_type == c.MD_BLOCK_ALERT) {
-        const d: *const c.MD_BLOCK_ALERT_DETAIL = @ptrCast(@alignCast(detail.?));
-        node = jsonNodeNew("alert", .element);
-        if (node == null) {
-            ctx.err = 1;
-            return -1;
-        }
-        node.?.detail.alert_type_name = jsonAttrToStr(&d.type_name);
-    } else if (block_type == c.MD_BLOCK_COMPONENT) {
-        const d: *const c.MD_BLOCK_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
-        tag = jsonAttrToStr(&d.tag_name);
-        if (tag == null) {
-            ctx.err = 1;
-            return -1;
-        }
-        node = jsonNodeNew(tag, .element);
-        if (node == null) {
-            ctx.err = 1;
-            return -1;
-        }
-        node.?.tag_is_dynamic = 1;
-        if (d.raw_props.len > 0) {
-            const dup = dupNts(d.raw_props.ptr, d.raw_props.len);
-            if (dup == null) {
+    // Dispatch on the detail union, so a dynamic component whose name
+    // collides with a built-in tag still takes the component path (see the
+    // tag_is_dynamic-first rule in AGENTS.md).
+    switch (detail.*) {
+        .doc => node = jsonNodeNew(null, .document),
+        .alert => |*d| {
+            node = jsonNodeNew("alert", .element);
+            if (node == null) {
                 ctx.err = 1;
                 return -1;
             }
-            node.?.detail.component_raw_props = dup;
-            node.?.detail.component_raw_props_size = @intCast(d.raw_props.len);
-        }
-        if (d.title.len > 0) {
-            const dup = dupNts(d.title.ptr, d.title.len);
-            if (dup == null) {
-                jsonNodeFree(node);
+            node.?.detail.alert_type_name = jsonAttrToStr(&d.type_name);
+        },
+        .component => |*d| {
+            tag = jsonAttrToStr(&d.tag_name);
+            if (tag == null) {
                 ctx.err = 1;
                 return -1;
             }
-            node.?.detail.component_title = dup;
-            node.?.detail.component_title_size = @intCast(d.title.len);
-        }
-    } else if (block_type == c.MD_BLOCK_TEMPLATE) {
-        const d: *const c.MD_BLOCK_TEMPLATE_DETAIL = @ptrCast(@alignCast(detail.?));
-        const name_str = jsonAttrToStr(&d.name);
-        node = jsonNodeNew("template", .element);
-        if (node == null) {
-            ctx.err = 1;
-            return -1;
-        }
-        node.?.detail.tmpl_name = name_str;
-    } else {
-        node = jsonNodeNew(tag, .element);
+            node = jsonNodeNew(tag, .element);
+            if (node == null) {
+                ctx.err = 1;
+                return -1;
+            }
+            node.?.tag_is_dynamic = 1;
+            if (d.raw_props.len > 0) {
+                const dup = dupNts(d.raw_props.ptr, d.raw_props.len);
+                if (dup == null) {
+                    ctx.err = 1;
+                    return -1;
+                }
+                node.?.detail.component_raw_props = dup;
+                node.?.detail.component_raw_props_size = @intCast(d.raw_props.len);
+            }
+            if (d.title.len > 0) {
+                const dup = dupNts(d.title.ptr, d.title.len);
+                if (dup == null) {
+                    jsonNodeFree(node);
+                    ctx.err = 1;
+                    return -1;
+                }
+                node.?.detail.component_title = dup;
+                node.?.detail.component_title_size = @intCast(d.title.len);
+            }
+        },
+        .template => |*d| {
+            const name_str = jsonAttrToStr(&d.name);
+            node = jsonNodeNew("template", .element);
+            if (node == null) {
+                ctx.err = 1;
+                return -1;
+            }
+            node.?.detail.tmpl_name = name_str;
+        },
+        else => node = jsonNodeNew(tag, .element),
     }
     if (node == null) {
         ctx.err = 1;
@@ -456,39 +457,35 @@ fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
     if (n.tag_is_dynamic != 0) {
         n.tag_kind = .dynamic;
     } else switch (block_type) {
-        c.MD_BLOCK_UL => n.tag_kind = .ul,
-        c.MD_BLOCK_OL => n.tag_kind = .ol,
-        c.MD_BLOCK_LI => n.tag_kind = .li,
-        c.MD_BLOCK_H => n.tag_kind = .other,
-        c.MD_BLOCK_CODE => n.tag_kind = .pre,
-        c.MD_BLOCK_HTML => n.tag_kind = .html_block,
-        c.MD_BLOCK_TH => n.tag_kind = .th,
-        c.MD_BLOCK_TD => n.tag_kind = .td,
-        c.MD_BLOCK_FRONTMATTER => n.tag_kind = .frontmatter,
-        c.MD_BLOCK_TEMPLATE => n.tag_kind = .template,
-        c.MD_BLOCK_ALERT => n.tag_kind = .alert,
+        .ul => n.tag_kind = .ul,
+        .ol => n.tag_kind = .ol,
+        .li => n.tag_kind = .li,
+        .h => n.tag_kind = .other,
+        .code => n.tag_kind = .pre,
+        .html => n.tag_kind = .html_block,
+        .th => n.tag_kind = .th,
+        .td => n.tag_kind = .td,
+        .frontmatter => n.tag_kind = .frontmatter,
+        .template => n.tag_kind = .template,
+        .alert => n.tag_kind = .alert,
         else => n.tag_kind = .other,
     }
 
     // Copy type-specific detail data.
-    switch (block_type) {
-        c.MD_BLOCK_UL => {
-            const d: *const c.MD_BLOCK_UL_DETAIL = @ptrCast(@alignCast(detail.?));
+    switch (detail.*) {
+        .ul => |*d| {
             n.detail.ul_is_tight = d.is_tight;
         },
-        c.MD_BLOCK_OL => {
-            const d: *const c.MD_BLOCK_OL_DETAIL = @ptrCast(@alignCast(detail.?));
+        .ol => |*d| {
             n.detail.ol_is_tight = d.is_tight;
             n.detail.ol_start = d.start;
             n.detail.ol_delimiter = @bitCast(d.mark_delimiter);
         },
-        c.MD_BLOCK_LI => {
-            const d: *const c.MD_BLOCK_LI_DETAIL = @ptrCast(@alignCast(detail.?));
+        .li => |*d| {
             n.detail.li_is_task = d.is_task;
             n.detail.li_task_mark = @bitCast(d.task_mark);
         },
-        c.MD_BLOCK_CODE => {
-            const d: *const c.MD_BLOCK_CODE_DETAIL = @ptrCast(@alignCast(detail.?));
+        .code => |*d| {
             n.detail.code_info = jsonAttrToStr(&d.info);
             n.detail.code_lang = jsonAttrToStr(&d.lang);
             n.detail.code_fence_char = @bitCast(d.fence_char);
@@ -507,13 +504,11 @@ fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
                 }
             }
         },
-        c.MD_BLOCK_TABLE => {
-            const d: *const c.MD_BLOCK_TABLE_DETAIL = @ptrCast(@alignCast(detail.?));
+        .table => |*d| {
             n.detail.table_col_count = d.col_count;
         },
-        c.MD_BLOCK_TH, c.MD_BLOCK_TD => {
-            const d: *const c.MD_BLOCK_TD_DETAIL = @ptrCast(@alignCast(detail.?));
-            n.detail.td_align = @intCast(d.@"align");
+        .th, .td => |*d| {
+            n.detail.td_align = @intCast(@intFromEnum(d.@"align"));
         },
         else => {},
     }
@@ -533,12 +528,11 @@ fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
     return if (ctx.err != 0) -1 else 0;
 }
 
-fn jsonLeaveBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn jsonLeaveBlock(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.CallbackResult {
     const ctx: *JsonCtx = @ptrCast(@alignCast(userdata.?));
-    _ = detail;
 
     // Convert html_block comments to [null, {}, "body"] nodes.
-    if (block_type == c.MD_BLOCK_HTML and ctx.current != null and ctx.current.?.text_value != null) {
+    if (detail.* == .html and ctx.current != null and ctx.current.?.text_value != null) {
         const cur = ctx.current.?;
         var body: [*]const u8 = undefined;
         var body_size: c.MD_SIZE = undefined;
@@ -559,20 +553,24 @@ fn jsonLeaveBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
     return 0;
 }
 
-fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn jsonEnterSpan(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackResult {
     const ctx: *JsonCtx = @ptrCast(@alignCast(userdata.?));
+    const span_type = std.meta.activeTag(detail.*);
     var node: ?*JsonNode = null;
     var tag: ?[*:0]const u8 = null;
 
     // Inside an image: suppress nested spans, just accumulate alt text.
     if (ctx.image_nesting > 0) {
-        if (span_type == c.MD_SPAN_IMG)
+        if (detail.* == .img)
             ctx.image_nesting += 1;
         return 0;
     }
 
-    if (span_type == c.MD_SPAN_COMPONENT) {
-        const d: *const c.MD_SPAN_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
+    // The dynamic-component arm is resolved from the union tag *before* any
+    // built-in tag handling (AGENTS.md's tag_is_dynamic-first rule), so a
+    // component named e.g. "code" still takes the component path.
+    if (detail.* == .component) {
+        const d = &detail.component;
         tag = jsonAttrToStr(&d.tag_name);
         if (tag == null) {
             ctx.err = 1;
@@ -595,19 +593,22 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
             node.?.detail.component_raw_props_size = @intCast(d.raw_props.len);
         }
     } else {
-        switch (span_type) {
-            c.MD_SPAN_EM => tag = "em",
-            c.MD_SPAN_STRONG => tag = "strong",
-            c.MD_SPAN_A => tag = "a",
-            c.MD_SPAN_IMG => tag = "img",
-            c.MD_SPAN_CODE => tag = "code",
-            c.MD_SPAN_DEL => tag = "del",
-            c.MD_SPAN_LATEXMATH => tag = "math",
-            c.MD_SPAN_LATEXMATH_DISPLAY => tag = "math-display",
-            c.MD_SPAN_WIKILINK => tag = "wikilink",
-            c.MD_SPAN_U => tag = "u",
-            c.MD_SPAN_SPAN => tag = "span",
-            else => tag = "unknown",
+        switch (detail.*) {
+            .em => tag = "em",
+            .strong => tag = "strong",
+            .a => tag = "a",
+            .img => tag = "img",
+            .code => tag = "code",
+            .del => tag = "del",
+            .latexmath => tag = "math",
+            .latexmath_display => tag = "math-display",
+            .wikilink => tag = "wikilink",
+            .u => tag = "u",
+            .span => tag = "span",
+            // `.component` is resolved above; the arm only exists to keep the
+            // switch exhaustive without an `unreachable` (AGENTS.md: prefer a
+            // defensive guard, since `unreachable` is UB in ReleaseFast).
+            .component => tag = "unknown",
         }
 
         node = jsonNodeNew(tag, .element);
@@ -618,18 +619,17 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
         const n = node.?;
 
         n.tag_kind = switch (span_type) {
-            c.MD_SPAN_A => .a,
-            c.MD_SPAN_IMG => .img,
-            c.MD_SPAN_CODE => .code,
-            c.MD_SPAN_LATEXMATH => .math,
-            c.MD_SPAN_LATEXMATH_DISPLAY => .math_display,
-            c.MD_SPAN_WIKILINK => .wikilink,
+            .a => .a,
+            .img => .img,
+            .code => .code,
+            .latexmath => .math,
+            .latexmath_display => .math_display,
+            .wikilink => .wikilink,
             else => .other,
         };
 
-        switch (span_type) {
-            c.MD_SPAN_A => {
-                const d: *const c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(detail.?));
+        switch (detail.*) {
+            .a => |*d| {
                 n.detail.a_href = jsonAttrToStr(&d.href);
                 n.detail.a_title = jsonAttrToStr(&d.title);
                 if (d.raw_attrs.len > 0) {
@@ -639,8 +639,7 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
                     }
                 }
             },
-            c.MD_SPAN_IMG => {
-                const d: *const c.MD_SPAN_IMG_DETAIL = @ptrCast(@alignCast(detail.?));
+            .img => |*d| {
                 n.detail.img_src = jsonAttrToStr(&d.src);
                 n.detail.img_title = jsonAttrToStr(&d.title);
                 if (d.raw_attrs.len > 0) {
@@ -651,34 +650,29 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
                 }
                 ctx.image_nesting = 1;
             },
-            c.MD_SPAN_WIKILINK => {
-                const d: *const c.MD_SPAN_WIKILINK_DETAIL = @ptrCast(@alignCast(detail.?));
+            .wikilink => |*d| {
                 n.detail.wikilink_target = jsonAttrToStr(&d.target);
             },
-            c.MD_SPAN_SPAN => {
-                const d_opt: ?*const c.MD_SPAN_SPAN_DETAIL = @ptrCast(@alignCast(detail));
-                if (d_opt) |d| {
-                    if (d.raw_attrs.len > 0) {
-                        if (dupNts(d.raw_attrs.ptr, d.raw_attrs.len)) |dup| {
-                            n.raw_attrs = dup;
-                            n.raw_attrs_size = @intCast(d.raw_attrs.len);
-                        }
+            .span => |*d| {
+                if (d.raw_attrs.len > 0) {
+                    if (dupNts(d.raw_attrs.ptr, d.raw_attrs.len)) |dup| {
+                        n.raw_attrs = dup;
+                        n.raw_attrs_size = @intCast(d.raw_attrs.len);
                     }
                 }
             },
-            c.MD_SPAN_EM, c.MD_SPAN_STRONG, c.MD_SPAN_CODE, c.MD_SPAN_DEL, c.MD_SPAN_U => {
-                // These spans may have trailing {attrs} via MD_SPAN_ATTRS_DETAIL.
-                if (detail != null) {
-                    const d: *const c.MD_SPAN_ATTRS_DETAIL = @ptrCast(@alignCast(detail.?));
-                    if (d.raw_attrs.len > 0) {
-                        if (dupNts(d.raw_attrs.ptr, d.raw_attrs.len)) |dup| {
-                            n.raw_attrs = dup;
-                            n.raw_attrs_size = @intCast(d.raw_attrs.len);
-                        }
+            .em, .strong, .code, .del, .u => |*d| {
+                // These spans may carry trailing {attrs}; an empty raw_attrs
+                // means there were none.
+                if (d.raw_attrs.len > 0) {
+                    if (dupNts(d.raw_attrs.ptr, d.raw_attrs.len)) |dup| {
+                        n.raw_attrs = dup;
+                        n.raw_attrs_size = @intCast(d.raw_attrs.len);
                     }
                 }
             },
-            else => {},
+            .latexmath, .latexmath_display => {},
+            .component => {}, // resolved above
         }
     }
 
@@ -687,12 +681,11 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
     return if (ctx.err != 0) -1 else 0;
 }
 
-fn jsonLeaveSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn jsonLeaveSpan(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackResult {
     const ctx: *JsonCtx = @ptrCast(@alignCast(userdata.?));
-    _ = detail;
 
     if (ctx.image_nesting > 0) {
-        if (span_type == c.MD_SPAN_IMG)
+        if (detail.* == .img)
             ctx.image_nesting -= 1;
         if (ctx.image_nesting > 0)
             return 0;
@@ -703,9 +696,10 @@ fn jsonLeaveSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
     return 0;
 }
 
-fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
+fn jsonText(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata: ?*anyopaque) c.CallbackResult {
     const ctx: *JsonCtx = @ptrCast(@alignCast(userdata.?));
-    const text: [*]const u8 = @ptrCast(text_in);
+    const text: [*]const u8 = text_slice.ptr;
+    const size: c.MD_SIZE = @intCast(text_slice.len);
     var value: ?[*:0]u8 = null;
     var value_size: c.MD_SIZE = 0;
 
@@ -720,12 +714,12 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
 
     // Inside an image: accumulate text as alt attribute.
     if (ctx.image_nesting > 0) {
-        if (text_type == c.MD_TEXT_SOFTBR) {
+        if (text_type == c.TextType.softbr) {
             if (jsonAppendText(cur, " ", 1) != 0) {
                 ctx.err = 1;
                 return -1;
             }
-        } else if (text_type == c.MD_TEXT_NULLCHAR) {
+        } else if (text_type == c.TextType.nullchar) {
             const buf = [_]u8{ 0xEF, 0xBF, 0xBD };
             if (jsonAppendText(cur, &buf, 3) != 0) {
                 ctx.err = 1;
@@ -748,7 +742,7 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
         var src_size: c.MD_SIZE = size;
         const nullchar_buf = [_]u8{ 0xEF, 0xBF, 0xBD };
 
-        if (text_type == c.MD_TEXT_NULLCHAR) {
+        if (text_type == c.TextType.nullchar) {
             src = &nullchar_buf;
             src_size = 3;
         }
@@ -761,7 +755,7 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
     }
 
     switch (text_type) {
-        c.MD_TEXT_BR => {
+        .br => {
             // Linebreak → ["br", {}] element node.
             const node = jsonNodeNew("br", .element);
             if (node == null) {
@@ -772,7 +766,7 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
             return 0;
         },
 
-        c.MD_TEXT_SOFTBR => {
+        .softbr => {
             // Softbreak → "\n" text.
             const buf = allocBytes(2) orelse {
                 ctx.err = 1;
@@ -784,7 +778,7 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
             value_size = 1;
         },
 
-        c.MD_TEXT_NULLCHAR => {
+        .nullchar => {
             const buf = allocBytes(4) orelse {
                 ctx.err = 1;
                 return -1;
@@ -798,7 +792,7 @@ fn jsonText(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_S
             value_size = 3;
         },
 
-        c.MD_TEXT_HTML => {
+        .html => {
             // Inline HTML: check for comment <!-- ... -->
             var cbody: [*]const u8 = undefined;
             var cbody_size: c.MD_SIZE = undefined;
@@ -882,16 +876,16 @@ fn isLeafContainer(kind: TagKind) bool {
     };
 }
 
-fn jsonDebugLog(msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
+fn jsonDebugLog(msg: []const u8, userdata: ?*anyopaque) void {
     _ = userdata;
-    _ = sys.fprintf(sys.stderr, "MD4X: %s\n", msg);
+    _ = sys.fprintf(sys.stderr, "MD4X: %.*s\n", @as(c_int, @intCast(msg.len)), msg.ptr);
 }
 
 fn jsonAlignStr(align_v: c_int) ?[*:0]const u8 {
     return switch (align_v) {
-        c.MD_ALIGN_LEFT => "left",
-        c.MD_ALIGN_CENTER => "center",
-        c.MD_ALIGN_RIGHT => "right",
+        @intFromEnum(c.Align.left) => "left",
+        @intFromEnum(c.Align.center) => "center",
+        @intFromEnum(c.Align.right) => "right",
         else => null,
     };
 }
@@ -1318,8 +1312,7 @@ pub fn md_ast(
         return ret;
     }
 
-    var parser: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER);
-    parser.abi_version = 0;
+    var parser: c.Parser = .{};
     parser.flags = parser_flags;
     parser.enter_block = jsonEnterBlock;
     parser.leave_block = jsonLeaveBlock;

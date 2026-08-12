@@ -1,18 +1,15 @@
 //! Zig-native ABI type definitions for the MD4X parser.
 //!
 //! This module replaces the former C headers `md4x.h` and `entity.h` as the
-//! single source of truth for the shared MD_* types, enums, flags, and the
-//! MD_PARSER struct. The parser (`src/parser/types.zig`) and every renderer
-//! import it as `c` so that the pre-existing `c.MD_*` references keep resolving
-//! unchanged.
+//! single source of truth for the shared parser types, enums, flags, and the
+//! `Parser` callback table. The parser (`src/parser/types.zig`) and every
+//! renderer import it as `c`.
 //!
 //! The type/enum/flag declarations started life as a verbatim transcription of
-//! `zig translate-c md4x.h`. Phase 4c of `PLAN.md` is idiomatizing them, one
-//! step at a time, so they are no longer layout-identical to what
-//! `@cImport("md4x.h")` produced:
+//! `zig translate-c md4x.h`. Phase 4c of `PLAN.md` idiomatized them, so they
+//! bear no resemblance to what `@cImport("md4x.h")` produced any more:
 //!
-//! - **Step 2 (done):** the SAX **detail** types (`MD_ATTRIBUTE`,
-//!   `MD_BLOCK_*_DETAIL`, `MD_SPAN_*_DETAIL`) are ordinary Zig structs with
+//! - **Step 2:** the SAX **detail** types are ordinary Zig structs with
 //!   compiler-chosen layout. Their string/array members are **slices** with
 //!   exact lengths (`text`, `meta`, `highlights`, `raw_attrs`, `raw_props`,
 //!   `title`, `substr_types`, `substr_offsets`) instead of `[*c]` pointer +
@@ -20,85 +17,101 @@
 //!   `c_int` members (`is_tight`, `is_task`, `is_autolink`) are `bool`.
 //!   An absent value is the **empty** slice — the parser never distinguished a
 //!   null pointer from a zero length, and no consumer does either.
-//! - **Still C-shaped, pending step 3:** `MD_PARSER` remains an `extern struct`
-//!   whose five callbacks are `callconv(.c)` and receive their detail as
-//!   `?*anyopaque`; `MD_BLOCKTYPE` / `MD_SPANTYPE` / `MD_TEXTTYPE` / `MD_ALIGN`
-//!   remain `c_uint` with free `pub const` members rather than real Zig enums.
+//! - **Steps 3-5:** `MD_BLOCKTYPE` / `MD_SPANTYPE` / `MD_TEXTTYPE` / `MD_ALIGN`
+//!   are real Zig enums (`BlockType` / `SpanType` / `TextType` / `Align`); the
+//!   detail structs are reachable only through the tagged unions `BlockDetail`
+//!   and `SpanDetail`, so a renderer resolves them with an exhaustive `switch`
+//!   rather than an unchecked `@ptrCast` of a `?*anyopaque`. `MD_PARSER`
+//!   (`extern struct`, `callconv(.c)` callbacks, `abi_version`, `syntax`,
+//!   the `MD_RENDERER` alias) is replaced by the plain Zig `Parser` struct.
+//!
+//! The enums keep the **numeric values and declaration order** of the C
+//! enumerations they replace (`enum(c_uint)`, implicit ordinals), so any
+//! accidental numeric dependency is preserved.
 //!
 //! `MD_CHAR` / `MD_SIZE` / `MD_OFFSET` keep their C spellings: they describe the
 //! input buffer and offsets into it, which the parser indexes with `c_uint`
 //! arithmetic throughout.
 //!
-//! **This module is a pure leaf: types only, no imports, no function
-//! declarations.** It used to also declare `md_parse` / `md_heal` /
-//! `entity_lookup` / the renderer entry points as `pub extern fn`, resolved at
-//! link time against separate static libs. Those now live in `src/lib.zig` as
-//! re-exports of the real Zig definitions, so the units call each other
-//! directly. Do not reintroduce function declarations here — an import from
-//! `abi` back into the parser or a renderer would make this module cyclic.
+//! **This module is a pure leaf: types only, no imports of other md4x modules.**
+//! It used to also declare `md_parse` / `md_heal` / `entity_lookup` / the
+//! renderer entry points as `pub extern fn`, resolved at link time against
+//! separate static libs. Those now live in `src/lib.zig` as re-exports of the
+//! real Zig definitions, so the units call each other directly. Do not
+//! reintroduce entry-point declarations here — an import from `abi` back into
+//! the parser or a renderer would make this module cyclic.
 
 const __helpers = @import("std").zig.c_translation.helpers;
 
 // ---------------------------------------------------------------------------
-// Scalars, enums and MD_PARSER (still the translate-c shapes — Phase 4c step 3)
+// Scalars and enums
 // ---------------------------------------------------------------------------
 pub const MD_CHAR = u8;
 pub const MD_SIZE = c_uint;
 pub const MD_OFFSET = c_uint;
-pub const MD_BLOCK_DOC: c_int = 0;
-pub const MD_BLOCK_QUOTE: c_int = 1;
-pub const MD_BLOCK_UL: c_int = 2;
-pub const MD_BLOCK_OL: c_int = 3;
-pub const MD_BLOCK_LI: c_int = 4;
-pub const MD_BLOCK_HR: c_int = 5;
-pub const MD_BLOCK_H: c_int = 6;
-pub const MD_BLOCK_CODE: c_int = 7;
-pub const MD_BLOCK_HTML: c_int = 8;
-pub const MD_BLOCK_P: c_int = 9;
-pub const MD_BLOCK_TABLE: c_int = 10;
-pub const MD_BLOCK_THEAD: c_int = 11;
-pub const MD_BLOCK_TBODY: c_int = 12;
-pub const MD_BLOCK_TR: c_int = 13;
-pub const MD_BLOCK_TH: c_int = 14;
-pub const MD_BLOCK_TD: c_int = 15;
-pub const MD_BLOCK_FRONTMATTER: c_int = 16;
-pub const MD_BLOCK_COMPONENT: c_int = 17;
-pub const MD_BLOCK_TEMPLATE: c_int = 18;
-pub const MD_BLOCK_ALERT: c_int = 19;
-pub const enum_MD_BLOCKTYPE = c_uint;
-pub const MD_BLOCKTYPE = enum_MD_BLOCKTYPE;
-pub const MD_SPAN_EM: c_int = 0;
-pub const MD_SPAN_STRONG: c_int = 1;
-pub const MD_SPAN_A: c_int = 2;
-pub const MD_SPAN_IMG: c_int = 3;
-pub const MD_SPAN_CODE: c_int = 4;
-pub const MD_SPAN_DEL: c_int = 5;
-pub const MD_SPAN_LATEXMATH: c_int = 6;
-pub const MD_SPAN_LATEXMATH_DISPLAY: c_int = 7;
-pub const MD_SPAN_WIKILINK: c_int = 8;
-pub const MD_SPAN_U: c_int = 9;
-pub const MD_SPAN_COMPONENT: c_int = 10;
-pub const MD_SPAN_SPAN: c_int = 11;
-pub const enum_MD_SPANTYPE = c_uint;
-pub const MD_SPANTYPE = enum_MD_SPANTYPE;
-pub const MD_TEXT_NORMAL: c_int = 0;
-pub const MD_TEXT_NULLCHAR: c_int = 1;
-pub const MD_TEXT_BR: c_int = 2;
-pub const MD_TEXT_SOFTBR: c_int = 3;
-pub const MD_TEXT_ENTITY: c_int = 4;
-pub const MD_TEXT_CODE: c_int = 5;
-pub const MD_TEXT_HTML: c_int = 6;
-pub const MD_TEXT_LATEXMATH: c_int = 7;
-pub const enum_MD_TEXTTYPE = c_uint;
-pub const MD_TEXTTYPE = enum_MD_TEXTTYPE;
-pub const MD_ALIGN_DEFAULT: c_int = 0;
-pub const MD_ALIGN_LEFT: c_int = 1;
-pub const MD_ALIGN_CENTER: c_int = 2;
-pub const MD_ALIGN_RIGHT: c_int = 3;
-pub const enum_MD_ALIGN = c_uint;
-pub const MD_ALIGN = enum_MD_ALIGN;
+
+/// Block types. Ordinals are the values of the former C `MD_BLOCKTYPE`.
+pub const BlockType = enum(c_uint) {
+    doc,
+    quote,
+    ul,
+    ol,
+    li,
+    hr,
+    h,
+    code,
+    html,
+    p,
+    table,
+    thead,
+    tbody,
+    tr,
+    th,
+    td,
+    frontmatter,
+    component,
+    template,
+    alert,
+};
+
+/// Span types. Ordinals are the values of the former C `MD_SPANTYPE`.
+pub const SpanType = enum(c_uint) {
+    em,
+    strong,
+    a,
+    img,
+    code,
+    del,
+    latexmath,
+    latexmath_display,
+    wikilink,
+    u,
+    component,
+    span,
+};
+
+/// Text-run types. Ordinals are the values of the former C `MD_TEXTTYPE`.
+pub const TextType = enum(c_uint) {
+    normal,
+    nullchar,
+    br,
+    softbr,
+    entity,
+    code,
+    html,
+    latexmath,
+};
+
+/// Table cell alignment. Ordinals are the values of the former C `MD_ALIGN`.
+pub const Align = enum(c_uint) {
+    default,
+    left,
+    center,
+    right,
+};
+
 // ---------------------------------------------------------------------------
-// SAX detail types (Phase 4c step 2: idiomatic Zig structs, slices, bools)
+// SAX detail types
 // ---------------------------------------------------------------------------
 
 /// String attribute for non-text-flow content (URLs, titles, info strings, …).
@@ -111,29 +124,28 @@ pub const MD_ALIGN = enum_MD_ALIGN;
 ///   final terminator entry), except for the fully-empty attribute where both
 ///   are empty.
 /// - `substr_offsets[0] == 0` and `substr_offsets[substr_types.len] == size()`.
-/// - only `MD_TEXT_NORMAL`, `MD_TEXT_ENTITY` and `MD_TEXT_NULLCHAR` appear in
-///   `substr_types`.
+/// - only `.normal`, `.entity` and `.nullchar` appear in `substr_types`.
 ///
 /// An unset attribute is the default value: an empty `text` with empty tables.
-pub const MD_ATTRIBUTE = struct {
+pub const Attribute = struct {
     text: []const MD_CHAR = &.{},
-    substr_types: []const MD_TEXTTYPE = &.{},
+    substr_types: []const TextType = &.{},
     substr_offsets: []const MD_OFFSET = &.{},
 
     /// Byte length of `text`, as the `MD_SIZE` the offset tables are expressed in.
-    pub fn size(self: MD_ATTRIBUTE) MD_SIZE {
+    pub fn size(self: Attribute) MD_SIZE {
         return @intCast(self.text.len);
     }
 };
 
-pub const MD_BLOCK_UL_DETAIL = struct {
+pub const BlockUlDetail = struct {
     /// True for a tight list, false for a loose one.
     is_tight: bool = false,
     /// Bullet character: '-', '+' or '*'.
     mark: MD_CHAR = 0,
 };
 
-pub const MD_BLOCK_OL_DETAIL = struct {
+pub const BlockOlDetail = struct {
     start: c_uint = 0,
     /// True for a tight list, false for a loose one.
     is_tight: bool = false,
@@ -141,7 +153,7 @@ pub const MD_BLOCK_OL_DETAIL = struct {
     mark_delimiter: MD_CHAR = 0,
 };
 
-pub const MD_BLOCK_LI_DETAIL = struct {
+pub const BlockLiDetail = struct {
     /// Can be true only with MD_FLAG_TASKLISTS.
     is_task: bool = false,
     /// 'x', 'X' or ' ' when `is_task`.
@@ -150,17 +162,17 @@ pub const MD_BLOCK_LI_DETAIL = struct {
     task_mark_offset: MD_OFFSET = 0,
 };
 
-pub const MD_BLOCK_H_DETAIL = struct {
+pub const BlockHDetail = struct {
     level: c_uint = 0,
 };
 
-pub const MD_BLOCK_CODE_DETAIL = struct {
-    info: MD_ATTRIBUTE = .{},
-    lang: MD_ATTRIBUTE = .{},
+pub const BlockCodeDetail = struct {
+    info: Attribute = .{},
+    lang: Attribute = .{},
     /// Fence character, or zero for an indented code block.
     fence_char: MD_CHAR = 0,
     /// `[filename]` from the info string.
-    filename: MD_ATTRIBUTE = .{},
+    filename: Attribute = .{},
     /// Raw metadata remainder of the info string. Empty when absent. The
     /// backing allocation carries a trailing NUL one byte past `meta.len`.
     meta: []const MD_CHAR = &.{},
@@ -168,84 +180,176 @@ pub const MD_BLOCK_CODE_DETAIL = struct {
     highlights: []const c_uint = &.{},
 };
 
-pub const MD_BLOCK_TABLE_DETAIL = struct {
+pub const BlockTableDetail = struct {
     col_count: c_uint = 0,
     head_row_count: c_uint = 0,
     body_row_count: c_uint = 0,
 };
 
-pub const MD_BLOCK_TD_DETAIL = struct {
-    @"align": MD_ALIGN = @intCast(MD_ALIGN_DEFAULT),
+pub const BlockTdDetail = struct {
+    @"align": Align = .default,
 };
 
-pub const MD_SPAN_A_DETAIL = struct {
-    href: MD_ATTRIBUTE = .{},
-    title: MD_ATTRIBUTE = .{},
-    /// Raw attrs from a trailing `{...}`. Empty when absent.
-    raw_attrs: []const MD_CHAR = &.{},
-    is_autolink: bool = false,
-};
-
-pub const MD_SPAN_IMG_DETAIL = struct {
-    src: MD_ATTRIBUTE = .{},
-    title: MD_ATTRIBUTE = .{},
-    /// Raw attrs from a trailing `{...}`. Empty when absent.
-    raw_attrs: []const MD_CHAR = &.{},
-};
-
-pub const MD_SPAN_WIKILINK_DETAIL = struct {
-    target: MD_ATTRIBUTE = .{},
-};
-
-pub const MD_SPAN_COMPONENT_DETAIL = struct {
-    /// Component name (e.g. "badge", "icon-star").
-    tag_name: MD_ATTRIBUTE = .{},
-    /// Raw props from `{...}`. Empty when absent.
-    raw_props: []const MD_CHAR = &.{},
-};
-
-pub const MD_BLOCK_COMPONENT_DETAIL = struct {
+pub const BlockComponentDetail = struct {
     /// Component name (e.g. "alert", "card").
-    tag_name: MD_ATTRIBUTE = .{},
+    tag_name: Attribute = .{},
     /// Raw props from `{...}`. Empty when absent.
     raw_props: []const MD_CHAR = &.{},
     /// Title after the name (e.g. "STOP" in `:::danger STOP`). Empty when absent.
     title: []const MD_CHAR = &.{},
 };
 
-pub const MD_BLOCK_TEMPLATE_DETAIL = struct {
+pub const BlockTemplateDetail = struct {
     /// Slot name (e.g. "header", "footer").
-    name: MD_ATTRIBUTE = .{},
+    name: Attribute = .{},
 };
 
-pub const MD_BLOCK_ALERT_DETAIL = struct {
+pub const BlockAlertDetail = struct {
     /// Alert type (e.g. "NOTE", "WARNING").
-    type_name: MD_ATTRIBUTE = .{},
+    type_name: Attribute = .{},
 };
 
-pub const MD_SPAN_ATTRS_DETAIL = struct {
-    /// Raw attrs from a trailing `{...}`. Empty for `{}`.
+pub const SpanADetail = struct {
+    href: Attribute = .{},
+    title: Attribute = .{},
+    /// Raw attrs from a trailing `{...}`. Empty when absent.
+    raw_attrs: []const MD_CHAR = &.{},
+    is_autolink: bool = false,
+};
+
+pub const SpanImgDetail = struct {
+    src: Attribute = .{},
+    title: Attribute = .{},
+    /// Raw attrs from a trailing `{...}`. Empty when absent.
     raw_attrs: []const MD_CHAR = &.{},
 };
 
-pub const MD_SPAN_SPAN_DETAIL = struct {
+pub const SpanWikilinkDetail = struct {
+    target: Attribute = .{},
+};
+
+pub const SpanComponentDetail = struct {
+    /// Component name (e.g. "badge", "icon-star").
+    tag_name: Attribute = .{},
+    /// Raw props from `{...}`. Empty when absent.
+    raw_props: []const MD_CHAR = &.{},
+};
+
+/// Trailing `{...}` attributes on em/strong/code/del/u. An **empty**
+/// `raw_attrs` means "no attributes" — before Phase 4c step 3 the parser
+/// signalled that by handing the callback a null detail pointer instead, but
+/// no consumer ever distinguished the two (every guard was
+/// `detail != null and raw_attrs.len > 0`), so the null case is gone.
+pub const SpanAttrsDetail = struct {
+    raw_attrs: []const MD_CHAR = &.{},
+};
+
+pub const SpanSpanDetail = struct {
     /// Raw attrs from `{...}`. Empty for `{}`.
     raw_attrs: []const MD_CHAR = &.{},
 };
 
-pub const struct_MD_PARSER = extern struct {
-    abi_version: c_uint = 0,
-    flags: c_uint = 0,
-    enter_block: ?*const fn (MD_BLOCKTYPE, ?*anyopaque, ?*anyopaque) callconv(.c) c_int = null,
-    leave_block: ?*const fn (MD_BLOCKTYPE, ?*anyopaque, ?*anyopaque) callconv(.c) c_int = null,
-    enter_span: ?*const fn (MD_SPANTYPE, ?*anyopaque, ?*anyopaque) callconv(.c) c_int = null,
-    leave_span: ?*const fn (MD_SPANTYPE, ?*anyopaque, ?*anyopaque) callconv(.c) c_int = null,
-    text: ?*const fn (MD_TEXTTYPE, [*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) c_int = null,
-    debug_log: ?*const fn ([*c]const u8, ?*anyopaque) callconv(.c) void = null,
-    syntax: ?*const fn () callconv(.c) void = null,
+/// The detail handed to `enter_block` / `leave_block`, tagged by `BlockType`.
+/// Arms whose block type carries no detail are `void`.
+pub const BlockDetail = union(BlockType) {
+    doc: void,
+    quote: void,
+    ul: BlockUlDetail,
+    ol: BlockOlDetail,
+    li: BlockLiDetail,
+    hr: void,
+    h: BlockHDetail,
+    code: BlockCodeDetail,
+    html: void,
+    p: void,
+    table: BlockTableDetail,
+    thead: void,
+    tbody: void,
+    tr: void,
+    th: BlockTdDetail,
+    td: BlockTdDetail,
+    frontmatter: void,
+    component: BlockComponentDetail,
+    template: BlockTemplateDetail,
+    alert: BlockAlertDetail,
+
+    /// The all-defaults value of the arm selected by `ty`. The emission path
+    /// uses it to materialize a detail for a block whose type is only known at
+    /// runtime, then fills in the fields the type actually carries.
+    pub fn default(ty: BlockType) BlockDetail {
+        return switch (ty) {
+            inline else => |t| @unionInit(BlockDetail, @tagName(t), defaultPayload(TagPayload(BlockDetail, t))),
+        };
+    }
 };
-pub const MD_PARSER = struct_MD_PARSER;
-pub const MD_RENDERER = MD_PARSER;
+
+/// The detail handed to `enter_span` / `leave_span`, tagged by `SpanType`.
+/// Arms whose span type carries no detail are `void`.
+pub const SpanDetail = union(SpanType) {
+    em: SpanAttrsDetail,
+    strong: SpanAttrsDetail,
+    a: SpanADetail,
+    img: SpanImgDetail,
+    code: SpanAttrsDetail,
+    del: SpanAttrsDetail,
+    latexmath: void,
+    latexmath_display: void,
+    wikilink: SpanWikilinkDetail,
+    u: SpanAttrsDetail,
+    component: SpanComponentDetail,
+    span: SpanSpanDetail,
+};
+
+/// Local `std.meta.TagPayload` / default-value helpers. Spelled out here so
+/// this module keeps its "no imports" property beyond the translate-c helper.
+fn TagPayload(comptime U: type, comptime tag: @typeInfo(U).@"union".tag_type.?) type {
+    for (@typeInfo(U).@"union".fields) |f| {
+        if (@field(@typeInfo(U).@"union".tag_type.?, f.name) == tag) return f.type;
+    }
+    unreachable;
+}
+
+fn defaultPayload(comptime T: type) T {
+    return if (T == void) {} else T{};
+}
+
+// ---------------------------------------------------------------------------
+// The callback table
+// ---------------------------------------------------------------------------
+
+/// A callback's abort code. `0` continues the parse; non-zero aborts the
+/// enclosing emitter.
+///
+/// **Abort contract (md4c parity — pinned by the abort matrix in
+/// `src/md4x.zig`, do not change):** `md_parse` propagates a NEGATIVE code
+/// verbatim as its own return value, but returns `0` for a POSITIVE one (the
+/// positive code stops emission, is never caught by an internal `< 0` boundary,
+/// and is then overwritten by a subsequent `leave_*` returning 0). OOM and a
+/// callback returning `-1` are deliberately unified as `-1`.
+///
+/// This is why the callbacks return a plain integer rather than a Zig error
+/// union (PLAN.md §8.2): the contract has to carry an arbitrary caller-chosen
+/// i32 through, and OOM must stay indistinguishable from `-1`.
+pub const CallbackResult = i32;
+
+/// Parser flags + the SAX callback table. A plain Zig struct: no `extern`, no
+/// `callconv(.c)`, and no `abi_version` / `syntax` / `MD_RENDERER` alias — all
+/// three were vestiges of the dropped external C ABI.
+///
+/// Details are passed by **const pointer**: the unions are large and this is a
+/// hot path. The type tag lives in the union, so there is no separate type
+/// parameter — recover it with `switch (detail.*)`.
+pub const Parser = struct {
+    /// Bitmask of `MD_FLAG_*` values.
+    flags: c_uint = 0,
+    enter_block: ?*const fn (*const BlockDetail, ?*anyopaque) CallbackResult = null,
+    leave_block: ?*const fn (*const BlockDetail, ?*anyopaque) CallbackResult = null,
+    enter_span: ?*const fn (*const SpanDetail, ?*anyopaque) CallbackResult = null,
+    leave_span: ?*const fn (*const SpanDetail, ?*anyopaque) CallbackResult = null,
+    text: ?*const fn (TextType, []const MD_CHAR, ?*anyopaque) CallbackResult = null,
+    /// Optional diagnostic sink; `MD_*_FLAG_DEBUG` wires it to stderr.
+    debug_log: ?*const fn ([]const u8, ?*anyopaque) void = null,
+};
 
 pub const MD_FLAG_COLLAPSEWHITESPACE = @as(c_int, 0x0001);
 pub const MD_FLAG_PERMISSIVEATXHEADERS = @as(c_int, 0x0002);

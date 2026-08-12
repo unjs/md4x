@@ -188,35 +188,35 @@ fn meta_append_entity(ctx: *META_CTX, text: [*]const u8, size: c.MD_SIZE) c_int 
 // ***  md_parse() callbacks       ***
 // **********************************
 
-fn meta_enter_block(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn meta_enter_block(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.CallbackResult {
     const ctx: *META_CTX = @ptrCast(@alignCast(userdata.?));
 
-    if (block_type == c.MD_BLOCK_COMPONENT) {
-        ctx.comp_depth += 1;
-    } else if (block_type == c.MD_BLOCK_FRONTMATTER) {
+    switch (detail.*) {
+        .component => ctx.comp_depth += 1,
         // Only capture document-level frontmatter, not component frontmatter.
-        if (ctx.comp_depth == 0)
+        .frontmatter => if (ctx.comp_depth == 0) {
             ctx.in_frontmatter = 1;
-    } else if (block_type == c.MD_BLOCK_H) {
-        const d: *const c.MD_BLOCK_H_DETAIL = @ptrCast(@alignCast(detail.?));
-        ctx.in_heading = 1;
-        ctx.heading_level = d.level;
-        ctx.heading_buf_size = 0;
+        },
+        .h => |*d| {
+            ctx.in_heading = 1;
+            ctx.heading_level = d.level;
+            ctx.heading_buf_size = 0;
+        },
+        else => {},
     }
 
     return 0;
 }
 
-fn meta_leave_block(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn meta_leave_block(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.CallbackResult {
     const ctx: *META_CTX = @ptrCast(@alignCast(userdata.?));
+    const block_type = std.meta.activeTag(detail.*);
 
-    _ = detail;
-
-    if (block_type == c.MD_BLOCK_COMPONENT) {
+    if (block_type == c.BlockType.component) {
         ctx.comp_depth -= 1;
-    } else if (block_type == c.MD_BLOCK_FRONTMATTER) {
+    } else if (block_type == c.BlockType.frontmatter) {
         ctx.in_frontmatter = 0;
-    } else if (block_type == c.MD_BLOCK_H) {
+    } else if (block_type == c.BlockType.h) {
         // Store the completed heading.
         if (ctx.heading_count >= ctx.heading_cap) {
             const new_cap: c_int = if (ctx.heading_cap == 0) 8 else ctx.heading_cap * 2;
@@ -263,23 +263,22 @@ fn meta_leave_block(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?
     return 0;
 }
 
-fn meta_enter_span(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-    _ = span_type;
+fn meta_enter_span(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackResult {
     _ = detail;
     _ = userdata;
     return 0;
 }
 
-fn meta_leave_span(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-    _ = span_type;
+fn meta_leave_span(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackResult {
     _ = detail;
     _ = userdata;
     return 0;
 }
 
-fn meta_text(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
+fn meta_text(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata: ?*anyopaque) c.CallbackResult {
     const ctx: *META_CTX = @ptrCast(@alignCast(userdata.?));
-    const text: [*]const u8 = @ptrCast(text_in);
+    const text: [*]const u8 = text_slice.ptr;
+    const size: c.MD_SIZE = @intCast(text_slice.len);
 
     if (ctx.in_frontmatter != 0) {
         if (meta_buf_append(&ctx.fm_text, &ctx.fm_size, &ctx.fm_cap, text, size) != 0) {
@@ -291,14 +290,14 @@ fn meta_text(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_
 
     if (ctx.in_heading != 0) {
         switch (text_type) {
-            c.MD_TEXT_SOFTBR, c.MD_TEXT_BR => {
+            .softbr, .br => {
                 if (meta_buf_append(&ctx.heading_buf, &ctx.heading_buf_size, &ctx.heading_buf_cap, " ", 1) != 0) {
                     ctx.err = 1;
                     return -1;
                 }
             },
 
-            c.MD_TEXT_NULLCHAR => {
+            .nullchar => {
                 const buf = [_]u8{ 0xEF, 0xBF, 0xBD };
                 if (meta_buf_append(&ctx.heading_buf, &ctx.heading_buf_size, &ctx.heading_buf_cap, &buf, 3) != 0) {
                     ctx.err = 1;
@@ -306,7 +305,7 @@ fn meta_text(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_
                 }
             },
 
-            c.MD_TEXT_ENTITY => {
+            .entity => {
                 if (meta_append_entity(ctx, text, size) != 0) {
                     ctx.err = 1;
                     return -1;
@@ -325,9 +324,9 @@ fn meta_text(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_
     return 0;
 }
 
-fn meta_debug_log(msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
+fn meta_debug_log(msg: []const u8, userdata: ?*anyopaque) void {
     _ = userdata;
-    _ = sys.fprintf(sys.stderr, "MD4X: %s\n", msg);
+    _ = sys.fprintf(sys.stderr, "MD4X: %.*s\n", @as(c_int, @intCast(msg.len)), msg.ptr);
 }
 
 // **************************************
@@ -477,7 +476,7 @@ pub fn md_meta(
         return ret;
     }
 
-    var parser: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER);
+    var parser: c.Parser = .{};
     parser.flags = parser_flags;
     parser.enter_block = meta_enter_block;
     parser.leave_block = meta_leave_block;

@@ -243,7 +243,7 @@ const md_process_normal_block_contents = process.md_process_normal_block_content
 //  Public entry point — the only non-static (exported) symbol of the parser.
 // ============================================================================
 
-pub fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PARSER, userdata: ?*anyopaque) c_int {
+pub fn md_parse(text: [*c]const CHAR, size: SZ, parser: *const c.Parser, userdata: ?*anyopaque) c_int {
     // Production always uses the libc-backed c_allocator. The allocator is split
     // out into md_parse_impl so native OOM tests can inject a
     // std.testing.FailingAllocator and sweep the full parse for crash/leak
@@ -251,12 +251,9 @@ pub fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PARSER, u
     return md_parse_impl(c_allocator, text, size, parser, userdata);
 }
 
-fn md_parse_impl(alloc: std.mem.Allocator, text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PARSER, userdata: ?*anyopaque) c_int {
-    if (parser.*.abi_version != 0) {
-        if (parser.*.debug_log != null)
-            parser.*.debug_log.?("Unsupported abi_version.", userdata);
-        return -1;
-    }
+fn md_parse_impl(alloc: std.mem.Allocator, text: [*c]const CHAR, size: SZ, parser: *const c.Parser, userdata: ?*anyopaque) c_int {
+    // (The `abi_version` guard that used to stand here went away with the field
+    // — it was a vestige of the dropped external C ABI.)
 
     // Setup context structure (zero-initialized like C's memset).
     var ctx: MD_CTX = .{ .alloc = alloc };
@@ -365,7 +362,7 @@ inline fn entity_lookup_wrap(name: [*c]const u8, name_size: usize) ?*const entit
 // md_parse setup. Splits `text[0..size]` into MD_LINE[] at '\n' (newline
 // excluded), runs analyze+process, and performs the ptr_stack cleanup + frees.
 // Returns the analyze/process return value.
-fn _test_run_inline(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ) c_int {
+fn _test_run_inline(parser: *const c.Parser, text: [*c]const CHAR, size: SZ) c_int {
     var ctx: MD_CTX = .{};
     ctx.text = text;
     ctx.size = size;
@@ -520,7 +517,7 @@ fn _test_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, l
     }
 
     if (line.type == .MD_LINE_SETEXTUNDERLINE) {
-        ctx.current_block.*.setType(c.MD_BLOCK_H);
+        ctx.current_block.*.setType(c.BlockType.h);
         ctx.current_block.*.bits.data = @truncate(line.data);
         ctx.current_block.*.bits.flags |= @as(u8, @truncate(MD_BLOCK_SETEXT_HEADER));
         ret = md_add_line_into_current_block(ctx, line);
@@ -537,7 +534,7 @@ fn _test_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, l
     }
 
     if (line.type == .MD_LINE_TABLEUNDERLINE) {
-        ctx.current_block.*.setType(c.MD_BLOCK_TABLE);
+        ctx.current_block.*.setType(c.BlockType.table);
         ctx.current_block.*.bits.data = @truncate(line.data);
         @as(*MD_LINE_ANALYSIS, @constCast(pivot_line)).type = .MD_LINE_TABLE;
         ret = md_add_line_into_current_block(ctx, line);
@@ -568,7 +565,7 @@ fn _test_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, l
 // PROCESSING is skipped — we only want classification + container/block-
 // accumulation deltas to differential.
 const TestOut = *const fn ([*c]const u8, usize, ?*anyopaque) callconv(.c) void;
-fn _test_run_analyze(parser: *const c.MD_PARSER, text: [*c]const CHAR, size: SZ, out_fn: TestOut, out_ud: ?*anyopaque) c_int {
+fn _test_run_analyze(parser: *const c.Parser, text: [*c]const CHAR, size: SZ, out_fn: TestOut, out_ud: ?*anyopaque) c_int {
     var ctx: MD_CTX = .{};
     ctx.text = text;
     ctx.size = size;
@@ -683,7 +680,7 @@ const AbortProbe = struct {
     enter_calls: u32 = 0,
     // The non-zero code a triggered callback returns. md_parse must propagate
     // this EXACT value (positive or negative) as its own return value.
-    abort_code: c_int = 1,
+    abort_code: c.CallbackResult = 1,
     abort_on_text: bool = false,
     abort_on_block_p: bool = false,
     abort_on_enter_block: bool = false,
@@ -691,47 +688,42 @@ const AbortProbe = struct {
     abort_on_enter_span: bool = false,
     abort_on_leave_span: bool = false,
 
-    fn enterBlock(ty: c.MD_BLOCKTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
-        _ = detail;
+    fn enterBlock(detail: *const c.BlockDetail, ud: ?*anyopaque) c.CallbackResult {
         const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
         self.enter_calls += 1;
-        if (self.abort_on_block_p and ty == c.MD_BLOCK_P) return self.abort_code;
-        if (self.abort_on_enter_block and ty != c.MD_BLOCK_DOC) return self.abort_code;
+        if (self.abort_on_block_p and detail.* == .p) return self.abort_code;
+        if (self.abort_on_enter_block and detail.* != .doc) return self.abort_code;
         return 0;
     }
-    fn leaveBlock(ty: c.MD_BLOCKTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
-        _ = detail;
+    fn leaveBlock(detail: *const c.BlockDetail, ud: ?*anyopaque) c.CallbackResult {
         const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
-        if (self.abort_on_leave_block and ty != c.MD_BLOCK_DOC) return self.abort_code;
+        if (self.abort_on_leave_block and detail.* != .doc) return self.abort_code;
         return 0;
     }
-    fn enterSpan(ty: c.MD_SPANTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
-        _ = ty;
+    fn enterSpan(detail: *const c.SpanDetail, ud: ?*anyopaque) c.CallbackResult {
         _ = detail;
         const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
         if (self.abort_on_enter_span) return self.abort_code;
         return 0;
     }
-    fn leaveSpan(ty: c.MD_SPANTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
-        _ = ty;
+    fn leaveSpan(detail: *const c.SpanDetail, ud: ?*anyopaque) c.CallbackResult {
         _ = detail;
         const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
         if (self.abort_on_leave_span) return self.abort_code;
         return 0;
     }
-    fn textCb(ty: c.MD_TEXTTYPE, str: [*c]const CHAR, size: SZ, ud: ?*anyopaque) callconv(.c) c_int {
+    fn textCb(ty: c.TextType, str: []const CHAR, ud: ?*anyopaque) c.CallbackResult {
         _ = ty;
         _ = str;
-        _ = size;
         const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
         self.text_calls += 1;
         if (self.abort_on_text) return self.abort_code;
         return 0;
     }
 
-    fn parser(self: *AbortProbe) c.MD_PARSER {
+    fn parser(self: *AbortProbe) c.Parser {
         _ = self;
-        var p: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER);
+        var p: c.Parser = .{};
         p.flags = c.MD_DIALECT_ALL;
         p.enter_block = AbortProbe.enterBlock;
         p.leave_block = AbortProbe.leaveBlock;
@@ -1024,7 +1016,7 @@ const TraceProbe = struct {
 
     /// An MD_ATTRIBUTE, including its substring type/offset table — the part
     /// Phase 4c converts from [*c] arrays to slices.
-    fn attr(self: *TraceProbe, name: []const u8, a: c.MD_ATTRIBUTE) void {
+    fn attr(self: *TraceProbe, name: []const u8, a: c.Attribute) void {
         self.raw(" {s}=", .{name});
         if (a.text.len == 0) {
             // An unset attribute; md_build_attribute never yields a non-empty
@@ -1049,61 +1041,58 @@ const TraceProbe = struct {
         self.raw("|end@{d}]", .{total});
     }
 
-    fn blockTypeName(t: c.MD_BLOCKTYPE) []const u8 {
+    fn blockTypeName(t: c.BlockType) []const u8 {
         return switch (t) {
-            c.MD_BLOCK_DOC => "DOC",
-            c.MD_BLOCK_QUOTE => "QUOTE",
-            c.MD_BLOCK_UL => "UL",
-            c.MD_BLOCK_OL => "OL",
-            c.MD_BLOCK_LI => "LI",
-            c.MD_BLOCK_HR => "HR",
-            c.MD_BLOCK_H => "H",
-            c.MD_BLOCK_CODE => "CODE",
-            c.MD_BLOCK_HTML => "HTML",
-            c.MD_BLOCK_P => "P",
-            c.MD_BLOCK_TABLE => "TABLE",
-            c.MD_BLOCK_THEAD => "THEAD",
-            c.MD_BLOCK_TBODY => "TBODY",
-            c.MD_BLOCK_TR => "TR",
-            c.MD_BLOCK_TH => "TH",
-            c.MD_BLOCK_TD => "TD",
-            c.MD_BLOCK_FRONTMATTER => "FRONTMATTER",
-            c.MD_BLOCK_COMPONENT => "COMPONENT",
-            c.MD_BLOCK_TEMPLATE => "TEMPLATE",
-            c.MD_BLOCK_ALERT => "ALERT",
-            else => "BLOCK?",
+            c.BlockType.doc => "DOC",
+            c.BlockType.quote => "QUOTE",
+            c.BlockType.ul => "UL",
+            c.BlockType.ol => "OL",
+            c.BlockType.li => "LI",
+            c.BlockType.hr => "HR",
+            c.BlockType.h => "H",
+            c.BlockType.code => "CODE",
+            c.BlockType.html => "HTML",
+            c.BlockType.p => "P",
+            c.BlockType.table => "TABLE",
+            c.BlockType.thead => "THEAD",
+            c.BlockType.tbody => "TBODY",
+            c.BlockType.tr => "TR",
+            c.BlockType.th => "TH",
+            c.BlockType.td => "TD",
+            c.BlockType.frontmatter => "FRONTMATTER",
+            c.BlockType.component => "COMPONENT",
+            c.BlockType.template => "TEMPLATE",
+            c.BlockType.alert => "ALERT",
         };
     }
 
-    fn spanTypeName(t: c.MD_SPANTYPE) []const u8 {
+    fn spanTypeName(t: c.SpanType) []const u8 {
         return switch (t) {
-            c.MD_SPAN_EM => "EM",
-            c.MD_SPAN_STRONG => "STRONG",
-            c.MD_SPAN_A => "A",
-            c.MD_SPAN_IMG => "IMG",
-            c.MD_SPAN_CODE => "CODE",
-            c.MD_SPAN_DEL => "DEL",
-            c.MD_SPAN_LATEXMATH => "LATEXMATH",
-            c.MD_SPAN_LATEXMATH_DISPLAY => "LATEXMATH_DISPLAY",
-            c.MD_SPAN_WIKILINK => "WIKILINK",
-            c.MD_SPAN_U => "U",
-            c.MD_SPAN_COMPONENT => "COMPONENT",
-            c.MD_SPAN_SPAN => "SPAN",
-            else => "SPAN?",
+            c.SpanType.em => "EM",
+            c.SpanType.strong => "STRONG",
+            c.SpanType.a => "A",
+            c.SpanType.img => "IMG",
+            c.SpanType.code => "CODE",
+            c.SpanType.del => "DEL",
+            c.SpanType.latexmath => "LATEXMATH",
+            c.SpanType.latexmath_display => "LATEXMATH_DISPLAY",
+            c.SpanType.wikilink => "WIKILINK",
+            c.SpanType.u => "U",
+            c.SpanType.component => "COMPONENT",
+            c.SpanType.span => "SPAN",
         };
     }
 
-    fn textTypeName(t: c.MD_TEXTTYPE) []const u8 {
+    fn textTypeName(t: c.TextType) []const u8 {
         return switch (t) {
-            c.MD_TEXT_NORMAL => "NORMAL",
-            c.MD_TEXT_NULLCHAR => "NULLCHAR",
-            c.MD_TEXT_BR => "BR",
-            c.MD_TEXT_SOFTBR => "SOFTBR",
-            c.MD_TEXT_ENTITY => "ENTITY",
-            c.MD_TEXT_CODE => "CODE",
-            c.MD_TEXT_HTML => "HTML",
-            c.MD_TEXT_LATEXMATH => "LATEXMATH",
-            else => "TEXT?",
+            c.TextType.normal => "NORMAL",
+            c.TextType.nullchar => "NULLCHAR",
+            c.TextType.br => "BR",
+            c.TextType.softbr => "SOFTBR",
+            c.TextType.entity => "ENTITY",
+            c.TextType.code => "CODE",
+            c.TextType.html => "HTML",
+            c.TextType.latexmath => "LATEXMATH",
         };
     }
 
@@ -1112,30 +1101,29 @@ const TraceProbe = struct {
         if (s.len == 0) self.raw("<null>", .{}) else self.quoted(s.ptr, @intCast(s.len));
     }
 
-    fn blockDetail(self: *TraceProbe, ty: c.MD_BLOCKTYPE, detail: ?*anyopaque) void {
-        const d = detail orelse {
-            self.raw(" <no-detail>", .{});
-            return;
-        };
-        switch (ty) {
-            c.MD_BLOCK_UL => {
-                const x: *c.MD_BLOCK_UL_DETAIL = @ptrCast(@alignCast(d));
+    /// The pre-4c emission path signalled "this block carries no detail" two
+    /// different ways: a NULL pointer for DOC/THEAD/TBODY/TR, and a non-null
+    /// pointer into an unread union slot for QUOTE/HR/HTML/P/FRONTMATTER. The
+    /// union's `void` arms carry neither, so the two spellings below are a
+    /// purely cosmetic reproduction of that historical split — kept so the
+    /// golden trace stays byte-identical across the representation change.
+    fn blockDetail(self: *TraceProbe, detail: *const c.BlockDetail) void {
+        switch (detail.*) {
+            c.BlockType.doc, c.BlockType.thead, c.BlockType.tbody, c.BlockType.tr => self.raw(" <no-detail>", .{}),
+            c.BlockType.quote, c.BlockType.hr, c.BlockType.html, c.BlockType.p, c.BlockType.frontmatter => self.raw(" <detail:opaque>", .{}),
+            c.BlockType.ul => |x| {
                 self.raw(" is_tight={d} mark='{c}'", .{ @intFromBool(x.is_tight), x.mark });
             },
-            c.MD_BLOCK_OL => {
-                const x: *c.MD_BLOCK_OL_DETAIL = @ptrCast(@alignCast(d));
+            c.BlockType.ol => |x| {
                 self.raw(" start={d} is_tight={d} delim='{c}'", .{ x.start, @intFromBool(x.is_tight), x.mark_delimiter });
             },
-            c.MD_BLOCK_LI => {
-                const x: *c.MD_BLOCK_LI_DETAIL = @ptrCast(@alignCast(d));
+            c.BlockType.li => |x| {
                 self.raw(" is_task={d} task_mark='{c}' off={d}", .{ @intFromBool(x.is_task), if (x.task_mark == 0) @as(u8, '-') else x.task_mark, x.task_mark_offset });
             },
-            c.MD_BLOCK_H => {
-                const x: *c.MD_BLOCK_H_DETAIL = @ptrCast(@alignCast(d));
+            c.BlockType.h => |x| {
                 self.raw(" level={d}", .{x.level});
             },
-            c.MD_BLOCK_CODE => {
-                const x: *c.MD_BLOCK_CODE_DETAIL = @ptrCast(@alignCast(d));
+            c.BlockType.code => |x| {
                 self.attr("info", x.info);
                 self.attr("lang", x.lang);
                 self.raw(" fence='{c}'", .{if (x.fence_char == 0) @as(u8, '-') else x.fence_char});
@@ -1148,115 +1136,103 @@ const TraceProbe = struct {
                 }
                 self.raw("]", .{});
             },
-            c.MD_BLOCK_TABLE => {
-                const x: *c.MD_BLOCK_TABLE_DETAIL = @ptrCast(@alignCast(d));
+            c.BlockType.table => |x| {
                 self.raw(" cols={d} head_rows={d} body_rows={d}", .{ x.col_count, x.head_row_count, x.body_row_count });
             },
-            c.MD_BLOCK_TH, c.MD_BLOCK_TD => {
-                const x: *c.MD_BLOCK_TD_DETAIL = @ptrCast(@alignCast(d));
-                self.raw(" align={d}", .{x.@"align"});
+            c.BlockType.th, c.BlockType.td => |x| {
+                self.raw(" align={d}", .{@intFromEnum(x.@"align")});
             },
-            c.MD_BLOCK_COMPONENT => {
-                const x: *c.MD_BLOCK_COMPONENT_DETAIL = @ptrCast(@alignCast(d));
+            c.BlockType.component => |x| {
                 self.attr("tag", x.tag_name);
                 self.rawStr("props", x.raw_props);
                 self.rawStr("title", x.title);
             },
-            c.MD_BLOCK_TEMPLATE => {
-                const x: *c.MD_BLOCK_TEMPLATE_DETAIL = @ptrCast(@alignCast(d));
+            c.BlockType.template => |x| {
                 self.attr("name", x.name);
             },
-            c.MD_BLOCK_ALERT => {
-                const x: *c.MD_BLOCK_ALERT_DETAIL = @ptrCast(@alignCast(d));
+            c.BlockType.alert => |x| {
                 self.attr("type", x.type_name);
             },
-            else => self.raw(" <detail:opaque>", .{}),
         }
     }
 
-    fn spanDetail(self: *TraceProbe, ty: c.MD_SPANTYPE, detail: ?*anyopaque) void {
-        const d = detail orelse {
-            self.raw(" <no-detail>", .{});
-            return;
-        };
-        switch (ty) {
-            c.MD_SPAN_A => {
-                const x: *c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(d));
+    fn spanDetail(self: *TraceProbe, detail: *const c.SpanDetail) void {
+        switch (detail.*) {
+            // The two math spans never carried a detail (see blockDetail's note
+            // on the historical NULL-pointer spelling).
+            c.SpanType.latexmath, c.SpanType.latexmath_display => self.raw(" <no-detail>", .{}),
+            c.SpanType.a => |x| {
                 self.attr("href", x.href);
                 self.attr("title", x.title);
                 self.rawStr("attrs", x.raw_attrs);
                 self.raw(" autolink={d}", .{@intFromBool(x.is_autolink)});
             },
-            c.MD_SPAN_IMG => {
-                const x: *c.MD_SPAN_IMG_DETAIL = @ptrCast(@alignCast(d));
+            c.SpanType.img => |x| {
                 self.attr("src", x.src);
                 self.attr("title", x.title);
                 self.rawStr("attrs", x.raw_attrs);
             },
-            c.MD_SPAN_WIKILINK => {
-                const x: *c.MD_SPAN_WIKILINK_DETAIL = @ptrCast(@alignCast(d));
+            c.SpanType.wikilink => |x| {
                 self.attr("target", x.target);
             },
-            c.MD_SPAN_COMPONENT => {
-                const x: *c.MD_SPAN_COMPONENT_DETAIL = @ptrCast(@alignCast(d));
+            c.SpanType.component => |x| {
                 self.attr("tag", x.tag_name);
                 self.rawStr("props", x.raw_props);
             },
-            c.MD_SPAN_SPAN => {
-                const x: *c.MD_SPAN_SPAN_DETAIL = @ptrCast(@alignCast(d));
+            c.SpanType.span => |x| {
                 self.rawStr("attrs", x.raw_attrs);
             },
-            // em/strong/code/del/u carry MD_SPAN_ATTRS_DETAIL (or null).
-            else => {
-                const x: *c.MD_SPAN_ATTRS_DETAIL = @ptrCast(@alignCast(d));
-                self.rawStr("attrs", x.raw_attrs);
+            // em/strong/code/del/u carry SpanAttrsDetail; an empty raw_attrs is
+            // the old "NULL detail" case.
+            c.SpanType.em, c.SpanType.strong, c.SpanType.code, c.SpanType.del, c.SpanType.u => |x| {
+                if (x.raw_attrs.len == 0) self.raw(" <no-detail>", .{}) else self.rawStr("attrs", x.raw_attrs);
             },
         }
     }
 
-    fn enterBlock(ty: c.MD_BLOCKTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+    fn enterBlock(detail: *const c.BlockDetail, ud: ?*anyopaque) c.CallbackResult {
         const self: *TraceProbe = @ptrCast(@alignCast(ud.?));
         self.indent();
-        self.raw("+block {s}", .{blockTypeName(ty)});
-        self.blockDetail(ty, detail);
+        self.raw("+block {s}", .{blockTypeName(std.meta.activeTag(detail.*))});
+        self.blockDetail(detail);
         self.raw("\n", .{});
         self.depth += 1;
         return 0;
     }
-    fn leaveBlock(ty: c.MD_BLOCKTYPE, _: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+    fn leaveBlock(detail: *const c.BlockDetail, ud: ?*anyopaque) c.CallbackResult {
         const self: *TraceProbe = @ptrCast(@alignCast(ud.?));
         if (self.depth > 0) self.depth -= 1;
         self.indent();
-        self.raw("-block {s}\n", .{blockTypeName(ty)});
+        self.raw("-block {s}\n", .{blockTypeName(std.meta.activeTag(detail.*))});
         return 0;
     }
-    fn enterSpan(ty: c.MD_SPANTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+    fn enterSpan(detail: *const c.SpanDetail, ud: ?*anyopaque) c.CallbackResult {
         const self: *TraceProbe = @ptrCast(@alignCast(ud.?));
         self.indent();
-        self.raw("+span {s}", .{spanTypeName(ty)});
-        self.spanDetail(ty, detail);
+        self.raw("+span {s}", .{spanTypeName(std.meta.activeTag(detail.*))});
+        self.spanDetail(detail);
         self.raw("\n", .{});
         self.depth += 1;
         return 0;
     }
-    fn leaveSpan(ty: c.MD_SPANTYPE, _: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+    fn leaveSpan(detail: *const c.SpanDetail, ud: ?*anyopaque) c.CallbackResult {
         const self: *TraceProbe = @ptrCast(@alignCast(ud.?));
         if (self.depth > 0) self.depth -= 1;
         self.indent();
-        self.raw("-span {s}\n", .{spanTypeName(ty)});
+        self.raw("-span {s}\n", .{spanTypeName(std.meta.activeTag(detail.*))});
         return 0;
     }
-    fn textCb(ty: c.MD_TEXTTYPE, str: [*c]const CHAR, size: SZ, ud: ?*anyopaque) callconv(.c) c_int {
+    fn textCb(ty: c.TextType, str: []const CHAR, ud: ?*anyopaque) c.CallbackResult {
         const self: *TraceProbe = @ptrCast(@alignCast(ud.?));
         self.indent();
         self.raw("text {s} ", .{textTypeName(ty)});
-        self.quoted(@ptrCast(str), size);
+        self.quoted(str.ptr, @intCast(str.len));
         self.raw("\n", .{});
         return 0;
     }
 
-    fn parser() c.MD_PARSER {
-        var p: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER);
+    fn parser() c.Parser {
+        var p: c.Parser = .{};
         p.flags = c.MD_DIALECT_ALL;
         p.enter_block = TraceProbe.enterBlock;
         p.leave_block = TraceProbe.leaveBlock;

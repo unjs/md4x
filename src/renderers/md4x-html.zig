@@ -402,7 +402,7 @@ fn render_entity(r: *MD_HTML, text: [*]const u8, size: c.MD_SIZE, fn_append: App
     fn_append(r, text, size);
 }
 
-fn render_attribute(r: *MD_HTML, attr: *const c.MD_ATTRIBUTE, fn_append: AppendFn) void {
+fn render_attribute(r: *MD_HTML, attr: *const c.Attribute, fn_append: AppendFn) void {
     const total = attr.size();
     var i: usize = 0;
     while (i < attr.substr_types.len and attr.substr_offsets[i] < total) : (i += 1) {
@@ -412,14 +412,14 @@ fn render_attribute(r: *MD_HTML, attr: *const c.MD_ATTRIBUTE, fn_append: AppendF
         const text: [*]const u8 = attr.text.ptr + off;
 
         switch (ttype) {
-            c.MD_TEXT_NULLCHAR => render_utf8_codepoint(r, 0x0000, render_verbatim),
-            c.MD_TEXT_ENTITY => render_entity(r, text, size, fn_append),
+            c.TextType.nullchar => render_utf8_codepoint(r, 0x0000, render_verbatim),
+            c.TextType.entity => render_entity(r, text, size, fn_append),
             else => fn_append(r, text, size),
         }
     }
 }
 
-fn render_open_ol_block(r: *MD_HTML, det: *const c.MD_BLOCK_OL_DETAIL) void {
+fn render_open_ol_block(r: *MD_HTML, det: *const c.BlockOlDetail) void {
     if (det.start == 1) {
         render_verbatim_lit(r, "<ol>\n");
         return;
@@ -430,7 +430,7 @@ fn render_open_ol_block(r: *MD_HTML, det: *const c.MD_BLOCK_OL_DETAIL) void {
     render_verbatim(r, s.ptr, @intCast(s.len));
 }
 
-fn render_open_li_block(r: *MD_HTML, det: *const c.MD_BLOCK_LI_DETAIL) void {
+fn render_open_li_block(r: *MD_HTML, det: *const c.BlockLiDetail) void {
     if (det.is_task) {
         render_verbatim_lit(r, "<li class=\"task-list-item\">" ++
             "<input type=\"checkbox\" class=\"task-list-item-checkbox\" disabled");
@@ -442,7 +442,7 @@ fn render_open_li_block(r: *MD_HTML, det: *const c.MD_BLOCK_LI_DETAIL) void {
     }
 }
 
-fn render_open_code_block(r: *MD_HTML, det: *const c.MD_BLOCK_CODE_DETAIL) void {
+fn render_open_code_block(r: *MD_HTML, det: *const c.BlockCodeDetail) void {
     render_verbatim_lit(r, "<pre><code");
 
     // If known, output the HTML 5 attribute class="language-LANGNAME".
@@ -455,19 +455,19 @@ fn render_open_code_block(r: *MD_HTML, det: *const c.MD_BLOCK_CODE_DETAIL) void 
     render_verbatim_lit(r, ">");
 }
 
-fn render_open_td_block(r: *MD_HTML, comptime cell_type: []const u8, det: *const c.MD_BLOCK_TD_DETAIL) void {
+fn render_open_td_block(r: *MD_HTML, comptime cell_type: []const u8, det: *const c.BlockTdDetail) void {
     render_verbatim_lit(r, "<");
     render_verbatim_lit(r, cell_type);
 
     switch (det.@"align") {
-        c.MD_ALIGN_LEFT => render_verbatim_lit(r, " align=\"left\">"),
-        c.MD_ALIGN_CENTER => render_verbatim_lit(r, " align=\"center\">"),
-        c.MD_ALIGN_RIGHT => render_verbatim_lit(r, " align=\"right\">"),
+        c.Align.left => render_verbatim_lit(r, " align=\"left\">"),
+        c.Align.center => render_verbatim_lit(r, " align=\"center\">"),
+        c.Align.right => render_verbatim_lit(r, " align=\"right\">"),
         else => render_verbatim_lit(r, ">"),
     }
 }
 
-fn render_open_a_span(r: *MD_HTML, det: *const c.MD_SPAN_A_DETAIL) void {
+fn render_open_a_span(r: *MD_HTML, det: *const c.SpanADetail) void {
     render_verbatim_lit(r, "<a href=\"");
     render_attribute(r, &det.href, render_url_escaped);
 
@@ -482,14 +482,14 @@ fn render_open_a_span(r: *MD_HTML, det: *const c.MD_SPAN_A_DETAIL) void {
     render_verbatim_lit(r, ">");
 }
 
-fn render_open_img_span(r: *MD_HTML, det: *const c.MD_SPAN_IMG_DETAIL) void {
+fn render_open_img_span(r: *MD_HTML, det: *const c.SpanImgDetail) void {
     render_verbatim_lit(r, "<img src=\"");
     render_attribute(r, &det.src, render_url_escaped);
 
     render_verbatim_lit(r, "\" alt=\"");
 }
 
-fn render_close_img_span(r: *MD_HTML, det: *const c.MD_SPAN_IMG_DETAIL) void {
+fn render_close_img_span(r: *MD_HTML, det: *const c.SpanImgDetail) void {
     if (det.title.text.len > 0) {
         render_verbatim_lit(r, "\" title=\"");
         render_attribute(r, &det.title, render_html_escaped);
@@ -501,7 +501,7 @@ fn render_close_img_span(r: *MD_HTML, det: *const c.MD_SPAN_IMG_DETAIL) void {
     render_verbatim_lit(r, ">");
 }
 
-fn render_open_wikilink_span(r: *MD_HTML, det: *const c.MD_SPAN_WIKILINK_DETAIL) void {
+fn render_open_wikilink_span(r: *MD_HTML, det: *const c.SpanWikilinkDetail) void {
     render_verbatim_lit(r, "<x-wikilink data-target=\"");
     render_attribute(r, &det.target, render_html_escaped);
 
@@ -550,23 +550,23 @@ fn render_html_component_props(r: *MD_HTML, raw: [*]const u8, size: c.MD_SIZE) v
 }
 
 // Render opening tag for a simple span with optional trailing attrs.
-fn render_open_tag_with_attrs(r: *MD_HTML, comptime tag: []const u8, det: ?*const c.MD_SPAN_ATTRS_DETAIL) void {
+fn render_open_tag_with_attrs(r: *MD_HTML, comptime tag: []const u8, det: *const c.SpanAttrsDetail) void {
     render_verbatim_lit(r, "<");
     render_verbatim_lit(r, tag);
-    if (det != null and det.?.raw_attrs.len > 0)
-        render_html_component_props(r, det.?.raw_attrs.ptr, @intCast(det.?.raw_attrs.len));
+    if (det.raw_attrs.len > 0)
+        render_html_component_props(r, det.raw_attrs.ptr, @intCast(det.raw_attrs.len));
     render_verbatim_lit(r, ">");
 }
 
 // Render opening tag for [text]{attrs} span.
-fn render_open_span_span(r: *MD_HTML, det: ?*const c.MD_SPAN_SPAN_DETAIL) void {
+fn render_open_span_span(r: *MD_HTML, det: *const c.SpanSpanDetail) void {
     render_verbatim_lit(r, "<span");
-    if (det != null and det.?.raw_attrs.len > 0)
-        render_html_component_props(r, det.?.raw_attrs.ptr, @intCast(det.?.raw_attrs.len));
+    if (det.raw_attrs.len > 0)
+        render_html_component_props(r, det.raw_attrs.ptr, @intCast(det.raw_attrs.len));
     render_verbatim_lit(r, ">");
 }
 
-fn render_open_component_span(r: *MD_HTML, det: *const c.MD_SPAN_COMPONENT_DETAIL) void {
+fn render_open_component_span(r: *MD_HTML, det: *const c.SpanComponentDetail) void {
     render_verbatim_lit(r, "<");
     render_attribute(r, &det.tag_name, render_html_escaped);
     if (det.raw_props.len > 0)
@@ -574,7 +574,7 @@ fn render_open_component_span(r: *MD_HTML, det: *const c.MD_SPAN_COMPONENT_DETAI
     render_verbatim_lit(r, ">");
 }
 
-fn render_close_component_span(r: *MD_HTML, det: *const c.MD_SPAN_COMPONENT_DETAIL) void {
+fn render_close_component_span(r: *MD_HTML, det: *const c.SpanComponentDetail) void {
     render_verbatim_lit(r, "</");
     render_attribute(r, &det.tag_name, render_html_escaped);
     render_verbatim_lit(r, ">");
@@ -699,7 +699,7 @@ fn comp_fm_flush_tag(r: *MD_HTML) void {
     r.comp_fm_capturing = 0;
 }
 
-fn render_open_block_component(r: *MD_HTML, det: *const c.MD_BLOCK_COMPONENT_DETAIL) void {
+fn render_open_block_component(r: *MD_HTML, det: *const c.BlockComponentDetail) void {
     // Buffer the open tag (without closing ">") so we can append
     // frontmatter YAML attributes if a frontmatter block follows.
     r.comp_fm_tag_size = 0;
@@ -749,7 +749,7 @@ fn render_open_block_component(r: *MD_HTML, det: *const c.MD_BLOCK_COMPONENT_DET
     r.comp_fm_pending = 1;
 }
 
-fn render_close_block_component(r: *MD_HTML, det: *const c.MD_BLOCK_COMPONENT_DETAIL) void {
+fn render_close_block_component(r: *MD_HTML, det: *const c.BlockComponentDetail) void {
     // Flush pending open tag if it was never flushed (empty component).
     if (r.comp_fm_pending != 0)
         comp_fm_flush_tag(r);
@@ -867,7 +867,7 @@ fn render_code_meta_json(r: *MD_HTML) void {
     out.?("]", 1, ud);
 }
 
-fn render_open_alert_block(r: *MD_HTML, det: *const c.MD_BLOCK_ALERT_DETAIL) void {
+fn render_open_alert_block(r: *MD_HTML, det: *const c.BlockAlertDetail) void {
     render_verbatim_lit(r, "<blockquote class=\"alert alert-");
     // Lowercase the type name for the CSS class.
     if (det.type_name.text.len > 0) {
@@ -1063,12 +1063,13 @@ fn ensure_head_emitted(r: *MD_HTML) void {
 // ***  HTML renderer implementation  ***
 // **************************************
 
-fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.CallbackResult {
     const head = [_][]const u8{ "<h1>", "<h2>", "<h3>", "<h4>", "<h5>", "<h6>" };
     const r: *MD_HTML = @ptrCast(@alignCast(userdata.?));
+    const block_type = std.meta.activeTag(detail.*);
 
     // Frontmatter: always suppress, capture text for full-HTML or component props.
-    if (block_type == c.MD_BLOCK_FRONTMATTER) {
+    if (block_type == c.BlockType.frontmatter) {
         r.in_frontmatter = 1;
         if (r.comp_fm_pending != 0) {
             r.comp_fm_capturing = 1;
@@ -1078,27 +1079,25 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
 
     // If a component tag is pending and the next block is not frontmatter,
     // flush the buffered tag immediately.
-    if (r.comp_fm_pending != 0 and block_type != c.MD_BLOCK_FRONTMATTER) {
+    if (r.comp_fm_pending != 0 and block_type != c.BlockType.frontmatter) {
         comp_fm_flush_tag(r);
     }
 
     // In full-HTML mode, emit <head> before first body content.
-    if ((r.flags & MD_HTML_FLAG_FULL_HTML != 0) and block_type != c.MD_BLOCK_DOC)
+    if ((r.flags & MD_HTML_FLAG_FULL_HTML != 0) and block_type != c.BlockType.doc)
         ensure_head_emitted(r);
 
-    switch (block_type) {
-        c.MD_BLOCK_DOC => {}, // noop
-        c.MD_BLOCK_QUOTE => render_verbatim_lit(r, "<blockquote>\n"),
-        c.MD_BLOCK_UL => render_verbatim_lit(r, "<ul>\n"),
-        c.MD_BLOCK_OL => render_open_ol_block(r, @ptrCast(@alignCast(detail.?))),
-        c.MD_BLOCK_LI => render_open_li_block(r, @ptrCast(@alignCast(detail.?))),
-        c.MD_BLOCK_HR => render_verbatim_lit(r, "<hr>\n"),
-        c.MD_BLOCK_H => {
-            const det: *const c.MD_BLOCK_H_DETAIL = @ptrCast(@alignCast(detail.?));
-            render_verbatim_lit_runtime(r, head[det.level - 1]);
+    switch (detail.*) {
+        .doc => {}, // noop
+        .quote => render_verbatim_lit(r, "<blockquote>\n"),
+        .ul => render_verbatim_lit(r, "<ul>\n"),
+        .ol => |*d| render_open_ol_block(r, d),
+        .li => |*d| render_open_li_block(r, d),
+        .hr => render_verbatim_lit(r, "<hr>\n"),
+        .h => |*d| {
+            render_verbatim_lit_runtime(r, head[d.level - 1]);
         },
-        c.MD_BLOCK_CODE => {
-            const det: *const c.MD_BLOCK_CODE_DETAIL = @ptrCast(@alignCast(detail.?));
+        .code => |*det| {
             render_open_code_block(r, det);
             if (r.flags & MD_HTML_FLAG_CODE_META != 0) {
                 const meta = code_meta_push(r);
@@ -1129,26 +1128,25 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
                 }
             }
         },
-        c.MD_BLOCK_HTML => {}, // noop
-        c.MD_BLOCK_P => render_verbatim_lit(r, "<p>"),
-        c.MD_BLOCK_TABLE => render_verbatim_lit(r, "<table>\n"),
-        c.MD_BLOCK_THEAD => render_verbatim_lit(r, "<thead>\n"),
-        c.MD_BLOCK_TBODY => render_verbatim_lit(r, "<tbody>\n"),
-        c.MD_BLOCK_TR => render_verbatim_lit(r, "<tr>\n"),
-        c.MD_BLOCK_TH => render_open_td_block(r, "th", @ptrCast(@alignCast(detail.?))),
-        c.MD_BLOCK_TD => render_open_td_block(r, "td", @ptrCast(@alignCast(detail.?))),
-        c.MD_BLOCK_COMPONENT => {
+        .html => {}, // noop
+        .p => render_verbatim_lit(r, "<p>"),
+        .table => render_verbatim_lit(r, "<table>\n"),
+        .thead => render_verbatim_lit(r, "<thead>\n"),
+        .tbody => render_verbatim_lit(r, "<tbody>\n"),
+        .tr => render_verbatim_lit(r, "<tr>\n"),
+        .th => |*d| render_open_td_block(r, "th", d),
+        .td => |*d| render_open_td_block(r, "td", d),
+        .component => |*d| {
             r.component_nesting += 1;
-            render_open_block_component(r, @ptrCast(@alignCast(detail.?)));
+            render_open_block_component(r, d);
         },
-        c.MD_BLOCK_ALERT => render_open_alert_block(r, @ptrCast(@alignCast(detail.?))),
-        c.MD_BLOCK_TEMPLATE => {
-            const det: *const c.MD_BLOCK_TEMPLATE_DETAIL = @ptrCast(@alignCast(detail.?));
+        .alert => |*d| render_open_alert_block(r, d),
+        .template => |*d| {
             render_verbatim_lit(r, "<template name=\"");
-            render_attribute(r, &det.name, render_html_escaped);
+            render_attribute(r, &d.name, render_html_escaped);
             render_verbatim_lit(r, "\">\n");
         },
-        else => {},
+        .frontmatter => {},
     }
 
     return 0;
@@ -1159,12 +1157,13 @@ fn render_verbatim_lit_runtime(r: *MD_HTML, lit: []const u8) void {
     render_verbatim(r, lit.ptr, @intCast(lit.len));
 }
 
-fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.CallbackResult {
     const head = [_][]const u8{ "</h1>\n", "</h2>\n", "</h3>\n", "</h4>\n", "</h5>\n", "</h6>\n" };
     const r: *MD_HTML = @ptrCast(@alignCast(userdata.?));
+    const block_type = std.meta.activeTag(detail.*);
 
     // Frontmatter: always suppress.
-    if (block_type == c.MD_BLOCK_FRONTMATTER) {
+    if (block_type == c.BlockType.frontmatter) {
         r.in_frontmatter = 0;
         if (r.comp_fm_capturing != 0) {
             // Component frontmatter done — flush the buffered tag with YAML attrs.
@@ -1173,23 +1172,22 @@ fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
         return 0;
     }
 
-    switch (block_type) {
-        c.MD_BLOCK_DOC => {
+    switch (detail.*) {
+        .doc => {
             if (r.flags & MD_HTML_FLAG_FULL_HTML != 0) {
                 ensure_head_emitted(r);
                 render_verbatim_lit(r, "</body>\n</html>\n");
             }
         },
-        c.MD_BLOCK_QUOTE => render_verbatim_lit(r, "</blockquote>\n"),
-        c.MD_BLOCK_UL => render_verbatim_lit(r, "</ul>\n"),
-        c.MD_BLOCK_OL => render_verbatim_lit(r, "</ol>\n"),
-        c.MD_BLOCK_LI => render_verbatim_lit(r, "</li>\n"),
-        c.MD_BLOCK_HR => {}, // noop
-        c.MD_BLOCK_H => {
-            const det: *const c.MD_BLOCK_H_DETAIL = @ptrCast(@alignCast(detail.?));
-            render_verbatim_lit_runtime(r, head[det.level - 1]);
+        .quote => render_verbatim_lit(r, "</blockquote>\n"),
+        .ul => render_verbatim_lit(r, "</ul>\n"),
+        .ol => render_verbatim_lit(r, "</ol>\n"),
+        .li => render_verbatim_lit(r, "</li>\n"),
+        .hr => {}, // noop
+        .h => |*d| {
+            render_verbatim_lit_runtime(r, head[d.level - 1]);
         },
-        c.MD_BLOCK_CODE => {
+        .code => {
             if ((r.flags & MD_HTML_FLAG_CODE_META != 0) and r.in_code_block != 0) {
                 r.code_blocks.?[@intCast(r.n_code_blocks)].end = r.output_offset;
                 r.n_code_blocks += 1;
@@ -1197,108 +1195,82 @@ fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             }
             render_verbatim_lit(r, "</code></pre>\n");
         },
-        c.MD_BLOCK_HTML => {}, // noop
-        c.MD_BLOCK_P => render_verbatim_lit(r, "</p>\n"),
-        c.MD_BLOCK_TABLE => render_verbatim_lit(r, "</table>\n"),
-        c.MD_BLOCK_THEAD => render_verbatim_lit(r, "</thead>\n"),
-        c.MD_BLOCK_TBODY => render_verbatim_lit(r, "</tbody>\n"),
-        c.MD_BLOCK_TR => render_verbatim_lit(r, "</tr>\n"),
-        c.MD_BLOCK_TH => render_verbatim_lit(r, "</th>\n"),
-        c.MD_BLOCK_TD => render_verbatim_lit(r, "</td>\n"),
-        c.MD_BLOCK_COMPONENT => {
+        .html => {}, // noop
+        .p => render_verbatim_lit(r, "</p>\n"),
+        .table => render_verbatim_lit(r, "</table>\n"),
+        .thead => render_verbatim_lit(r, "</thead>\n"),
+        .tbody => render_verbatim_lit(r, "</tbody>\n"),
+        .tr => render_verbatim_lit(r, "</tr>\n"),
+        .th => render_verbatim_lit(r, "</th>\n"),
+        .td => render_verbatim_lit(r, "</td>\n"),
+        .component => |*d| {
             r.component_nesting -= 1;
-            render_close_block_component(r, @ptrCast(@alignCast(detail.?)));
+            render_close_block_component(r, d);
         },
-        c.MD_BLOCK_ALERT => render_verbatim_lit(r, "</blockquote>\n"),
-        c.MD_BLOCK_TEMPLATE => render_verbatim_lit(r, "</template>\n"),
-        else => {},
+        .alert => render_verbatim_lit(r, "</blockquote>\n"),
+        .template => render_verbatim_lit(r, "</template>\n"),
+        .frontmatter => {},
     }
 
     return 0;
 }
 
-fn enter_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn enter_span_callback(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_HTML = @ptrCast(@alignCast(userdata.?));
     const inside_img = (r.image_nesting_level > 0);
 
-    if (span_type == c.MD_SPAN_IMG)
+    if (detail.* == .img)
         r.image_nesting_level += 1;
     if (inside_img)
         return 0;
 
-    switch (span_type) {
-        c.MD_SPAN_EM => {
-            if (detail != null)
-                render_open_tag_with_attrs(r, "em", @ptrCast(@alignCast(detail)))
-            else
-                render_verbatim_lit(r, "<em>");
-        },
-        c.MD_SPAN_STRONG => {
-            if (detail != null)
-                render_open_tag_with_attrs(r, "strong", @ptrCast(@alignCast(detail)))
-            else
-                render_verbatim_lit(r, "<strong>");
-        },
-        c.MD_SPAN_U => {
-            if (detail != null)
-                render_open_tag_with_attrs(r, "u", @ptrCast(@alignCast(detail)))
-            else
-                render_verbatim_lit(r, "<u>");
-        },
-        c.MD_SPAN_A => render_open_a_span(r, @ptrCast(@alignCast(detail.?))),
-        c.MD_SPAN_IMG => render_open_img_span(r, @ptrCast(@alignCast(detail.?))),
-        c.MD_SPAN_CODE => {
-            if (detail != null)
-                render_open_tag_with_attrs(r, "code", @ptrCast(@alignCast(detail)))
-            else
-                render_verbatim_lit(r, "<code>");
-        },
-        c.MD_SPAN_DEL => {
-            if (detail != null)
-                render_open_tag_with_attrs(r, "del", @ptrCast(@alignCast(detail)))
-            else
-                render_verbatim_lit(r, "<del>");
-        },
-        c.MD_SPAN_LATEXMATH => render_verbatim_lit(r, "<x-equation>"),
-        c.MD_SPAN_LATEXMATH_DISPLAY => render_verbatim_lit(r, "<x-equation type=\"display\">"),
-        c.MD_SPAN_WIKILINK => render_open_wikilink_span(r, @ptrCast(@alignCast(detail.?))),
-        c.MD_SPAN_COMPONENT => render_open_component_span(r, @ptrCast(@alignCast(detail.?))),
-        c.MD_SPAN_SPAN => render_open_span_span(r, @ptrCast(@alignCast(detail))),
-        else => {},
+    switch (detail.*) {
+        .em => |*d| render_open_tag_with_attrs(r, "em", d),
+        .strong => |*d| render_open_tag_with_attrs(r, "strong", d),
+        .u => |*d| render_open_tag_with_attrs(r, "u", d),
+        .a => |*d| render_open_a_span(r, d),
+        .img => |*d| render_open_img_span(r, d),
+        .code => |*d| render_open_tag_with_attrs(r, "code", d),
+        .del => |*d| render_open_tag_with_attrs(r, "del", d),
+        .latexmath => render_verbatim_lit(r, "<x-equation>"),
+        .latexmath_display => render_verbatim_lit(r, "<x-equation type=\"display\">"),
+        .wikilink => |*d| render_open_wikilink_span(r, d),
+        .component => |*d| render_open_component_span(r, d),
+        .span => |*d| render_open_span_span(r, d),
     }
 
     return 0;
 }
 
-fn leave_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+fn leave_span_callback(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_HTML = @ptrCast(@alignCast(userdata.?));
 
-    if (span_type == c.MD_SPAN_IMG)
+    if (detail.* == .img)
         r.image_nesting_level -= 1;
     if (r.image_nesting_level > 0)
         return 0;
 
-    switch (span_type) {
-        c.MD_SPAN_EM => render_verbatim_lit(r, "</em>"),
-        c.MD_SPAN_STRONG => render_verbatim_lit(r, "</strong>"),
-        c.MD_SPAN_U => render_verbatim_lit(r, "</u>"),
-        c.MD_SPAN_A => render_verbatim_lit(r, "</a>"),
-        c.MD_SPAN_IMG => render_close_img_span(r, @ptrCast(@alignCast(detail.?))),
-        c.MD_SPAN_CODE => render_verbatim_lit(r, "</code>"),
-        c.MD_SPAN_DEL => render_verbatim_lit(r, "</del>"),
-        c.MD_SPAN_LATEXMATH, c.MD_SPAN_LATEXMATH_DISPLAY => render_verbatim_lit(r, "</x-equation>"),
-        c.MD_SPAN_WIKILINK => render_verbatim_lit(r, "</x-wikilink>"),
-        c.MD_SPAN_COMPONENT => render_close_component_span(r, @ptrCast(@alignCast(detail.?))),
-        c.MD_SPAN_SPAN => render_verbatim_lit(r, "</span>"),
-        else => {},
+    switch (detail.*) {
+        .em => render_verbatim_lit(r, "</em>"),
+        .strong => render_verbatim_lit(r, "</strong>"),
+        .u => render_verbatim_lit(r, "</u>"),
+        .a => render_verbatim_lit(r, "</a>"),
+        .img => |*d| render_close_img_span(r, d),
+        .code => render_verbatim_lit(r, "</code>"),
+        .del => render_verbatim_lit(r, "</del>"),
+        .latexmath, .latexmath_display => render_verbatim_lit(r, "</x-equation>"),
+        .wikilink => render_verbatim_lit(r, "</x-wikilink>"),
+        .component => |*d| render_close_component_span(r, d),
+        .span => render_verbatim_lit(r, "</span>"),
     }
 
     return 0;
 }
 
-fn text_callback(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
+fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata: ?*anyopaque) c.CallbackResult {
     const r: *MD_HTML = @ptrCast(@alignCast(userdata.?));
-    const text: [*]const u8 = @ptrCast(text_in);
+    const text: [*]const u8 = text_slice.ptr;
+    const size: c.MD_SIZE = @intCast(text_slice.len);
 
     // Frontmatter text: capture for full-HTML or component frontmatter, always suppress output.
     if (r.in_frontmatter != 0) {
@@ -1310,21 +1282,21 @@ fn text_callback(text_type: c.MD_TEXTTYPE, text_in: [*c]const c.MD_CHAR, size: c
     }
 
     switch (text_type) {
-        c.MD_TEXT_NULLCHAR => render_utf8_codepoint(r, 0x0000, render_verbatim),
-        c.MD_TEXT_BR => render_verbatim_lit_runtime(r, if (r.image_nesting_level == 0) "<br>\n" else " "),
-        c.MD_TEXT_SOFTBR => render_verbatim_lit_runtime(r, if (r.image_nesting_level == 0) "\n" else " "),
-        c.MD_TEXT_HTML => render_verbatim(r, text, size),
-        c.MD_TEXT_ENTITY => render_entity(r, text, size, render_html_escaped),
+        c.TextType.nullchar => render_utf8_codepoint(r, 0x0000, render_verbatim),
+        c.TextType.br => render_verbatim_lit_runtime(r, if (r.image_nesting_level == 0) "<br>\n" else " "),
+        c.TextType.softbr => render_verbatim_lit_runtime(r, if (r.image_nesting_level == 0) "\n" else " "),
+        c.TextType.html => render_verbatim(r, text, size),
+        c.TextType.entity => render_entity(r, text, size, render_html_escaped),
         else => render_html_escaped(r, text, size),
     }
 
     return 0;
 }
 
-fn debug_log_callback(msg: [*c]const u8, userdata: ?*anyopaque) callconv(.c) void {
+fn debug_log_callback(msg: []const u8, userdata: ?*anyopaque) void {
     const r: *MD_HTML = @ptrCast(@alignCast(userdata.?));
     if (r.flags & MD_HTML_FLAG_DEBUG != 0)
-        _ = sys.fprintf(sys.stderr, "MD4X: %s\n", msg);
+        _ = sys.fprintf(sys.stderr, "MD4X: %.*s\n", @as(c_int, @intCast(msg.len)), msg.ptr);
 }
 
 // **************************************
@@ -1413,7 +1385,7 @@ pub fn md_html_ex(
     render.flags = renderer_flags;
     render.opts = opts;
 
-    var parser: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER);
+    var parser: c.Parser = .{};
     parser.flags = parser_flags;
     parser.enter_block = enter_block_callback;
     parser.leave_block = leave_block_callback;
