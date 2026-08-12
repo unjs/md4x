@@ -3,10 +3,11 @@
 ## WASM Target
 
 ```sh
-zig build wasm                     # outputs packages/md4x/build/md4x.wasm (~324K)
+zig build wasm                     # packages/md4x/build/md4x.wasm       (ReleaseFast, ~310K)
+zig build wasm-small               # packages/md4x/build/md4x-small.wasm (ReleaseSmall, ~252K)
 ```
 
-Builds a `wasm32-wasi` WASM binary with exported functions. Uses `ReleaseFast` optimization (`pkg_optimize` in `build.zig`, shared with the NAPI targets). The WASM module requires minimal WASI imports (`fd_close`, `fd_seek`, `fd_write`, `proc_exit`) which can be stubbed for browser use.
+Builds a `wasm32-wasi` WASM binary with exported functions. `wasm` is the binary shipped as an asset and loaded by `md4x/wasm` (`ReleaseFast`, `pkg_optimize` in `build.zig`, shared with the NAPI targets); `wasm-small` is the `ReleaseSmall` variant inlined into the `md4x/standalone` bundle (it is excluded from the npm tarball, since it ships inside that module). The WASM module requires minimal WASI imports (`fd_close`, `fd_seek`, `fd_write`, `proc_exit`) which can be stubbed for browser use.
 
 > **Note on WASM performance:** The WASM target is built `ReleaseFast` (same as NAPI), but it is consistently slower than the native NAPI binding (roughly 3x on `renderToHtml`, 2x on `parseAST` for the medium fixture) due to the WebAssembly runtime plus the cost of copying input/output across the JS↔WASM memory boundary on every call. Renderer-side allocation optimizations (e.g. the AST arena, HTML output buffering) help the native path more than WASM, since wasm's linear-memory allocator has a different cost profile than the system `malloc`. Prefer NAPI where raw throughput matters; WASM is the portable fallback for non-Node environments.
 
@@ -36,6 +37,73 @@ const html = renderToHtml("# Hello"); // sync after init
 ```
 
 `init(opts?)` accepts an optional options object with a `wasm` property: `ArrayBuffer`, `Uint8Array`, `WebAssembly.Module`, `Response`, or `Promise<Response>`. When called with no arguments in Node.js, it reads the bundled `.wasm` file from disk. All render methods are **sync** after initialization. All extensions are enabled by default (`MD_DIALECT_ALL`).
+
+## Standalone Target (inlined WASM)
+
+`md4x/standalone` exposes the same WASM API from a **single, minified, dependency-free ES module** (`lib/standalone.mjs`, ~126 KB) with the binary embedded — gzipped, then [Z85](https://rfc.zeromq.org/spec/32/) encoded. No `.wasm` asset to fetch, resolve, or configure a bundler for, and no relative imports to follow. Useful for single-file bundles, edge runtimes, and environments without asset loading.
+
+```js
+import { init, renderToHtml } from "md4x/standalone";
+
+await init(); // decodes + inflates + instantiates the inlined binary (no options)
+
+const html = renderToHtml("# Hello");
+```
+
+It is also what `md4x` and `md4x/wasm` resolve to under the **`browser`** export condition, so browser bundlers pick it up with no configuration. Everything else (render functions, options, behavior) is identical to `md4x/wasm`: the bundle is built from the same `lib/wasm/common.mjs` source, inlined at build time. `init(opts?)` keeps the same signature — the embedded binary is used unless `opts.wasm` overrides it.
+
+**Encoding pipeline:** `md4x-small.wasm` (ReleaseSmall) → gzip (zlib level 9, build time) → Z85 → JS string literal.
+
+**Inflating at `init()`** takes the fastest available route:
+
+1. `process.getBuiltinModule("node:zlib").gunzipSync()` on Node/Bun/Deno — ~1 ms. This is a plain call, not an import, so bundlers never see a `node:zlib` specifier and the module stays dependency-free.
+2. `DecompressionStream("gzip")` otherwise (browsers, workers, older runtimes).
+
+If neither exists, `init()` throws a descriptive error pointing at `md4x/wasm`.
+
+Cold `init()`, measured on this repo's fixture (single run in a fresh process, AMD Ryzen 9 9950X3D):
+
+| Runtime | `DecompressionStream` | `node:zlib` |
+| ------- | --------------------: | ----------: |
+| Node 24 |                ~28 ms |     ~6.5 ms |
+| Bun 1.3 |                ~15 ms |    ~13.5 ms |
+
+The gap is **not** zlib throughput (inflating 96 KB → 294 KB takes ~1 ms either way) — it is first-call setup of the web-streams-to-zlib adapter (~27 ms on Node, ~10 ms on Bun). Bun's win is smaller because loading `node:zlib` itself costs ~7 ms there. Browser figures are not measured here; `DecompressionStream` is native in browsers and does not pay Node's adapter cost.
+
+Streaming the inflate directly into `WebAssembly.instantiateStreaming()` was measured and **did not help**: the payload is already in memory, so there is no download to overlap with, and compilation (~1–4 ms) is too small a fraction of cold init to hide behind decompression.
+
+Z85 encodes 4 bytes as 5 ASCII characters (**+25%** overhead, vs +33% for base64) and its alphabet contains no `"`, `'`, `\` or backtick, so the payload embeds verbatim in a JS string literal with no escaping.
+
+| Payload                                      |        Size |
+| -------------------------------------------- | ----------: |
+| `md4x.wasm` (ReleaseFast, raw)               |     ~302 KB |
+| `md4x-small.wasm` (ReleaseSmall, raw)        |     ~287 KB |
+| Z85 of raw                                   |     ~359 KB |
+| base64 of gzip                               |     ~126 KB |
+| **gzip + Z85 payload**                       | **~118 KB** |
+| **`lib/standalone.mjs`** (payload + runtime) | **~126 KB** |
+
+**Build (`scripts/build-standalone.ts`):** [rolldown](https://rolldown.rs/) bundles the entry, with the payload/decoder and the entry module supplied as **virtual modules** — so the ~118 KB Z85 string and the glue code never land in `lib/` as source. Real source (`lib/wasm/common.mjs`, `lib/_shared.mjs`) is bundled in from disk, then everything is minified into one file.
+
+| Module                | Kind    | Contents                                                                  |
+| --------------------- | ------- | ------------------------------------------------------------------------- |
+| `\0md4x:standalone`   | virtual | Entry — re-exports the renderers, defines `init()` (gunzip + instantiate) |
+| `\0md4x:z85`          | virtual | `z85Decode()` + the `WASM_GZIP_Z85` / `GZIP_SIZE` payload constants       |
+| `lib/wasm/common.mjs` | on disk | Shared render functions (same source as `md4x/wasm`)                      |
+| `lib/_shared.mjs`     | on disk | Highlighter/code-meta helpers                                             |
+
+Output files:
+
+| File                   | Description                                              |
+| ---------------------- | -------------------------------------------------------- |
+| `lib/standalone.mjs`   | **Generated** — minified single-file bundle (gitignored) |
+| `lib/standalone.d.mts` | TypeScript declarations (checked in)                     |
+
+```sh
+zig build wasm-small && bun scripts/build-standalone.ts   # or: bun run build:standalone
+```
+
+This runs in CI, in the release workflow, and in the package `prepack` script, so `lib/standalone.mjs` is always rebuilt from the freshly built binary before publish.
 
 ## NAPI Target (Node.js)
 
@@ -103,11 +171,14 @@ The JS loader (`lib/napi.mjs`) auto-detects the platform via `process.platform` 
 
 Configured in `packages/md4x/package.json` via `exports`:
 
-| Subpath       | Module                                           | Description                                  |
-| ------------- | ------------------------------------------------ | -------------------------------------------- |
-| `md4x` (bare) | `lib/napi.mjs` (node) / `lib/wasm.mjs` (default) | Auto-selects NAPI on Node.js, WASM elsewhere |
-| `md4x/wasm`   | `lib/wasm.mjs`                                   | WASM-based API (sync after `init()`)         |
-| `md4x/napi`   | `lib/napi.mjs`                                   | Sync NAPI-based API (ESM only)               |
+| Subpath           | Conditions (in order)                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `md4x` (bare)     | `node` → `lib/napi.mjs`, `unwasm` → `lib/wasm/unwasm.mjs`, `browser` → `lib/standalone.mjs`, else `lib/wasm/default.mjs` |
+| `md4x/wasm`       | `unwasm` → `lib/wasm/unwasm.mjs`, `browser` → `lib/standalone.mjs`, else `lib/wasm/default.mjs`                          |
+| `md4x/standalone` | `lib/standalone.mjs` (unconditional)                                                                                     |
+| `md4x/napi`       | `lib/napi.mjs`                                                                                                           |
+
+Conditions are matched in declaration order, so: Node.js keeps NAPI for the bare entry; an explicitly-enabled `unwasm` build keeps the unwasm module; browser bundlers (Vite, webpack, Rollup with `browser` on) get the self-contained `lib/standalone.mjs` with no `.wasm` asset to emit; everything else loads `build/md4x.wasm` from disk or over the network.
 
 All extensions (`MD_DIALECT_ALL`) are enabled by default. No parser/renderer flag configuration is exposed to JS consumers.
 

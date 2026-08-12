@@ -122,6 +122,19 @@ const html = renderToHtml("# Hello");
 
 `init()` accepts an optional options object with a `wasm` property (`ArrayBuffer`, `Response`, `WebAssembly.Module`, or `Promise<Response>`). When called with no arguments, it loads the bundled `.wasm` file automatically.
 
+#### Standalone (inlined WASM)
+
+A single, minified, dependency-free ES module (~126 KB) with the same API as `md4x/wasm` fully embeded into single chunk.
+
+```js
+import { init, renderToHtml } from "md4x/standalone";
+
+await init(); // inflates and instantiates the inlined binary
+const html = renderToHtml("# Hello");
+```
+
+This is also what `md4x` and `md4x/wasm` resolve to under the **`browser`** export condition, so browser bundlers get the self-contained module automatically (the explicit `unwasm` condition still wins where it is set).
+
 <details>
 <summary>Benchmarks</summary>
 

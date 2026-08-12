@@ -1,2 +1,4 @@
 packages/md4x/test/fixtures/
 website/dist/
+packages/md4x/build/
+packages/md4x/lib/standalone.mjs

@@ -1,6 +1,6 @@
 {
   "name": "md4x",
-  "version": "0.0.25",
+  "version": "0.0.26",
   "repository": "unjs/md4x",
   "license": "MIT",
   "type": "module",
@@ -8,17 +8,21 @@
     "./wasm": {
       "types": "./lib/wasm/index.d.mts",
       "unwasm": "./lib/wasm/unwasm.mjs",
+      "browser": "./lib/standalone.mjs",
       "default": "./lib/wasm/default.mjs"
+    },
+    "./standalone": {
+      "types": "./lib/standalone.d.mts",
+      "default": "./lib/standalone.mjs"
     },
     "./napi": "./lib/napi.mjs",
     "./build/md4x.wasm": "./build/md4x.wasm",
     ".": {
       "types": "./lib/types.d.mts",
       "node": "./lib/napi.mjs",
-      "default": {
-        "unwasm": "./lib/wasm/unwasm.mjs",
-        "default": "./lib/wasm/default.mjs"
-      }
+      "unwasm": "./lib/wasm/unwasm.mjs",
+      "browser": "./lib/standalone.mjs",
+      "default": "./lib/wasm/default.mjs"
     }
   },
   "types": "./lib/types.d.mts",
@@ -27,11 +31,12 @@
   },
   "files": [
     "build",
+    "!build/md4x-small.wasm",
     "lib",
     "README.md"
   ],
   "scripts": {
-    "prepack": "cd ../.. && zig build --verbose"
+    "prepack": "cd ../.. && zig build --verbose && zig build wasm && zig build wasm-small && bun scripts/build-standalone.ts"
   },
   "devDependencies": {
     "markdown-it": "^14.1.1",

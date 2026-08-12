@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "build": "zig build --verbose",
+    "build:standalone": "zig build wasm-small && bun scripts/build-standalone.ts",
     "dev": "cd website && bun run dev",
     "fmt": "prettier --write .",
     "vitest": "vitest",
@@ -23,6 +24,7 @@
     "node-api-headers": "^1.8.0",
     "prettier": "^3.8.1",
     "remend": "^1.2.2",
+    "rolldown": "^1.2.3",
     "vitest": "^4.0.18"
   },
   "packageManager": "bun@1.3.9"
