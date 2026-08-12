@@ -25,9 +25,6 @@ pub const MD_SIZE = c.MD_SIZE; // explicit alias used in a few signatures
 pub const SZ_MAX: SZ = std.math.maxInt(SZ);
 pub const OFF_MAX: OFF = std.math.maxInt(OFF);
 
-pub const TRUE: c_int = 1;
-pub const FALSE: c_int = 0;
-
 // ============================================================================
 //  Internal Types
 // ============================================================================
@@ -57,7 +54,7 @@ pub const MD_LINETYPE = enum {
 pub const MD_LINE_ANALYSIS = struct {
     type: MD_LINETYPE = .blank,
     data: c_uint = 0,
-    enforce_new_block: c_int = 0,
+    enforce_new_block: bool = false,
     beg: OFF = 0,
     end: OFF = 0,
     indent: c_uint = 0, // Indentation level.
@@ -131,9 +128,11 @@ pub const MD_BLOCK = extern struct {
 // `extern` so the compiler may lay out / pad the fields optimally.
 pub const MD_CONTAINER = struct {
     ch: CHAR = 0,
+    // NOTE: `is_loose` stays an integer — md_process_block() stores the raw
+    // masked `MD_BLOCK_LOOSE_LIST` bit (value 4) in it, so it is not two-state.
     is_loose: u8 = 0,
-    is_task: u8 = 0,
-    is_alert: u8 = 0,
+    is_task: bool = false,
+    is_alert: bool = false,
     start: c_uint = 0,
     mark_indent: c_uint = 0,
     contents_indent: c_uint = 0,
@@ -255,7 +254,7 @@ pub const MD_CTX = struct {
     userdata: ?*anyopaque = null,
 
     // When this is true, it allows some optimizations.
-    doc_ends_with_newline: c_int = 0,
+    doc_ends_with_newline: bool = false,
 
     // Helper temporary growing buffer.
     buffer: [*c]CHAR = null,
@@ -327,8 +326,8 @@ pub const MD_CTX = struct {
     code_fence_length: SZ = 0, // For checking closing fence length.
     html_block_type: c_int = 0, // For checking closing raw HTML condition.
     frontmatter_state: c_int = 0, // 0: looking for opener, 1: inside, 2: done/disabled
-    last_line_has_list_loosening_effect: c_int = 0,
-    last_list_item_starts_with_two_blank_lines: c_int = 0,
+    last_line_has_list_loosening_effect: bool = false,
+    last_list_item_starts_with_two_blank_lines: bool = false,
 
     // Block component info array. (PLAN 8.1: ArrayListUnmanaged.)
     block_component_info: std.ArrayListUnmanaged(MD_BLOCK_COMPONENT_INFO) = .empty,

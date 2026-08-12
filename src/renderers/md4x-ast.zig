@@ -172,8 +172,8 @@ const JsonNode = struct {
 
     detail: Detail = .{},
 
-    // Non-zero if the tag is heap-allocated (dynamic component tag).
-    tag_is_dynamic: c_int = 0,
+    // True if the tag is heap-allocated (dynamic component tag).
+    tag_is_dynamic: bool = false,
 
     // Raw inline attributes string from trailing {attrs}, or NULL.
     raw_attrs: ?[*:0]u8 = null,
@@ -415,7 +415,7 @@ fn jsonEnterBlock(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.Callbac
                 ctx.err = 1;
                 return -1;
             }
-            node.?.tag_is_dynamic = 1;
+            node.?.tag_is_dynamic = true;
             if (d.raw_props.len > 0) {
                 const dup = dupNts(d.raw_props.ptr, d.raw_props.len);
                 if (dup == null) {
@@ -454,7 +454,7 @@ fn jsonEnterBlock(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.Callbac
     const n = node.?;
 
     // Classify the tag once for fast dispatch later (dynamic components win).
-    if (n.tag_is_dynamic != 0) {
+    if (n.tag_is_dynamic) {
         n.tag_kind = .dynamic;
     } else switch (block_type) {
         .ul => n.tag_kind = .ul,
@@ -581,7 +581,7 @@ fn jsonEnterSpan(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.CallbackR
             ctx.err = 1;
             return -1;
         }
-        node.?.tag_is_dynamic = 1;
+        node.?.tag_is_dynamic = true;
         node.?.tag_kind = .dynamic;
         if (d.raw_props.len > 0) {
             const dup = dupNts(d.raw_props.ptr, d.raw_props.len);
@@ -737,7 +737,7 @@ fn jsonText(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata: ?*an
     // Leaf container nodes: accumulate text as literal on the parent node.
     // Dynamic components (tag_is_dynamic) must never match here, even if their
     // name collides with a built-in tag (e.g. ::pre, ::code).
-    if (cur.tag_is_dynamic == 0 and cur.tag != null and isLeafContainer(cur.tag_kind)) {
+    if (!cur.tag_is_dynamic and cur.tag != null and isLeafContainer(cur.tag_kind)) {
         var src: [*]const u8 = text;
         var src_size: c.MD_SIZE = size;
         const nullchar_buf = [_]u8{ 0xEF, 0xBF, 0xBD };
@@ -962,10 +962,10 @@ fn jsonWriteProps(w: *JsonWriter, node: *const JsonNode) void {
     // Dynamic components (tag_is_dynamic) use detail.component fields, so must
     // be checked first to avoid misinterpreting detail when a component name
     // collides with a static tag (e.g. ::alert{...}).
-    if (node.tag_is_dynamic != 0) {
+    if (node.tag_is_dynamic) {
         // Component frontmatter: if first child is a frontmatter node, merge its YAML as props.
         if (node.first_child != null and node.first_child.?.kind == .element and
-            node.first_child.?.tag != null and node.first_child.?.tag_is_dynamic == 0 and
+            node.first_child.?.tag != null and !node.first_child.?.tag_is_dynamic and
             node.first_child.?.tag_kind == .frontmatter and
             node.first_child.?.text_value != null and node.first_child.?.text_size > 0)
         {
@@ -1127,7 +1127,7 @@ fn jsonSerializeNode(w: *JsonWriter, node: *const JsonNode) void {
             var child = node.first_child;
             while (child) |ch| : (child = ch.next_sibling) {
                 if (ch.kind == .element and ch.tag != null and
-                    ch.tag_is_dynamic == 0 and ch.tag_kind == .frontmatter)
+                    !ch.tag_is_dynamic and ch.tag_kind == .frontmatter)
                 {
                     fm_node = ch;
                     break;
@@ -1179,7 +1179,7 @@ fn jsonSerializeNode(w: *JsonWriter, node: *const JsonNode) void {
 
             // Special handling for built-in tags.
             // Dynamic components always use the regular container path.
-            if (node.tag_is_dynamic == 0 and node.tag_kind == .pre) {
+            if (!node.tag_is_dynamic and node.tag_kind == .pre) {
                 jsonWriteStr(w, ",[\"code\",{");
                 if (node.detail.code_lang != null and node.detail.code_lang.?[0] != 0) {
                     jsonWriteStr(w, "\"class\":\"language-");
@@ -1194,30 +1194,30 @@ fn jsonSerializeNode(w: *JsonWriter, node: *const JsonNode) void {
                 jsonWrite(w, "]", 1);
             }
             // html_block and frontmatter: emit literal as text child.
-            else if (node.tag_is_dynamic == 0 and node.text_value != null and
+            else if (!node.tag_is_dynamic and node.text_value != null and
                 (node.tag_kind == .html_block or node.tag_kind == .frontmatter))
             {
                 jsonWrite(w, ",", 1);
                 jsonWriteString(w, @ptrCast(node.text_value.?), node.text_size);
             }
             // Inline code, math, math-display: emit literal as text child.
-            else if (node.tag_is_dynamic == 0 and node.text_value != null and
+            else if (!node.tag_is_dynamic and node.text_value != null and
                 (node.tag_kind == .code or node.tag_kind == .math or node.tag_kind == .math_display))
             {
                 jsonWrite(w, ",", 1);
                 jsonWriteString(w, @ptrCast(node.text_value.?), node.text_size);
             }
             // img: void element, no children (alt is in props).
-            else if (node.tag_is_dynamic == 0 and node.tag_kind == .img) {
+            else if (!node.tag_is_dynamic and node.tag_kind == .img) {
                 // No children emitted.
             }
             // Regular container: emit children.
             else {
                 // For dynamic components, skip frontmatter first child (merged into props).
                 var skip_fm: ?*const JsonNode = null;
-                if (node.tag_is_dynamic != 0 and node.first_child != null and
+                if (node.tag_is_dynamic and node.first_child != null and
                     node.first_child.?.kind == .element and node.first_child.?.tag != null and
-                    node.first_child.?.tag_is_dynamic == 0 and node.first_child.?.tag_kind == .frontmatter)
+                    !node.first_child.?.tag_is_dynamic and node.first_child.?.tag_kind == .frontmatter)
                 {
                     skip_fm = node.first_child;
                 }

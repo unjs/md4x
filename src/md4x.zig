@@ -59,9 +59,6 @@ const MD_SIZE = types.MD_SIZE; // explicit alias used in a few signatures
 const SZ_MAX = types.SZ_MAX;
 const OFF_MAX = types.OFF_MAX;
 
-const TRUE = types.TRUE;
-const FALSE = types.FALSE;
-
 // ----------------------------------------------------------------------------
 // Boolean constants and small helpers (`SIZEOF_ARRAY` becomes `.len`).
 // ----------------------------------------------------------------------------
@@ -263,7 +260,7 @@ fn md_parse_impl(alloc: std.mem.Allocator, text: [*c]const CHAR, size: SZ, parse
     ctx.userdata = userdata;
     ctx.code_indent_offset = if (ctx.parser.flags & c.MD_FLAG_NOINDENTEDCODEBLOCKS != 0) OFF_MAX else 4;
     md_build_mark_char_map(&ctx);
-    ctx.doc_ends_with_newline = @intFromBool(size > 0 and ISNEWLINE_(text[size - 1]));
+    ctx.doc_ends_with_newline = size > 0 and ISNEWLINE_(text[size - 1]);
     {
         const a: u64 = 16 * @as(u64, size);
         const b: u64 = 1024 * 1024;
@@ -321,8 +318,6 @@ comptime {
     _ = &SZ_MAX;
     _ = &OFF_MAX;
     _ = &entity_lookup_wrap;
-    _ = &TRUE;
-    _ = &FALSE;
     // Pass B: ref-defs + link recognizers (consumed by Pass C/D/E).
     _ = &md_lookup_line;
     _ = &md_fnv1a;
@@ -370,7 +365,7 @@ fn _test_run_inline(parser: *const c.Parser, text: [*c]const CHAR, size: SZ) c_i
     ctx.userdata = null;
     ctx.code_indent_offset = if (ctx.parser.flags & c.MD_FLAG_NOINDENTEDCODEBLOCKS != 0) OFF_MAX else 4;
     md_build_mark_char_map(&ctx);
-    ctx.doc_ends_with_newline = @intFromBool(size > 0 and ISNEWLINE_(text[size - 1]));
+    ctx.doc_ends_with_newline = size > 0 and ISNEWLINE_(text[size - 1]);
     ctx.max_ref_def_output = 1024 * 1024;
 
     var i: usize = 0;
@@ -498,7 +493,7 @@ fn _test_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, l
         return 0;
     }
 
-    if (line.enforce_new_block != 0) {
+    if (line.enforce_new_block) {
         ret = md_end_current_block(ctx);
         if (ret < 0) return ret;
     }
@@ -572,7 +567,7 @@ fn _test_run_analyze(parser: *const c.Parser, text: [*c]const CHAR, size: SZ, ou
     ctx.parser = parser.*;
     ctx.userdata = null;
     ctx.code_indent_offset = if (ctx.parser.flags & c.MD_FLAG_NOINDENTEDCODEBLOCKS != 0) OFF_MAX else 4;
-    ctx.doc_ends_with_newline = @intFromBool(size > 0 and ISNEWLINE_(text[size - 1]));
+    ctx.doc_ends_with_newline = size > 0 and ISNEWLINE_(text[size - 1]);
     ctx.max_ref_def_output = 1024 * 1024;
 
     var line_buf = [2]MD_LINE_ANALYSIS{ .{}, .{} };
@@ -597,11 +592,11 @@ fn _test_run_analyze(parser: *const c.Parser, text: [*c]const CHAR, size: SZ, ou
 
         emit(&fbuf, "L type={d} data={d} enf={d} beg={d} end={d} indent={d} | nc={d} bcn={d} fm={d} llhle={d} llistwo={d} nblk={d} ncomp={d} nslot={d} nalert={d}\n", .{
             @intFromEnum(line.type),                        line.data,
-            line.enforce_new_block,                         line.beg,
+            @intFromBool(line.enforce_new_block),           line.beg,
             line.end,                                       line.indent,
             ctx.nContainers(),                               ctx.block_component_nesting,
-            ctx.frontmatter_state,                          ctx.last_line_has_list_loosening_effect,
-            ctx.last_list_item_starts_with_two_blank_lines, ctx.n_block_bytes,
+            ctx.frontmatter_state,                          @intFromBool(ctx.last_line_has_list_loosening_effect),
+            @intFromBool(ctx.last_list_item_starts_with_two_blank_lines), ctx.n_block_bytes,
             @as(c_int, @intCast(ctx.block_component_info.items.len)), @as(c_int, @intCast(ctx.slot_info.items.len)),
             @as(c_int, @intCast(ctx.block_alert_info.items.len)),
         }, out_fn, out_ud);
@@ -609,8 +604,8 @@ fn _test_run_analyze(parser: *const c.Parser, text: [*c]const CHAR, size: SZ, ou
         while (i < ctx.nContainers()) : (i += 1) {
             const co = &ctx.containers.items[@intCast(i)];
             emit(&fbuf, "  C[{d}] ch={d} loose={d} task={d} alert={d} start={d} mi={d} ci={d} bbo={d} tmo={d} cc={d} cfm={d}\n", .{
-                i,                 uval(co.ch),      co.is_loose,    co.is_task,
-                co.is_alert,       co.start,         co.mark_indent, co.contents_indent,
+                i,                 uval(co.ch),      co.is_loose,    @intFromBool(co.is_task),
+                @intFromBool(co.is_alert), co.start,   co.mark_indent, co.contents_indent,
                 co.block_byte_off, co.task_mark_off, co.colon_count, co.comp_fm_state,
             }, out_fn, out_ud);
         }

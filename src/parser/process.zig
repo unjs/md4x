@@ -17,8 +17,6 @@ const CHAR = types.CHAR;
 const SZ = types.SZ;
 const OFF = types.OFF;
 const MD_SIZE = types.MD_SIZE;
-const TRUE = types.TRUE;
-const FALSE = types.FALSE;
 const MD_CTX = types.MD_CTX;
 const c_allocator = types.c_allocator;
 const MD_LINE = types.MD_LINE;
@@ -804,7 +802,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     const is_loose: u8 = if (btype == c.BlockType.ul or btype == c.BlockType.ol)
                         @intCast(block.bits.flags & @as(u8, @truncate(MD_BLOCK_LOOSE_LIST)))
                     else
-                        @intFromBool(TRUE != 0);
+                        1;
                     // Reuse phase: capacity already covers the max nesting from the
                     // block-parse pass, so this append never actually reallocs.
                     ctx.containers.append(ctx.alloc, .{ .is_loose = is_loose }) catch {
@@ -853,7 +851,7 @@ pub fn md_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, 
         return 0;
     }
 
-    if (line.enforce_new_block != 0) {
+    if (line.enforce_new_block) {
         ret = md_end_current_block(ctx);
         if (ret < 0) return ret;
     }

@@ -17,8 +17,6 @@ const CHAR = types.CHAR;
 const SZ = types.SZ;
 const OFF = types.OFF;
 const MD_SIZE = types.MD_SIZE;
-const TRUE = types.TRUE;
-const FALSE = types.FALSE;
 const MD_CTX = types.MD_CTX;
 const MD_LINE = types.MD_LINE;
 const MD_LINE_ANALYSIS = types.MD_LINE_ANALYSIS;
@@ -284,7 +282,7 @@ pub fn md_push_block_alert_info(ctx: *MD_CTX, type_beg: OFF, type_end: OFF) erro
 
 // --- line classification helpers ---------------------------------------------
 
-pub fn md_is_hr_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_killer: *OFF) c_int {
+pub fn md_is_hr_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_killer: *OFF) bool {
     var off: OFF = beg + 1;
     var n: c_int = 1;
 
@@ -296,20 +294,20 @@ pub fn md_is_hr_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_killer: *OFF) c_int 
 
     if (n < 3) {
         p_killer.* = off;
-        return FALSE;
+        return false;
     }
 
     // Nothing else can be present on the line.
     if (off < ctx.size and !ctx.isNewline(off)) {
         p_killer.* = off;
-        return FALSE;
+        return false;
     }
 
     p_end.* = off;
-    return TRUE;
+    return true;
 }
 
-pub fn md_is_atxheader_line(ctx: *MD_CTX, beg: OFF, p_beg: *OFF, p_end: *OFF, p_level: *c_uint) c_int {
+pub fn md_is_atxheader_line(ctx: *MD_CTX, beg: OFF, p_beg: *OFF, p_end: *OFF, p_level: *c_uint) bool {
     var off: OFF = beg + 1;
 
     while (off < ctx.size and ctx.ch(off) == '#' and off - beg < 7)
@@ -317,21 +315,21 @@ pub fn md_is_atxheader_line(ctx: *MD_CTX, beg: OFF, p_beg: *OFF, p_end: *OFF, p_
     const n: OFF = off - beg;
 
     if (n > 6)
-        return FALSE;
+        return false;
     p_level.* = n;
 
     if ((ctx.parser.flags & c.MD_FLAG_PERMISSIVEATXHEADERS == 0) and off < ctx.size and
         !ctx.isBlank(off) and !ctx.isNewline(off))
-        return FALSE;
+        return false;
 
     while (off < ctx.size and ctx.isBlank(off))
         off += 1;
     p_beg.* = off;
     p_end.* = off;
-    return TRUE;
+    return true;
 }
 
-pub fn md_is_setext_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_level: *c_uint) c_int {
+pub fn md_is_setext_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_level: *c_uint) bool {
     var off: OFF = beg + 1;
 
     while (off < ctx.size and ctx.ch(off) == ctx.ch(beg))
@@ -343,33 +341,33 @@ pub fn md_is_setext_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_level: *c_u
 
     // But nothing more is allowed on the line.
     if (off < ctx.size and !ctx.isNewline(off))
-        return FALSE;
+        return false;
 
     p_level.* = if (ctx.ch(beg) == '=') 1 else 2;
     p_end.* = off;
-    return TRUE;
+    return true;
 }
 
-pub fn md_is_table_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_col_count: *c_uint) c_int {
+pub fn md_is_table_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_col_count: *c_uint) bool {
     var off: OFF = beg;
-    var found_pipe: c_int = FALSE;
+    var found_pipe: bool = false;
     var col_count: c_uint = 0;
 
     if (off < ctx.size and ctx.ch(off) == '|') {
-        found_pipe = TRUE;
+        found_pipe = true;
         off += 1;
         while (off < ctx.size and ctx.isWhitespace(off))
             off += 1;
     }
 
     while (true) {
-        var delimited: c_int = FALSE;
+        var delimited: bool = false;
 
         // Cell underline ("-----", ":----", "----:" or ":----:")
         if (off < ctx.size and ctx.ch(off) == ':')
             off += 1;
         if (off >= ctx.size or ctx.ch(off) != '-')
-            return FALSE;
+            return false;
         while (off < ctx.size and ctx.ch(off) == '-')
             off += 1;
         if (off < ctx.size and ctx.ch(off) == ':')
@@ -378,15 +376,15 @@ pub fn md_is_table_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_col_count: *
         col_count += 1;
         if (col_count > TABLE_MAXCOLCOUNT) {
             ctx.log("Suppressing table (column_count > TABLE_MAXCOLCOUNT)");
-            return FALSE;
+            return false;
         }
 
         // Pipe delimiter (optional at the end of line).
         while (off < ctx.size and ctx.isWhitespace(off))
             off += 1;
         if (off < ctx.size and ctx.ch(off) == '|') {
-            delimited = TRUE;
-            found_pipe = TRUE;
+            delimited = true;
+            found_pipe = true;
             off += 1;
             while (off < ctx.size and ctx.isWhitespace(off))
                 off += 1;
@@ -396,19 +394,19 @@ pub fn md_is_table_underline(ctx: *MD_CTX, beg: OFF, p_end: *OFF, p_col_count: *
         if (off >= ctx.size or ctx.isNewline(off))
             break;
 
-        if (delimited == FALSE)
-            return FALSE;
+        if (!delimited)
+            return false;
     }
 
-    if (found_pipe == FALSE)
-        return FALSE;
+    if (!found_pipe)
+        return false;
 
     p_end.* = off;
     p_col_count.* = col_count;
-    return TRUE;
+    return true;
 }
 
-pub fn md_is_opening_code_fence(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int {
+pub fn md_is_opening_code_fence(ctx: *MD_CTX, beg: OFF, p_end: *OFF) bool {
     var off: OFF = beg;
 
     while (off < ctx.size and ctx.ch(off) == ctx.ch(beg))
@@ -416,7 +414,7 @@ pub fn md_is_opening_code_fence(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int {
 
     // Fence must have at least three characters.
     if (off - beg < 3)
-        return FALSE;
+        return false;
 
     ctx.code_fence_length = off - beg;
 
@@ -428,17 +426,17 @@ pub fn md_is_opening_code_fence(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int {
     while (off < ctx.size and !ctx.isNewline(off)) {
         // Backtick-based fence must not contain '`' in the info string.
         if (ctx.ch(beg) == '`' and ctx.ch(off) == '`')
-            return FALSE;
+            return false;
         off += 1;
     }
 
     p_end.* = off;
-    return TRUE;
+    return true;
 }
 
-pub fn md_is_closing_code_fence(ctx: *MD_CTX, ch: CHAR, beg: OFF, p_end: *OFF) c_int {
+pub fn md_is_closing_code_fence(ctx: *MD_CTX, ch: CHAR, beg: OFF, p_end: *OFF) bool {
     var off: OFF = beg;
-    var ret: c_int = FALSE;
+    var ret: bool = false;
 
     // Closing fence must have at least the same length and use same char.
     while (off < ctx.size and ctx.ch(off) == ch)
@@ -459,7 +457,7 @@ pub fn md_is_closing_code_fence(ctx: *MD_CTX, ch: CHAR, beg: OFF, p_end: *OFF) c
         return ret;
     }
 
-    ret = TRUE;
+    ret = true;
 
     // Note we set *p_end even on failure.
     p_end.* = off;
@@ -500,7 +498,8 @@ pub const map6 = [26][]const TAG{
     &n6, &o6, &p6, &xx, &xx, &s6, &t6, &tag_u6, &xx,     &xx, &xx, &xx, &xx,
 };
 
-// Returns type of the raw HTML block, or FALSE (0) if not an HTML block.
+// Returns type of the raw HTML block (1..7), or 0 if not an HTML block. NOT a
+// boolean — the value is stored in ctx.html_block_type and compared against 6/7.
 pub fn md_is_html_block_start_condition(ctx: *MD_CTX, beg: OFF) c_int {
     var off: OFF = beg + 1;
 
@@ -570,25 +569,27 @@ pub fn md_is_html_block_start_condition(ctx: *MD_CTX, beg: OFF) c_int {
         }
     }
 
-    return FALSE;
+    return 0;
 }
 
 // Case-sensitive check whether substring 'what' is between 'beg' and EOL.
-pub fn md_line_contains(ctx: *MD_CTX, beg: OFF, what: [*c]const CHAR, what_len: SZ, p_end: *OFF) c_int {
+pub fn md_line_contains(ctx: *MD_CTX, beg: OFF, what: [*c]const CHAR, what_len: SZ, p_end: *OFF) bool {
     var i: OFF = beg;
     while (i + what_len < ctx.size) : (i += 1) {
         if (ctx.isNewline(i))
             break;
         if (memcmp(ctx.str(i), what, what_len) == 0) {
             p_end.* = i + what_len;
-            return TRUE;
+            return true;
         }
     }
 
     p_end.* = i;
-    return FALSE;
+    return false;
 }
 
+// Returns the raw-HTML block type (1..7) the line closes, or 0. NOT a boolean:
+// callers compare the result against ctx.html_block_type and against 6/7.
 pub fn md_is_html_block_end_condition(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int {
     switch (ctx.html_block_type) {
         1 => {
@@ -602,7 +603,7 @@ pub fn md_is_html_block_end_condition(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int
                                 ctx.ch(off + 2 + tag.len) == '>')
                             {
                                 p_end.* = off + 2 + tag.len + 1;
-                                return TRUE;
+                                return 1;
                             }
                         }
                     }
@@ -610,13 +611,13 @@ pub fn md_is_html_block_end_condition(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int
                 off += 1;
             }
             p_end.* = off;
-            return FALSE;
+            return 0;
         },
 
-        2 => return if (md_line_contains(ctx, beg, "-->", 3, p_end) != 0) 2 else FALSE,
-        3 => return if (md_line_contains(ctx, beg, "?>", 2, p_end) != 0) 3 else FALSE,
-        4 => return if (md_line_contains(ctx, beg, ">", 1, p_end) != 0) 4 else FALSE,
-        5 => return if (md_line_contains(ctx, beg, "]]>", 3, p_end) != 0) 5 else FALSE,
+        2 => return if (md_line_contains(ctx, beg, "-->", 3, p_end)) 2 else 0,
+        3 => return if (md_line_contains(ctx, beg, "?>", 2, p_end)) 3 else 0,
+        4 => return if (md_line_contains(ctx, beg, ">", 1, p_end)) 4 else 0,
+        5 => return if (md_line_contains(ctx, beg, "]]>", 3, p_end)) 5 else 0,
 
         6, 7 => {
             if (beg >= ctx.size or ctx.isNewline(beg)) {
@@ -624,7 +625,7 @@ pub fn md_is_html_block_end_condition(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int
                 p_end.* = beg;
                 return ctx.html_block_type;
             }
-            return FALSE;
+            return 0;
         },
 
         else => unreachable, // MD_UNREACHABLE
@@ -776,23 +777,23 @@ pub fn md_is_slot_opener(ctx: *MD_CTX, off_in: OFF, p_name_beg: *OFF, p_name_end
 
 // --- container push/pop ------------------------------------------------------
 
-pub fn md_is_container_compatible(pivot_p: [*c]const MD_CONTAINER, container_p: [*c]const MD_CONTAINER) c_int {
+pub fn md_is_container_compatible(pivot_p: [*c]const MD_CONTAINER, container_p: [*c]const MD_CONTAINER) bool {
     const pivot = &pivot_p[0];
     const container = &container_p[0];
     // Block quote has no "items" like lists.
     if (container.ch == '>')
-        return FALSE;
+        return false;
 
     // Block components have no "items".
     if (container.ch == ':')
-        return FALSE;
+        return false;
 
     if (container.ch != pivot.ch)
-        return FALSE;
+        return false;
     if (container.mark_indent > pivot.contents_indent)
-        return FALSE;
+        return false;
 
-    return TRUE;
+    return true;
 }
 
 pub fn md_push_container(ctx: *MD_CTX, container: *const MD_CONTAINER) error{OutOfMemory}!void {
@@ -808,18 +809,18 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
     var i: c_int = ctx.nContainers() - n_children;
     while (i < ctx.nContainers()) : (i += 1) {
         const cont = &ctx.containers.items[@intCast(i)];
-        var is_ordered_list: c_int = FALSE;
+        var is_ordered_list: bool = false;
 
         switch (cont.ch) {
             ')', '.' => {
-                is_ordered_list = TRUE;
+                is_ordered_list = true;
                 // MD_FALLTHROUGH to bullet handling.
                 _ = md_end_current_block(ctx);
                 cont.block_byte_off = @intCast(ctx.n_block_bytes);
 
-                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.BlockType.ol else c.BlockType.ul, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, if (is_ordered_list) c.BlockType.ol else c.BlockType.ul, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
-                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
             },
             '-', '+', '*' => {
@@ -827,13 +828,13 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
                 _ = md_end_current_block(ctx);
                 cont.block_byte_off = @intCast(ctx.n_block_bytes);
 
-                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.BlockType.ol else c.BlockType.ul, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, if (is_ordered_list) c.BlockType.ol else c.BlockType.ul, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
-                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
+                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
                 if (ret < 0) return ret;
             },
             '>' => {
-                if (cont.is_alert != 0)
+                if (cont.is_alert)
                     ret = md_push_container_bytes(ctx, c.BlockType.alert, 0, cont.start, MD_BLOCK_CONTAINER_OPENER)
                 else
                     ret = md_push_container_bytes(ctx, c.BlockType.quote, 0, 0, MD_BLOCK_CONTAINER_OPENER);
@@ -859,24 +860,24 @@ pub fn md_leave_child_containers(ctx: *MD_CTX, n_keep: c_int) c_int {
 
     while (ctx.nContainers() > n_keep) {
         const cont = &ctx.containers.items[@intCast(ctx.nContainers() - 1)];
-        var is_ordered_list: c_int = FALSE;
+        var is_ordered_list: bool = false;
 
         switch (cont.ch) {
             ')', '.' => {
-                is_ordered_list = TRUE;
-                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
+                is_ordered_list = true;
+                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
-                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.BlockType.ol else c.BlockType.ul, 0, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, if (is_ordered_list) c.BlockType.ol else c.BlockType.ul, 0, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
             },
             '-', '+', '*' => {
-                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task != 0) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, c.BlockType.li, cont.task_mark_off, if (cont.is_task) @intCast(uval(ctx.ch(cont.task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
-                ret = md_push_container_bytes(ctx, if (is_ordered_list != 0) c.BlockType.ol else c.BlockType.ul, 0, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_CLOSER);
+                ret = md_push_container_bytes(ctx, if (is_ordered_list) c.BlockType.ol else c.BlockType.ul, 0, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_CLOSER);
                 if (ret < 0) return ret;
             },
             '>' => {
-                if (cont.is_alert != 0)
+                if (cont.is_alert)
                     ret = md_push_container_bytes(ctx, c.BlockType.alert, 0, cont.start, MD_BLOCK_CONTAINER_CLOSER)
                 else
                     ret = md_push_container_bytes(ctx, c.BlockType.quote, 0, 0, MD_BLOCK_CONTAINER_CLOSER);
@@ -900,33 +901,33 @@ pub fn md_leave_child_containers(ctx: *MD_CTX, n_keep: c_int) c_int {
     return ret;
 }
 
-pub fn md_is_container_mark(ctx: *MD_CTX, indent: c_uint, beg: OFF, p_end: *OFF, p_container: *MD_CONTAINER) c_int {
+pub fn md_is_container_mark(ctx: *MD_CTX, indent: c_uint, beg: OFF, p_end: *OFF, p_container: *MD_CONTAINER) bool {
     var off: OFF = beg;
 
     if (off >= ctx.size or indent >= ctx.code_indent_offset)
-        return FALSE;
+        return false;
 
     // Check for block quote mark.
     if (ctx.ch(off) == '>') {
         off += 1;
         p_container.ch = '>';
-        p_container.is_loose = FALSE;
-        p_container.is_task = FALSE;
+        p_container.is_loose = 0;
+        p_container.is_task = false;
         p_container.mark_indent = indent;
         p_container.contents_indent = indent + 1;
         p_end.* = off;
-        return TRUE;
+        return true;
     }
 
     // Check for list item bullet mark.
     if (ctx.isAnyOf(off, "-+*") and (off + 1 >= ctx.size or ctx.isBlank(off + 1) or ctx.isNewline(off + 1))) {
         p_container.ch = ctx.ch(off);
-        p_container.is_loose = FALSE;
-        p_container.is_task = FALSE;
+        p_container.is_loose = 0;
+        p_container.is_task = false;
         p_container.mark_indent = indent;
         p_container.contents_indent = indent + 1;
         p_end.* = off + 1;
-        return TRUE;
+        return true;
     }
 
     // Check for ordered list item marks.
@@ -944,15 +945,15 @@ pub fn md_is_container_mark(ctx: *MD_CTX, indent: c_uint, beg: OFF, p_end: *OFF,
         (off + 1 >= ctx.size or ctx.isBlank(off + 1) or ctx.isNewline(off + 1)))
     {
         p_container.ch = ctx.ch(off);
-        p_container.is_loose = FALSE;
-        p_container.is_task = FALSE;
+        p_container.is_loose = 0;
+        p_container.is_task = false;
         p_container.mark_indent = indent;
         p_container.contents_indent = indent + off - beg + 1;
         p_end.* = off + 1;
-        return TRUE;
+        return true;
     }
 
-    return FALSE;
+    return false;
 }
 
 pub fn md_line_indentation(ctx: *MD_CTX, total_indent: c_uint, beg: OFF, p_end: *OFF) c_uint {
@@ -971,7 +972,7 @@ pub fn md_line_indentation(ctx: *MD_CTX, total_indent: c_uint, beg: OFF, p_end: 
     return indent - total_indent;
 }
 
-pub const md_dummy_blank_line = MD_LINE_ANALYSIS{ .type = .blank, .data = 0, .enforce_new_block = 0, .beg = 0, .end = 0, .indent = 0 };
+pub const md_dummy_blank_line = MD_LINE_ANALYSIS{ .type = .blank, .data = 0, .enforce_new_block = false, .beg = 0, .end = 0, .indent = 0 };
 
 // Analyze type of the line and find some of its properties. Main input for
 // determining type and boundaries of a block (md4x.c ~7096).
@@ -991,7 +992,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     line.indent = md_line_indentation(ctx, total_indent, off, &off);
     total_indent += line.indent;
     line.beg = off;
-    line.enforce_new_block = FALSE;
+    line.enforce_new_block = false;
 
     // Given the indentation and block quote marks '>', determine how many of
     // the current containers are our parents.
@@ -1090,9 +1091,9 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
             // Another .fenced_code unless closing fence (→ .blank).
             if (line.indent < ctx.code_indent_offset) {
-                if (md_is_closing_code_fence(ctx, ctx.ch(pivot_line.beg), off, &off) != 0) {
+                if (md_is_closing_code_fence(ctx, ctx.ch(pivot_line.beg), off, &off)) {
                     line.type = .blank;
-                    ctx.last_line_has_list_loosening_effect = FALSE;
+                    ctx.last_line_has_list_loosening_effect = false;
                     break :classify;
                 }
             }
@@ -1153,7 +1154,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                         }
 
                         line.type = .blank;
-                        ctx.last_line_has_list_loosening_effect = FALSE;
+                        ctx.last_line_has_list_loosening_effect = false;
                         off = tmp;
                         matched = 1;
                         break;
@@ -1200,8 +1201,8 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 }
 
                 container.ch = '#';
-                container.is_loose = FALSE;
-                container.is_task = FALSE;
+                container.is_loose = 0;
+                container.is_task = false;
                 container.mark_indent = 0;
                 container.contents_indent = line.indent;
                 container.start = @intCast(slot_idx);
@@ -1231,10 +1232,10 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                     line.indent -= ctx.code_indent_offset
                 else
                     line.indent = 0;
-                ctx.last_line_has_list_loosening_effect = FALSE;
+                ctx.last_line_has_list_loosening_effect = false;
             } else {
                 line.type = .blank;
-                ctx.last_line_has_list_loosening_effect = @intFromBool(n_parents > 0 and
+                ctx.last_line_has_list_loosening_effect = (n_parents > 0 and
                     n_brothers + n_children == 0 and
                     ctx.containers.items[@intCast(n_parents - 1)].ch != '>');
 
@@ -1246,13 +1247,13 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 {
                     const top_block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + @as(usize, @intCast(ctx.n_block_bytes - @sizeOf(MD_BLOCK)))));
                     if (top_block.typeIsRaw(c.BlockType.li))
-                        ctx.last_list_item_starts_with_two_blank_lines = TRUE;
+                        ctx.last_list_item_starts_with_two_blank_lines = true;
                 }
             }
             break :classify;
         } else {
             // 2nd half of the hack: 2nd blank line at list item start forces end.
-            if (ctx.last_list_item_starts_with_two_blank_lines != 0) {
+            if (ctx.last_list_item_starts_with_two_blank_lines) {
                 if (n_parents > 0 and n_parents == ctx.nContainers() and
                     ctx.containers.items[@intCast(n_parents - 1)].ch != '>' and
                     n_brothers + n_children == 0 and ctx.current_block == null and
@@ -1268,9 +1269,9 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                     }
                 }
 
-                ctx.last_list_item_starts_with_two_blank_lines = FALSE;
+                ctx.last_list_item_starts_with_two_blank_lines = false;
             }
-            ctx.last_line_has_list_loosening_effect = FALSE;
+            ctx.last_line_has_list_loosening_effect = false;
         }
 
         // Check for alert syntax > [!TYPE] inside a newly opened blockquote.
@@ -1280,7 +1281,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         {
             const last_cont: c_int = ctx.nContainers() - 1;
             if (last_cont >= 0 and ctx.containers.items[@intCast(last_cont)].ch == '>' and
-                ctx.containers.items[@intCast(last_cont)].is_alert == 0)
+                !ctx.containers.items[@intCast(last_cont)].is_alert)
             {
                 var tmp: OFF = off + 1;
                 if (tmp < ctx.size and ctx.ch(tmp) == '!') {
@@ -1298,7 +1299,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                                 ret = -1;
                                 return ret;
                             };
-                            ctx.containers.items[@intCast(last_cont)].is_alert = TRUE;
+                            ctx.containers.items[@intCast(last_cont)].is_alert = true;
                             ctx.containers.items[@intCast(last_cont)].start = @intCast(alert_idx);
                             line.type = .blank;
                             break :classify;
@@ -1315,7 +1316,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         {
             var level: c_uint = undefined;
 
-            if (md_is_setext_underline(ctx, off, &off, &level) != 0) {
+            if (md_is_setext_underline(ctx, off, &off, &level)) {
                 line.type = .setext_underline;
                 line.data = level;
                 break :classify;
@@ -1337,7 +1338,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 if (tmp >= ctx.size or ctx.isNewline(tmp)) {
                     if (beg == 0) {
                         line.type = .frontmatter;
-                        line.enforce_new_block = TRUE;
+                        line.enforce_new_block = true;
                         line.data = 1;
                         ctx.frontmatter_state = 1;
                         break :classify;
@@ -1362,7 +1363,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                     break;
             }
             if (comp_i >= 0 and ctx.containers.items[@intCast(comp_i)].comp_fm_state == 0) {
-                var found_opener: c_int = FALSE;
+                var found_opener: bool = false;
                 if (line.indent < ctx.code_indent_offset and
                     off < ctx.size and ctx.ch(off) == '-')
                 {
@@ -1376,12 +1377,12 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                             ctx.containers.items[@intCast(comp_i)].comp_fm_state = 1;
                             line.type = .frontmatter;
                             line.data = 2; // 2 = component frontmatter
-                            line.enforce_new_block = TRUE;
-                            found_opener = TRUE;
+                            line.enforce_new_block = true;
+                            found_opener = true;
                         }
                     }
                 }
-                if (found_opener != 0)
+                if (found_opener)
                     break :classify;
                 // First non-blank line is not ---; disable component frontmatter.
                 ctx.containers.items[@intCast(comp_i)].comp_fm_state = 2;
@@ -1393,7 +1394,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             off < ctx.size and off >= hr_killer and
             ctx.isAnyOf(off, "-_*"))
         {
-            if (md_is_hr_line(ctx, off, &off, &hr_killer) != 0) {
+            if (md_is_hr_line(ctx, off, &off, &hr_killer)) {
                 line.type = .hr;
                 break :classify;
             }
@@ -1403,8 +1404,8 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         if (n_parents < ctx.nContainers() and n_brothers + n_children == 0) {
             var tmp: OFF = undefined;
 
-            if (md_is_container_mark(ctx, line.indent, off, &tmp, &container) != 0 and
-                md_is_container_compatible(&ctx.containers.items[@intCast(n_parents)], &container) != 0)
+            if (md_is_container_mark(ctx, line.indent, off, &tmp, &container) and
+                md_is_container_compatible(&ctx.containers.items[@intCast(n_parents)], &container))
             {
                 pivot_line = &md_dummy_blank_line;
 
@@ -1464,8 +1465,8 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 };
 
                 container.ch = ':';
-                container.is_loose = FALSE;
-                container.is_task = FALSE;
+                container.is_loose = 0;
+                container.is_task = false;
                 container.mark_indent = 0;
                 container.contents_indent = line.indent;
                 container.start = @intCast(comp_idx);
@@ -1491,7 +1492,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
         // Check for start of a new container block.
         if (line.indent < ctx.code_indent_offset and
-            md_is_container_mark(ctx, line.indent, off, &off, &container) != 0)
+            md_is_container_mark(ctx, line.indent, off, &off, &container))
         {
             if (pivot_line.type == .text and n_parents == ctx.nContainers() and
                 (off >= ctx.size or ctx.isNewline(off)) and container.ch != '>')
@@ -1546,7 +1547,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         {
             var level: c_uint = undefined;
 
-            if (md_is_atxheader_line(ctx, off, &line.beg, &off, &level) != 0) {
+            if (md_is_atxheader_line(ctx, off, &line.beg, &off, &level)) {
                 line.type = .atx_header;
                 line.data = level;
                 break :classify;
@@ -1557,10 +1558,10 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         if (line.indent < ctx.code_indent_offset and
             off < ctx.size and ctx.isAnyOf2(off, '`', '~'))
         {
-            if (md_is_opening_code_fence(ctx, off, &off) != 0) {
+            if (md_is_opening_code_fence(ctx, off, &off)) {
                 line.type = .fenced_code;
                 line.data = 1;
-                line.enforce_new_block = TRUE;
+                line.enforce_new_block = true;
                 break :classify;
             }
         }
@@ -1581,7 +1582,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                     ctx.html_block_type = 0;
                 }
 
-                line.enforce_new_block = TRUE;
+                line.enforce_new_block = true;
                 line.type = .html;
                 break :classify;
             }
@@ -1595,7 +1596,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             var col_count: c_uint = undefined;
 
             if (ctx.current_block != null and ctx.current_block.*.n_lines == 1 and
-                md_is_table_underline(ctx, off, &off, &col_count) != 0)
+                md_is_table_underline(ctx, off, &off, &col_count))
             {
                 line.data = col_count;
                 line.type = .table_underline;
@@ -1623,7 +1624,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 (tmp + 3 == ctx.size or ctx.isBlank(tmp + 3) or ctx.isNewline(tmp + 3)))
             {
                 const task_container = if (n_children > 0) &ctx.containers.items[@intCast(ctx.nContainers() - 1)] else &container;
-                task_container.is_task = TRUE;
+                task_container.is_task = true;
                 task_container.task_mark_off = tmp + 1;
                 off = tmp + 3;
                 while (off < ctx.size and ctx.isWhitespace(off))
@@ -1636,7 +1637,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     }
 
     // Scan for end of the line.
-    if (ctx.doc_ends_with_newline != 0 and off < ctx.size) {
+    if (ctx.doc_ends_with_newline and off < ctx.size) {
         while (true) {
             off += @intCast(strcspn(ctx.str(off), "\r\n"));
 
@@ -1684,7 +1685,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     p_end.* = off;
 
     // If we belong to a list after seeing a blank line, the list is loose.
-    if (prev_line_has_list_loosening_effect != 0 and line.type != .blank and n_parents + n_brothers > 0) {
+    if (prev_line_has_list_loosening_effect and line.type != .blank and n_parents + n_brothers > 0) {
         const cont = &ctx.containers.items[@intCast(n_parents + n_brothers - 1)];
         if (cont.ch != '>') {
             const block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + cont.block_byte_off));
@@ -1701,9 +1702,9 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     // Enter any container we found a mark for.
     if (n_brothers > 0) {
         // MD_ASSERT(n_brothers == 1);
-        ret = md_push_container_bytes(ctx, c.BlockType.li, ctx.containers.items[@intCast(n_parents)].task_mark_off, if (ctx.containers.items[@intCast(n_parents)].is_task != 0) @intCast(uval(ctx.ch(ctx.containers.items[@intCast(n_parents)].task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
+        ret = md_push_container_bytes(ctx, c.BlockType.li, ctx.containers.items[@intCast(n_parents)].task_mark_off, if (ctx.containers.items[@intCast(n_parents)].is_task) @intCast(uval(ctx.ch(ctx.containers.items[@intCast(n_parents)].task_mark_off))) else 0, MD_BLOCK_CONTAINER_CLOSER);
         if (ret < 0) return ret;
-        ret = md_push_container_bytes(ctx, c.BlockType.li, container.task_mark_off, if (container.is_task != 0) @intCast(uval(ctx.ch(container.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
+        ret = md_push_container_bytes(ctx, c.BlockType.li, container.task_mark_off, if (container.is_task) @intCast(uval(ctx.ch(container.task_mark_off))) else 0, MD_BLOCK_CONTAINER_OPENER);
         if (ret < 0) return ret;
         ctx.containers.items[@intCast(n_parents)].is_task = container.is_task;
         ctx.containers.items[@intCast(n_parents)].task_mark_off = container.task_mark_off;
