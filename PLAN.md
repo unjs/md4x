@@ -37,7 +37,8 @@ see its section below):
 | 9 — list loosened by `::` / `#`   | `ce1db56`                       |
 | 10 — 16-bit comp/slot/alert index | `7db8d1b`                       |
 | 11 — required `Parser` callbacks  | `7785acc`                       |
-| 7 — delete the dead `growArray`   | _the commit adding this row_    |
+| 7 — delete the dead `growArray`   | `4d9a197`                       |
+| 5 — route `md_merge_lines_alloc`  | `2244cac`                       |
 
 Zero `TRUE`/`FALSE` tokens remain in `src/`. Verified at `3c3d2f7`: `zig build`,
 `zig build test` (ReleaseFast **and** Debug), 16 spec suites / 1001 assertions,
@@ -88,14 +89,14 @@ behind the full verification gate.
 verified by reproduction — item 9 is user-visible on ordinary MDC prose. They
 are not refactors and must not ride along with one. **All of them — 9, 9a, 9b,
 10 and 11 — are landed**; see the table above. Only the idiomatization/doc items
-4, 5 and 6 remain.
+4 and 6 remain.
 
 **Suggested priority.** `8` is **landed** (it was why three of these bugs went
 unseen); take the rest in any order.
 
 **Ordering constraint.** Items 7 and 5 rewrote overlapping parser files and had
-to stay **serial**; 7 is now landed, so 5 is unblocked. Renderer-only and
-docs-only work parallelizes freely.
+to stay **serial**; both are now landed. Renderer-only and docs-only work
+parallelizes freely.
 
 **Do not fold a bug fix into a refactor commit**, and do not let a refactor
 "tidy" an adjacent bug — constraint #4 makes the refactors type/name-only, and
@@ -108,53 +109,59 @@ grep-ability is no longer a requirement (the C source it cross-referenced is
 gone), so this is now free to idiomatize. Low value, high churn — **lowest
 priority, and fine to never do**. If it happens, do it file-by-file.
 
-### 5. Route the `md_merge_lines_alloc` buffers through `ctx.alloc`
+### ~~5. Route the `md_merge_lines_alloc` buffers through `ctx.alloc`~~ — LANDED
 
-The last libc allocations in the parser: the ref-def label/title and merged
-autolink/link-label strings. They `c_allocator.alloc` `end-beg` bytes but keep
-only the collapsed `*_size`, and some are freed via the `ptr_stack`
-(`md_mark_get_ptr` + `std.c.free`, no length). Routing them needs a
-shrink-to-fit plus a length-carrying `ptr_stack` free, so that every parser
-allocation goes through the injectable allocator and the exact-length rule.
+The residual set item 7 enumerated was still current: eight `std.c.free` sites,
+no `std.c.malloc`/`realloc`. **All eight are routed**, none deferred —
+`refdefs.zig` `md_free_ref_defs` ×2, `md_is_link_reference_definition_abort` ×2,
+`md_is_link_reference`'s multiline label; `inlines.zig`'s crossing-span abandon
+path; the `ptr_stack` walk in `process.zig`; and the same walk in the test-only
+`_test_run_inline` driver in `md4x.zig`.
 
-See the "Raw byte arenas" bullet in `AGENTS.md` for the allocation discipline
-these must adopt.
+Two mechanisms made it possible, exactly as PLAN predicted:
 
-**Audit verdict: this is PURE IDIOMATIZATION, not a bug fix.** The current
-arrangement was independently verified leak-correct: no wrong-length free (these
-are `u8` allocs with alignment 1, so `CAllocator.allocStrat` picks `.raw` /
-plain `malloc` on every shipping target — including Windows, where an
-over-aligned request would otherwise route through `_aligned_malloc` and make
-the bare `std.c.free` corrupt the CRT heap), and no leak on any path (the
-`md_is_link_reference_definition` abort path frees the merged label before
-returning; `md_is_link_reference` frees its multiline label unconditionally;
-`md_is_inline_link_spec`'s title reaches **either** `inlines.zig:1229` **or**
-the `ptr_stack` walk at `process.zig:275`, never both).
+- **Shrink-to-fit.** `md_merge_lines_alloc` allocates `end - beg` but
+  `md_merge_lines` usually writes fewer bytes, and the call sites keep only the
+  collapsed `*_size`. The helper now shrinks the buffer to the written size
+  before returning, so `*_size` **is** the allocated length and every free
+  satisfies the exact-length rule. (A shrinking realloc resizes in place on both
+  `c_allocator` and the testing allocator, so it never fails in practice; if it
+  ever did, the merge fails rather than hand back a length≠size buffer.)
+- **A length-carrying `ptr_stack` free — with no new field.** `md_resolve_links`
+  already writes the merged title's size into `marks[opener_index + 2].prev`
+  (`inlines.zig`), and the emission path already reads it back from there; the
+  only `prev` write after that point is none at all, so the value is still the
+  length at walk time. The new `inlines.md_mark_free_ptr` reads it and frees
+  exactly. **No engine logic moved** (constraint #4): the walk's loop, order and
+  terminator are unchanged, only the body's free call.
 
-**The real justification is test coverage, not correctness.** Because these
-bypass `ctx.alloc`, the `FailingAllocator` sweep can neither inject OOM into
-them nor leak-check them — so every path above is correct only _by inspection_.
-Prioritize accordingly; this is lower value than it looks.
+**Zero-length guard folded in** as instructed:
+`if (n == 0) { p_str.* = null; p_size.* = 0; return 0; }`, plus the symmetric
+`size == 0` case after the merge. Still unreachable (verified: every call site
+is gated by `contents_beg < contents_end`, and for `n > 0` the first loop
+iteration always writes at least one byte), but the sentinel it prevents —
+`Allocator.alloc(0)` returns a non-null `@ptrFromInt(maxInt(usize))` **without
+calling the vtable** — would now reach a length-validating free. PLAN's claim
+that "callers already tolerate a null title" checks out: `md_is_inline_link_spec`
+sets `attr.title = null` explicitly for the no-title case, and every consumer
+reads `title` only together with `title_size`. A null ref-def _label_ would be
+novel, but is equally unreachable, and `free_array_a` no-ops on it.
 
-**Item 1c is landed**, so the builder these would join now frees every buffer at
-its exact length. Follow the same discipline: one length field per buffer,
-published only after the block it describes exists.
+**`std.c.malloc`, `std.c.realloc` and `std.c.free` now have ZERO occurrences in
+`src/md4x.zig`, `src/abi.zig` and `src/parser/`.**
 
-**Fold in while you are here (preventive, not live):** `md_merge_lines_alloc`
-(`util.zig:407`) has no zero-length guard. In Zig 0.16
-`Allocator.allocBytesWithAlignment` short-circuits `byte_count == 0` and returns
-`@ptrFromInt(maxInt(usize))` **without calling the vtable**; that sentinel would
-reach `std.c.free` at `refdefs.zig:782`, the `ptr_stack` walk, and
-`inlines.zig:1229`. It diverges from C (where `malloc(0)` returns a freeable
-pointer) and from the two sibling helpers in the same file that _do_
-special-case zero (`arena_alloc`, `alloc_array_a`). Currently **unreachable** —
-all three call sites are guarded by non-local invariants
-(`contents_beg < contents_end`; multiline implies `lines[i+1].beg > lines[i].end`;
-`refdefs.zig:867` gates on `title_contents_beg < title_contents_end`) — but it
-is a one-line guard protecting a catastrophic outcome via invariants three call
-frames away, and item 5 disturbs exactly those call sites:
-`if (n == 0) { p_str.* = null; p_size.* = 0; return 0; }` (callers already
-tolerate a null title).
+**The payoff was realized.** The `FailingAllocator` sweep document gained the
+three multiline constructs the merge paths need — a ref-def whose label **and**
+title span lines, a reference _use_ with a multiline label, and an inline link
+with a multiline title (the one whose buffer goes through the `ptr_stack`).
+Measured: the document went from **35 to 40** `ctx.alloc` allocations, of which
+**4 are merges** (instrumented count; the 5th is incidental array growth from
+the longer input). Before this, **zero** merge allocations ran anywhere in the
+test suite, so all five free paths were correct only by inspection. The sweep
+passes under `zig build test -Doptimize=Debug`, where `std.testing.allocator`
+validates each freed length exactly.
+
+Corpus diff empty at 168 hashes; golden SAX trace unchanged.
 
 ### 6. Doc gaps
 
@@ -188,6 +195,8 @@ freeing `md_merge_lines_alloc` buffers — `refdefs.zig:391`, `:393`, `:735`,
 and `md4x.zig:392` (the same walk in the test-only `_test_run_inline`). No
 `std.c.malloc`/`realloc` anywhere; the five `extern "c"` declarations in
 `util.zig` (`qsort`/`bsearch`/`memcmp`/`strcspn`/`memmove`) are not allocation.
+**All eight were routed by item 5** (landed) — the parser now has no raw-libc
+memory call at all.
 
 The retired `growArray` test is replaced by one over the **live** helpers
 (`alloc_array_a` / `realloc_array_a` / `free_array_a`), which had no direct

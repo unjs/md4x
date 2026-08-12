@@ -387,10 +387,13 @@ pub fn md_free_ref_defs(ctx: *MD_CTX) void {
     var i: c_int = 0;
     while (i < @as(c_int, @intCast(ctx.ref_defs.items.len))) : (i += 1) {
         const def: *MD_REF_DEF = @ptrCast(&ctx.ref_defs.items[@intCast(i)]);
+        // md_merge_lines_alloc shrinks to fit, so `*_size` IS the allocated
+        // length (the exact-length rule — a wrong count panics under the
+        // testing allocator).
         if (def.label_needs_free)
-            std.c.free(def.label);
+            util.free_array_a(CHAR, ctx.alloc, def.label, @intCast(def.label_size));
         if (def.title_needs_free)
-            std.c.free(def.title);
+            util.free_array_a(CHAR, ctx.alloc, def.title, @intCast(def.title_size));
     }
     ctx.ref_defs.deinit(ctx.alloc);
 }
@@ -697,14 +700,14 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
     ctx.ref_defs.ensureUnusedCapacity(ctx.alloc, 1) catch {
         ctx.log("realloc() failed.");
         // ret stays 0 → abort.
-        return md_is_link_reference_definition_abort(def, ret);
+        return md_is_link_reference_definition_abort(ctx, def, ret);
     };
     def = &ctx.ref_defs.items.ptr[ctx.ref_defs.items.len];
     @memset(std.mem.asBytes(def.?), 0);
 
     if (label_is_multiline) {
         ret = md_merge_lines_alloc(ctx, label_contents_beg, label_contents_end, lines[label_contents_line_index..], ' ', &def.?.label, &def.?.label_size);
-        if (ret < 0) return md_is_link_reference_definition_abort(def, ret);
+        if (ret < 0) return md_is_link_reference_definition_abort(ctx, def, ret);
         def.?.label_needs_free = true;
     } else {
         def.?.label = @constCast(ctx.str(label_contents_beg));
@@ -713,7 +716,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
 
     if (title_is_multiline) {
         ret = md_merge_lines_alloc(ctx, title_contents_beg, title_contents_end, lines[title_contents_line_index..], '\n', &def.?.title, &def.?.title_size);
-        if (ret < 0) return md_is_link_reference_definition_abort(def, ret);
+        if (ret < 0) return md_is_link_reference_definition_abort(ctx, def, ret);
         def.?.title_needs_free = true;
     } else {
         def.?.title = @constCast(ctx.str(title_contents_beg));
@@ -730,10 +733,11 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
 
 // The C `abort:` cleanup for md_is_link_reference_definition. Factored out since
 // Zig has no goto; only the realloc/merge-lines paths can reach it (with ret<=0).
-pub fn md_is_link_reference_definition_abort(def: ?*MD_REF_DEF, ret: c_int) c_int {
+pub fn md_is_link_reference_definition_abort(ctx: *MD_CTX, def: ?*MD_REF_DEF, ret: c_int) c_int {
     if (def) |d| {
-        if (d.label_needs_free) std.c.free(d.label);
-        if (d.title_needs_free) std.c.free(d.title);
+        // Exact-length frees: md_merge_lines_alloc shrunk each buffer to `*_size`.
+        if (d.label_needs_free) util.free_array_a(CHAR, ctx.alloc, d.label, @intCast(d.label_size));
+        if (d.title_needs_free) util.free_array_a(CHAR, ctx.alloc, d.title, @intCast(d.title_size));
     }
     return ret;
 }
@@ -777,7 +781,7 @@ pub fn md_is_link_reference(ctx: *MD_CTX, lines: []const MD_LINE, beg_in: OFF, e
     }
 
     if (is_multiline)
-        std.c.free(label);
+        util.free_array_a(CHAR, ctx.alloc, label, @intCast(label_size));
 
     if (def) |d| {
         // See https://github.com/mity/md4c/issues/238

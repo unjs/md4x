@@ -310,6 +310,18 @@ pub inline fn md_mark_get_ptr(ctx: *MD_CTX, mark_index: c_int) ?*anyopaque {
     return ptr;
 }
 
+// Free a `ptr_stack` entry at its EXACT allocated length. The stored buffer is
+// always an `md_merge_lines_alloc` result (a merged multiline link title), which
+// is shrunk to fit, so its allocated length is the size the same dummy mark
+// already carries in `prev` — written next to md_mark_store_ptr in
+// md_resolve_links and read back verbatim at emission time. Nothing rewrites a
+// mark's `prev` after md_resolve_links, so it is still the length here.
+pub inline fn md_mark_free_ptr(ctx: *MD_CTX, mark_index: c_int) void {
+    const size: SZ = @bitCast(ctx.marks.items[@intCast(mark_index)].prev);
+    const ptr: [*c]CHAR = @ptrCast(@alignCast(md_mark_get_ptr(ctx, mark_index)));
+    util.free_array_a(CHAR, ctx.alloc, ptr, @intCast(size));
+}
+
 pub inline fn md_resolve_range(ctx: *MD_CTX, opener_index: c_int, closer_index: c_int) void {
     const opener = &ctx.marks.items[@intCast(opener_index)];
     const closer = &ctx.marks.items[@intCast(closer_index)];
@@ -1271,7 +1283,9 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                         if (m.beg >= inline_link_end) break;
                         if ((m.flags & (MarkFlags.opener | MarkFlags.resolved)) == (MarkFlags.opener | MarkFlags.resolved)) {
                             if (ctx.marks.items[@intCast(m.next)].beg >= inline_link_end) {
-                                if (attr.title_needs_free) std.c.free(attr.title);
+                                // Exact-length free: md_merge_lines_alloc shrank
+                                // the merged title to `title_size`.
+                                if (attr.title_needs_free) util.free_array_a(CHAR, ctx.alloc, attr.title, @intCast(attr.title_size));
                                 is_link = 0;
                                 break;
                             }

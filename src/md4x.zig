@@ -195,7 +195,7 @@ const md_build_mark_char_map = inlines.md_build_mark_char_map;
 const md_collect_marks = inlines.md_collect_marks;
 const md_is_html_any = inlines.md_is_html_any;
 const md_is_html_tag = inlines.md_is_html_tag;
-const md_mark_get_ptr = inlines.md_mark_get_ptr;
+const md_mark_free_ptr = inlines.md_mark_free_ptr;
 const md_process_inlines = inlines.md_process_inlines;
 const md_resolve_links = inlines.md_resolve_links;
 
@@ -389,7 +389,7 @@ fn _test_run_inline(parser: *const c.Parser, text: [*c]const CHAR, size: SZ) c_i
     // ptr_stack cleanup (mirrors md_process_normal_block_contents).
     var pi: c_int = ctx.ptr_stack.top;
     while (pi >= 0) : (pi = ctx.marks.items[@intCast(pi)].next) {
-        std.c.free(md_mark_get_ptr(&ctx, pi));
+        md_mark_free_ptr(&ctx, pi);
     }
     ctx.ptr_stack.top = -1;
 
@@ -1270,9 +1270,11 @@ test "OOM: full md_parse sweep is crash- and leak-free under FailingAllocator" {
     // (marks), a table (pipe_offs + align_arr scratch), a fenced code block with
     // filename + highlight metadata (md_build_attribute info/lang/filename +
     // meta_buf/meta_copy), an inline link title with an entity (md_build_attribute
-    // non-trivial path), and inline/block components with attributes. std.testing.
-    // allocator flags any leak; FailingAllocator turns each successive internal
-    // allocation into OOM so every abort/cleanup path runs.
+    // non-trivial path), inline/block components with attributes, and the three
+    // md_merge_lines_alloc buffers (PLAN item 5 — see the tail of the document).
+    // std.testing.allocator flags any leak; FailingAllocator turns each
+    // successive internal allocation into OOM so every abort/cleanup path runs.
+    // The document currently makes 40 ctx.alloc allocations, 4 of them merges.
     //
     // The second titled link carries a 15-substring title (8 entities separated
     // by literal text), which is the ONLY thing in this document that drives
@@ -1290,7 +1292,18 @@ test "OOM: full md_parse sweep is crash- and leak-free under FailingAllocator" {
         "```js [app.js] {1-2,4} extra\ncode line\nmore code\n```\n\n" ++
         "::alert{type=\"info\"}\nNested **content** here.\n::\n\n" ++
         "Mail me@example.com or visit www.example.org for details.\n\n" ++
-        "- one\n- two\n  - nested\n\n> quote\n";
+        "- one\n- two\n  - nested\n\n> quote\n\n" ++
+        // The three md_merge_lines_alloc sites (PLAN item 5), which are only
+        // reachable when a label or title SPANS LINES. Without them, none of
+        // the merged-buffer allocations exists and the sweep cannot inject OOM
+        // into (or leak-check) them. Keep all three multiline:
+        //   1. the ref-def's own label AND title -> md_is_link_reference_definition
+        //   2. a reference USE with a multiline label -> md_is_link_reference
+        //   3. an inline link with a multiline title -> md_is_inline_link_spec,
+        //      whose buffer is handed to the `ptr_stack` and freed by its walk.
+        "[multi\nline label]: /m \"multi\nline title\"\n\n" ++
+        "Ref to [multi\nline label] here.\n\n" ++
+        "An [x](/u \"multi\nline title\") link.\n";
     var probe: AbortProbe = .{};
     var p = probe.parser();
     var fail: usize = 0;

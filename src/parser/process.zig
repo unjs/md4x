@@ -39,7 +39,7 @@ const md_build_ref_def_hashtable = refdefs.md_build_ref_def_hashtable;
 
 const mdText = inlines.mdText;
 const md_analyze_inlines = inlines.md_analyze_inlines;
-const md_mark_get_ptr = inlines.md_mark_get_ptr;
+const md_mark_free_ptr = inlines.md_mark_free_ptr;
 const md_process_inlines = inlines.md_process_inlines;
 
 const md_add_line_into_current_block = blocks.md_add_line_into_current_block;
@@ -270,7 +270,7 @@ pub fn md_process_normal_block_contents(ctx: *MD_CTX, lines: []const MD_LINE) c_
     // Free any temporary memory blocks stored within some dummy marks.
     var i: c_int = ctx.ptr_stack.top;
     while (i >= 0) : (i = ctx.marks.items[@intCast(i)].next) {
-        std.c.free(md_mark_get_ptr(ctx, i));
+        md_mark_free_ptr(ctx, i);
     }
     ctx.ptr_stack.top = -1;
 

@@ -400,14 +400,61 @@ pub fn md_merge_lines(ctx: *const MD_CTX, beg: OFF, end: OFF, lines: []const MD_
 }
 
 // Wrapper of md_merge_lines() which allocates the output. Returns 0 / -1.
+//
+// Routed through `ctx.alloc` (PLAN item 5), so the caller must free the result
+// at its EXACT allocated length. md_merge_lines writes at most `end - beg`
+// bytes but usually fewer (the inter-line prefixes are dropped), so the buffer
+// is SHRUNK TO FIT before it is handed back: on return the allocated length is
+// exactly `p_size.*`, which is the field every call site already keeps. Do not
+// remove the shrink — it is what lets `md_free_ref_defs`, `md_is_link_reference`
+// and the `ptr_stack` walk free by `*_size` alone.
 pub fn md_merge_lines_alloc(ctx: *MD_CTX, beg: OFF, end: OFF, lines: []const MD_LINE, line_break_replacement_char: CHAR, p_str: *[*c]CHAR, p_size: *SZ) c_int {
     const n: usize = @intCast(end - beg);
-    const buffer = c_allocator.alloc(CHAR, n) catch {
+
+    // Zero-length guard. Currently unreachable (every call site is gated by a
+    // `contents_beg < contents_end` invariant), but `Allocator.alloc` of 0 bytes
+    // short-circuits the vtable and returns a non-null `maxInt(usize)` sentinel,
+    // which would reach the free sites — unlike C's `malloc(0)`. The sibling
+    // helpers (`arena_alloc`, `alloc_array_a`) special-case zero the same way.
+    // Callers tolerate a null string with a zero size (it is the ordinary
+    // "no title" shape).
+    if (n == 0) {
+        p_str.* = null;
+        p_size.* = 0;
+        return 0;
+    }
+
+    const buffer = alloc_array_a(CHAR, ctx.alloc, n);
+    if (buffer == null) {
         ctx.log("malloc() failed.");
         return -1;
-    };
-    md_merge_lines(ctx, beg, end, lines, line_break_replacement_char, buffer.ptr, p_size);
-    p_str.* = buffer.ptr;
+    }
+    md_merge_lines(ctx, beg, end, lines, line_break_replacement_char, buffer, p_size);
+
+    const size: usize = @intCast(p_size.*);
+    if (size == 0) {
+        // Also unreachable for n > 0 (the first loop iteration always writes at
+        // least one byte), but keep the buffer's length and `p_size` in sync.
+        free_array_a(CHAR, ctx.alloc, buffer, n);
+        p_str.* = null;
+        return 0;
+    }
+    if (size < n) {
+        // Shrink-to-fit. A shrinking realloc resizes in place on c_allocator and
+        // on the testing allocator, so this effectively never fails; if it ever
+        // did, fail the whole merge rather than hand back a length≠size buffer.
+        const shr = realloc_array_a(CHAR, ctx.alloc, buffer, n, size);
+        if (shr == null) {
+            free_array_a(CHAR, ctx.alloc, buffer, n);
+            p_str.* = null;
+            p_size.* = 0;
+            ctx.log("realloc() failed.");
+            return -1;
+        }
+        p_str.* = shr;
+        return 0;
+    }
+    p_str.* = buffer;
     return 0;
 }
 
