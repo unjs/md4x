@@ -18,8 +18,10 @@
 
 ## What's left
 
-**Landed 2026-08-12** (all behind the full gate, corpus diff-clean at 168
-hashes, golden SAX trace unchanged, nothing re-recorded):
+**Landed 2026-08-12** (all behind the full gate, golden SAX trace unchanged,
+nothing re-recorded; corpus diff-clean at 168 hashes for every item except 9,
+whose six changed hashes are the `test/regressions.txt` **input file** growing —
+see its section below):
 
 | Item                              | Commits                         |
 | --------------------------------- | ------------------------------- |
@@ -31,7 +33,8 @@ hashes, golden SAX trace unchanged, nothing re-recorded):
 | 9a — quadratic `{...}` attrs scan | `521bca5`                       |
 | 1c — attr builder OOM free length | `efd4025`                       |
 | 8 — `zig build test` in CI + safe | `4855d1b`                       |
-| 9b — out-of-range mark cursor     | _the commit adding this row_    |
+| 9b — out-of-range mark cursor     | `c666da4`                       |
+| 9 — list loosened by `::` / `#`   | _the commit adding this row_    |
 
 Zero `TRUE`/`FALSE` tokens remain in `src/`. Verified at `3c3d2f7`: `zig build`,
 `zig build test` (ReleaseFast **and** Debug), 16 spec suites / 1001 assertions,
@@ -80,11 +83,8 @@ behind the full verification gate.
 
 **Items 9–11 are different.** They are live bugs found by an independent audit,
 verified by reproduction — item 9 is user-visible on ordinary MDC prose. They
-are not refactors, they must not ride along with one, and item 9 deliberately
-**breaks the "corpus diff must be empty" rule** because the baseline currently
-encodes the bug. Read the gate exception on item 9 before touching it. (9a, the
-reachable DoS, and 9b, the out-of-range mark cursor, are **landed** — see the
-table above.)
+are not refactors and must not ride along with one. **9, 9a and 9b are all
+landed** — see the table above; only **10** and **11** are left.
 
 **Suggested priority.** `8` is **landed** (it was why three of these bugs went
 unseen); take the rest in any order.
@@ -238,9 +238,9 @@ format) and forces a re-baseline. Item 9b was granted no gate exception, so the
 cost buys nothing. If a `.txt` case is ever wanted for this, land it alongside
 item 9, which already requires a deliberate re-baseline.
 
-### 9. `::component` / `#slot` retroactively flips an earlier list to loose
+### ~~9. `::component` / `#slot` retroactively flips an earlier list to loose~~ — LANDED
 
-**Live output-correctness bug, reproduced.** `blocks.zig:1688-1693` uses
+**Live output-correctness bug, reproduced.** `blocks.zig:1688-1693` used
 `cont.ch != '>'` to mean "is a list":
 
 ```zig
@@ -279,10 +279,30 @@ Reachable from ordinary MDC prose: any document opening with a list that later
 contains a blank line inside a `::component` or `#slot`. Given md4x targets MDC,
 real Nuxt Content documents plausibly hit this.
 
-Fix: make the guard positive — `if (ISANYOF_(cont.ch, "-+*.)"))`. The same
-`!= '>'`-means-list assumption also drives `blocks.zig:1237`, `:1243` and the
-two-blank-lines hack at `:1256`; tightening `:1690` alone fixes the corruption,
-but all four deserve the positive test.
+**Fixed by making that one guard positive** — `if (ISANYOF_(cont.ch, "-+*.)"))`
+— and **only** that one. PLAN proposed the same positive test for the other
+three `!= '>'`-means-list sites (`blocks.zig:1238`, `:1244`, and the
+two-blank-lines hack at `:1258`); all three were evaluated with dedicated
+binaries and rejected, because both turn out to be behaviorally load-bearing:
+
+- **`:1238`** (`last_line_has_list_loosening_effect`) — the flag's only consumer
+  is `:1690`, so narrowing it is redundant _and_ harmful. A differential run of
+  11 825 generated container-shaped documents found 22 where it changes output,
+  all one shape: an indented blank line inside a component/slot that is itself
+  inside a list item, followed by a new list item (`- ::c` / `␠␠` / `- b`). The
+  blank line genuinely separates two list items, so CommonMark makes that list
+  **loose** — which the current code gets right and the positive test would
+  break. Pinned as the third case in `test/regressions.txt`.
+- **`:1244` / `:1258`** (the empty-list-item two-blank-lines hack) — a 15 994
+  document differential found one divergence
+  (`::c` / `x` / `␠␠- ` / `␠␠` / `1. ` / `- #s`). There the hack fires off a
+  **garbage type byte**: `x\n  -` is a setext `h2`, so the tail of `block_bytes`
+  is an `MD_LINE` payload whose `beg == 4` reads back as the `li` ordinal —
+  exactly the misread `MD_BLOCK.typeIsRaw` exists to tolerate. Today that makes
+  `n_parents -= 1` pop the **component** and close it early; the positive test
+  would keep it open. Arguably an improvement, but it is a distinct defect with
+  its own output change, so it does not belong in this commit and is not covered
+  by the gate exception below.
 
 > **GATE EXCEPTION — the corpus baseline currently ENCODES this bug.** If the
 > seed corpus contains any list-then-component document, its 168 hashes bake in
@@ -290,6 +310,26 @@ but all four deserve the positive test.
 > produce a non-empty `diff-corpus.sh` diff. It requires a deliberate
 > re-baseline plus a `test/regressions.txt` case, and **cannot** ride the
 > "diff must be empty" rule.
+
+**The exception turned out not to be needed for the parser fix.** Two-staged as
+required. **Stage A** (parser fix alone, `test/regressions.txt` untouched): the
+corpus diff is **empty**. The seed corpus contains no document that both opens
+with a list and later blanks a line inside a component/slot — every `::` in the
+spec `.txt` files sits inside a 32-backtick `example` fence, and
+`seed-corpus/components.md`, which does have real components and blank lines
+inside them, has no list at all (its `block_bytes[0]` is the `:icon-star`
+paragraph, and `MD_BLOCK_LOOSE_LIST` on a non-list block is simply ignored).
+**Stage B** (regression cases added): exactly six hashes change, one per format,
+all `test/regressions.txt` — the file is itself a corpus input, so appending
+~70 lines of test text moves them. Attribution proved directly: the **pre-fix**
+binary produces byte-identical hashes to the fixed one over the new file for all
+six formats, so zero of the six is caused by the parser change. Baseline
+re-captured at 168 hashes; the pre-item-9 copy is kept at
+`/home/dev/.md4x-gate/baseline-pre-item9.sha`.
+
+Golden SAX trace unchanged. Regression coverage is bidirectional: the two bug
+cases fail against the pre-fix binary, and the third case fails against the
+"all four positive" variant.
 
 ### 10. Component/slot/alert index truncated to 16 bits
 
@@ -384,8 +424,11 @@ zig build napi-linux-x64 -Dnapi-include=node_modules/node-api-headers/include \
 Use `bun`/`bunx` only — never npm/pnpm/yarn/npx.
 
 **Corpus baseline:** `/home/dev/.md4x-gate/baseline.sha` (168 hashes). Every
-commit from `83abae9` onward is output-identical, so it can be re-captured from
-any of them if lost (build that commit, run `diff-corpus.sh`). Any non-empty
+commit from `83abae9` onward is output-identical **except item 9's**, which
+changes the six `test/regressions.txt` hashes by growing that input file (the
+parser fix itself is diff-clean); re-capture from `HEAD` if lost, or from any
+earlier commit for the pre-item-9 set, also kept at
+`/home/dev/.md4x-gate/baseline-pre-item9.sha`. Any non-empty
 diff is a **stop-the-line** regression — bisect, fix, or revert. The hash lines
 are labelled `fmt:file`, so a diff immediately localizes which renderer broke.
 

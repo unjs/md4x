@@ -837,3 +837,80 @@ silently dropped closers, leaving orphaned openers with `next = -1`.
 .
 <p><i><i><i><i><i></i><i></i><i></i></i><i></i></i></i><i></i><i><i><i></i><i></i><i></i><i></i></i><i></i></i></i><i></i></p>
 ````````````````````````````````
+
+
+## `::component` / `#slot` retroactively loosening an earlier list
+
+A blank line inside a block component or a template slot set
+`last_line_has_list_loosening_effect`, and the loose-flag write then tested the
+innermost container with `ch != '>'` — "not a block quote", which upstream md4c
+could use as "is a list" because `'>'` and the list marks were the only
+container kinds it had. md4x adds `':'` (block component) and `'#'` (template
+slot), and only the list arms of `md_enter_child_containers()` ever assign
+`MD_CONTAINER.block_byte_off`, so for those two kinds it stayed at its `0`
+default and the flag was written to `block_bytes[0]` — the document's *first*
+block. Whenever that happened to be a `ul`/`ol` opener, an unrelated earlier
+list silently became loose.
+
+```````````````````````````````` example
+- a
+- b
+
+::c
+
+d
+::
+.
+<ul>
+<li>a</li>
+<li>b</li>
+</ul>
+<c>
+<p>d</p>
+</c>
+````````````````````````````````
+
+Same through a template slot:
+
+```````````````````````````````` example
+- a
+- b
+
+::c
+#s
+
+d
+::
+.
+<ul>
+<li>a</li>
+<li>b</li>
+</ul>
+<c>
+<template name="s">
+<p>d</p>
+</template>
+</c>
+````````````````````````````````
+
+The fix must stay confined to the loose-flag write. The blank line below really
+does separate two list items, so the list is genuinely loose even though the
+innermost *matched* container at the blank line is the component — narrowing
+`md_analyze_line`'s `last_line_has_list_loosening_effect` assignment to the same
+positive list test would wrongly make this tight. (The blank line here is
+indented to the list item's content column; that is what makes the component the
+innermost matched parent.)
+
+```````````````````````````````` example
+- ::c
+  
+- b
+.
+<ul>
+<li><c>
+</c>
+</li>
+<li><p>b</p>
+</li>
+</ul>
+````````````````````````````````

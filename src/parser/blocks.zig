@@ -1687,7 +1687,13 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     // If we belong to a list after seeing a blank line, the list is loose.
     if (prev_line_has_list_loosening_effect and line.type != .blank and n_parents + n_brothers > 0) {
         const cont = &ctx.containers.items[@intCast(n_parents + n_brothers - 1)];
-        if (cont.ch != '>') {
+        // Must be a LIST container: only the list arms of
+        // md_enter_child_containers() ever assign cont.block_byte_off. The
+        // md4x-only container kinds ':' (block component) and '#' (template
+        // slot) leave it at its 0 default, so the upstream "not a blockquote
+        // means a list" test would aim this write at block_bytes[0] — some
+        // unrelated earlier block, flipping it loose.
+        if (ISANYOF_(cont.ch, "-+*.)")) {
             const block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + cont.block_byte_off));
             block.bits.flags |= @as(u8, @truncate(MD_BLOCK_LOOSE_LIST));
         }

@@ -312,9 +312,12 @@ Based on past bugs found via fuzzing in the original C implementation. Zig's bou
 
 7. **Uncapped user-controlled ranges** — Cap ranges from user input (e.g. highlight ranges `{1-99999}`) at reasonable limits to prevent excessive allocation.
 
+8. **Upstream invariants md4x's extra container kinds broke** — md4c's `MD_CONTAINER` stack only ever holds `'>'` and the list marks `-+*.)`, so upstream freely writes `cont.ch != '>'` to mean _"is a list"_. md4x adds two more kinds — `':'` (block component, pushed in `md_analyze_line`) and `'#'` (template slot) — so that negative test is **wrong here**, and `MD_CONTAINER` fields only the list arms of `md_enter_child_containers()` initialize (notably `block_byte_off`, which defaults to `0`) silently read back as "block index 0" for them. That is a wild write into `block_bytes[0]`, the document's first block — the shape of item 9. **Always spell a list test positively: `ISANYOF_(cont.ch, "-+*.)")`.** The three remaining `ch != '>'` sites in `blocks.zig` (the `last_line_has_list_loosening_effect` assignment and both halves of the two-blank-lines hack) are deliberately left negative — see the third case in `test/regressions.txt` under "`::component` / `#slot` retroactively loosening an earlier list", which pins output that a positive test there would break.
+
 **Audit checklist when reviewing changes:**
 
 - Search for fixed-size arrays → verify bounds checks at every insertion
+- Search for `cont.ch != '>'` / any "not a block quote means a list" test → verify it is not reading a field that only the list arms initialize
 - Search for pointer caching across a realloc/`append` → verify no stale pointer use after buffer growth
 - Audit tag-name dispatch in the AST renderer → verify `tag_is_dynamic` checked first
 - Audit `leave_block`/`leave_span` callbacks → verify correct type guard and underflow handling
