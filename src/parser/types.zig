@@ -34,26 +34,28 @@ pub const FALSE: c_int = 0;
 
 // Internal-only line classifier (never crosses the C ABI — lives only in the
 // plain `MD_LINE_ANALYSIS` struct). The explicit `c_int` backing is dropped so
-// the compiler picks the layout; member names stay MD_LINE_* to preserve
-// upstream md4c cross-reference (PLAN 8.6 / 8.8).
+// the compiler picks the layout, and the members use the idiomatic Zig
+// spelling (`.blank`, `.atx_header`, …) matching the `BlockType` / `SpanType`
+// convention in `src/abi.zig`. Declaration order — hence the ordinals — is
+// frozen to the C enumeration this replaces.
 pub const MD_LINETYPE = enum {
-    MD_LINE_BLANK,
-    MD_LINE_HR,
-    MD_LINE_ATXHEADER,
-    MD_LINE_SETEXTHEADER,
-    MD_LINE_SETEXTUNDERLINE,
-    MD_LINE_INDENTEDCODE,
-    MD_LINE_FENCEDCODE,
-    MD_LINE_HTML,
-    MD_LINE_TEXT,
-    MD_LINE_TABLE,
-    MD_LINE_TABLEUNDERLINE,
-    MD_LINE_FRONTMATTER,
-    MD_LINE_BLOCKCOMPONENT,
+    blank,
+    hr,
+    atx_header,
+    setext_header,
+    setext_underline,
+    indented_code,
+    fenced_code,
+    html,
+    text,
+    table,
+    table_underline,
+    frontmatter,
+    block_component,
 };
 
 pub const MD_LINE_ANALYSIS = struct {
-    type: MD_LINETYPE = .MD_LINE_BLANK,
+    type: MD_LINETYPE = .blank,
     data: c_uint = 0,
     enforce_new_block: c_int = 0,
     beg: OFF = 0,

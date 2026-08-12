@@ -462,9 +462,9 @@ inline` include of md4x.c + a driver replicating `md_process_doc`'s line loop �
   GREEN.** `md_parse` is the real exported entry point (no longer a stub).
 
   **Step 1 — md_analyze_line `matched` fix (vs the FIXED C):** the Pass-D orphaned-`::`-closer branch read
-  `line.type == .MD_LINE_BLANK` after the container-walk loop (the OLD behavior). Replaced with a local
-  `matched: c_int` set inside the loop + `if (matched != 0) break :classify;` — byte-for-byte the FIXED
-  `src/md4x.c`. Since `MD_LINE_BLANK == 0` and `line_buf` is zero-inited, the old logic wrongly dropped orphaned
+  `line.type == .blank` (then spelled `.MD_LINE_BLANK`) after the container-walk loop (the OLD behavior). Replaced
+  with a local `matched: c_int` set inside the loop + `if (matched != 0) break :classify;` — byte-for-byte the FIXED
+  `src/md4x.c`. Since the blank line type is ordinal `0` and `line_buf` is zero-inited, the old logic wrongly dropped orphaned
   `::` closers; the new logic only treats a `::` line as a closer when a matching open `:` container is actually
   found. Verified the orphaned-closer cases now MATCH the oracle (both sides fixed).
 

@@ -108,13 +108,13 @@ pub fn md_start_new_block(ctx: *MD_CTX, line: *const MD_LINE_ANALYSIS) c_int {
     const block: *MD_BLOCK = @ptrCast(@alignCast(block_raw));
 
     switch (line.type) {
-        .MD_LINE_HR => block.setType(c.BlockType.hr),
-        .MD_LINE_ATXHEADER, .MD_LINE_SETEXTHEADER => block.setType(c.BlockType.h),
-        .MD_LINE_FENCEDCODE, .MD_LINE_INDENTEDCODE => block.setType(c.BlockType.code),
-        .MD_LINE_TEXT => block.setType(c.BlockType.p),
-        .MD_LINE_HTML => block.setType(c.BlockType.html),
-        .MD_LINE_FRONTMATTER => block.setType(c.BlockType.frontmatter),
-        // MD_LINE_BLANK / SETEXTUNDERLINE / TABLEUNDERLINE / default: MD_UNREACHABLE.
+        .hr => block.setType(c.BlockType.hr),
+        .atx_header, .setext_header => block.setType(c.BlockType.h),
+        .fenced_code, .indented_code => block.setType(c.BlockType.code),
+        .text => block.setType(c.BlockType.p),
+        .html => block.setType(c.BlockType.html),
+        .frontmatter => block.setType(c.BlockType.frontmatter),
+        // .blank / .setext_underline / .table_underline / default: MD_UNREACHABLE.
         else => unreachable,
     }
 
@@ -971,7 +971,7 @@ pub fn md_line_indentation(ctx: *MD_CTX, total_indent: c_uint, beg: OFF, p_end: 
     return indent - total_indent;
 }
 
-pub const md_dummy_blank_line = MD_LINE_ANALYSIS{ .type = .MD_LINE_BLANK, .data = 0, .enforce_new_block = 0, .beg = 0, .end = 0, .indent = 0 };
+pub const md_dummy_blank_line = MD_LINE_ANALYSIS{ .type = .blank, .data = 0, .enforce_new_block = 0, .beg = 0, .end = 0, .indent = 0 };
 
 // Analyze type of the line and find some of its properties. Main input for
 // determining type and boundaries of a block (md4x.c ~7096).
@@ -1045,7 +1045,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
     classify: while (true) {
         // Check whether we are frontmatter continuation.
-        if (pivot_line.type == .MD_LINE_FRONTMATTER) {
+        if (pivot_line.type == .frontmatter) {
             line.beg = off;
 
             // Check for closing --- fence.
@@ -1060,7 +1060,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                     while (tmp < ctx.size and ctx.ch(tmp) == ' ')
                         tmp += 1;
                     if (tmp >= ctx.size or ctx.isNewline(tmp)) {
-                        line.type = .MD_LINE_BLANK;
+                        line.type = .blank;
                         if (pivot_line.data == 2) {
                             // Component frontmatter: mark container as done.
                             var i: c_int = ctx.nContainers() - 1;
@@ -1078,20 +1078,20 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 }
             }
 
-            line.type = .MD_LINE_FRONTMATTER;
+            line.type = .frontmatter;
             line.data = pivot_line.data;
             n_parents = ctx.nContainers();
             break :classify;
         }
 
         // Check whether we are fenced code continuation.
-        if (pivot_line.type == .MD_LINE_FENCEDCODE) {
+        if (pivot_line.type == .fenced_code) {
             line.beg = off;
 
-            // Another MD_LINE_FENCEDCODE unless closing fence (→ MD_LINE_BLANK).
+            // Another .fenced_code unless closing fence (→ .blank).
             if (line.indent < ctx.code_indent_offset) {
                 if (md_is_closing_code_fence(ctx, ctx.ch(pivot_line.beg), off, &off) != 0) {
-                    line.type = .MD_LINE_BLANK;
+                    line.type = .blank;
                     ctx.last_line_has_list_loosening_effect = FALSE;
                     break :classify;
                 }
@@ -1104,13 +1104,13 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 else
                     line.indent = 0;
 
-                line.type = .MD_LINE_FENCEDCODE;
+                line.type = .fenced_code;
                 break :classify;
             }
         }
 
         // Check whether we are HTML block continuation.
-        if (pivot_line.type == .MD_LINE_HTML and ctx.html_block_type > 0) {
+        if (pivot_line.type == .html and ctx.html_block_type > 0) {
             if (n_parents < ctx.nContainers()) {
                 // HTML block ends implicitly when enclosing container ends.
                 ctx.html_block_type = 0;
@@ -1122,13 +1122,13 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
                     // Some end conditions serve as blank lines.
                     if (html_block_type == 6 or html_block_type == 7) {
-                        line.type = .MD_LINE_BLANK;
+                        line.type = .blank;
                         line.indent = 0;
                         break :classify;
                     }
                 }
 
-                line.type = .MD_LINE_HTML;
+                line.type = .html;
                 n_parents = ctx.nContainers();
                 break :classify;
             }
@@ -1152,7 +1152,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                             if (ret < 0) return ret;
                         }
 
-                        line.type = .MD_LINE_BLANK;
+                        line.type = .blank;
                         ctx.last_line_has_list_loosening_effect = FALSE;
                         off = tmp;
                         matched = 1;
@@ -1170,7 +1170,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         // Check for slot opener (#slot-name) inside a block component.
         if ((ctx.parser.flags & c.MD_FLAG_COMPONENTS != 0) and ctx.block_component_nesting > 0 and
             (line.indent < ctx.code_indent_offset or inside_component != 0) and
-            pivot_line.type != .MD_LINE_TEXT and
+            pivot_line.type != .text and
             off < ctx.size and ctx.ch(off) == '#')
         {
             var name_beg: OFF = undefined;
@@ -1218,22 +1218,22 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 md_push_container(ctx, &container) catch return -1;
 
                 off = slot_end;
-                line.type = .MD_LINE_BLANK;
+                line.type = .blank;
                 break :classify;
             }
         }
 
         // Check for blank line.
         if (off >= ctx.size or ctx.isNewline(off)) {
-            if (pivot_line.type == .MD_LINE_INDENTEDCODE and n_parents == ctx.nContainers()) {
-                line.type = .MD_LINE_INDENTEDCODE;
+            if (pivot_line.type == .indented_code and n_parents == ctx.nContainers()) {
+                line.type = .indented_code;
                 if (line.indent > ctx.code_indent_offset)
                     line.indent -= ctx.code_indent_offset
                 else
                     line.indent = 0;
                 ctx.last_line_has_list_loosening_effect = FALSE;
             } else {
-                line.type = .MD_LINE_BLANK;
+                line.type = .blank;
                 ctx.last_line_has_list_loosening_effect = @intFromBool(n_parents > 0 and
                     n_brothers + n_children == 0 and
                     ctx.containers.items[@intCast(n_parents - 1)].ch != '>');
@@ -1300,7 +1300,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                             };
                             ctx.containers.items[@intCast(last_cont)].is_alert = TRUE;
                             ctx.containers.items[@intCast(last_cont)].start = @intCast(alert_idx);
-                            line.type = .MD_LINE_BLANK;
+                            line.type = .blank;
                             break :classify;
                         }
                     }
@@ -1309,14 +1309,14 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         }
 
         // Check whether we are Setext underline.
-        if (line.indent < ctx.code_indent_offset and pivot_line.type == .MD_LINE_TEXT and
+        if (line.indent < ctx.code_indent_offset and pivot_line.type == .text and
             off < ctx.size and ctx.isAnyOf2(off, '=', '-') and
             (n_parents == ctx.nContainers()))
         {
             var level: c_uint = undefined;
 
             if (md_is_setext_underline(ctx, off, &off, &level) != 0) {
-                line.type = .MD_LINE_SETEXTUNDERLINE;
+                line.type = .setext_underline;
                 line.data = level;
                 break :classify;
             }
@@ -1336,7 +1336,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                     tmp += 1;
                 if (tmp >= ctx.size or ctx.isNewline(tmp)) {
                     if (beg == 0) {
-                        line.type = .MD_LINE_FRONTMATTER;
+                        line.type = .frontmatter;
                         line.enforce_new_block = TRUE;
                         line.data = 1;
                         ctx.frontmatter_state = 1;
@@ -1374,7 +1374,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                             tmp += 1;
                         if (tmp >= ctx.size or ctx.isNewline(tmp)) {
                             ctx.containers.items[@intCast(comp_i)].comp_fm_state = 1;
-                            line.type = .MD_LINE_FRONTMATTER;
+                            line.type = .frontmatter;
                             line.data = 2; // 2 = component frontmatter
                             line.enforce_new_block = TRUE;
                             found_opener = TRUE;
@@ -1394,7 +1394,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             ctx.isAnyOf(off, "-_*"))
         {
             if (md_is_hr_line(ctx, off, &off, &hr_killer) != 0) {
-                line.type = .MD_LINE_HR;
+                line.type = .hr;
                 break :classify;
             }
         }
@@ -1436,8 +1436,8 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
 
         // Check for indented code (cannot interrupt a paragraph; disabled
         // inside block components).
-        if (line.indent >= ctx.code_indent_offset and inside_component == 0 and (pivot_line.type != .MD_LINE_TEXT)) {
-            line.type = .MD_LINE_INDENTEDCODE;
+        if (line.indent >= ctx.code_indent_offset and inside_component == 0 and (pivot_line.type != .text)) {
+            line.type = .indented_code;
             line.indent -= ctx.code_indent_offset;
             line.data = 0;
             break :classify;
@@ -1446,7 +1446,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         // Check for block component opener (::name or ::name{props}).
         if ((ctx.parser.flags & c.MD_FLAG_COMPONENTS != 0) and
             (line.indent < ctx.code_indent_offset or inside_component != 0) and
-            pivot_line.type != .MD_LINE_TEXT and
+            pivot_line.type != .text and
             off < ctx.size and ctx.ch(off) == ':')
         {
             var name_beg: OFF = undefined;
@@ -1484,7 +1484,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 ctx.block_component_nesting += 1;
 
                 off = comp_end;
-                line.type = .MD_LINE_BLANK;
+                line.type = .blank;
                 break :classify;
             }
         }
@@ -1493,11 +1493,11 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         if (line.indent < ctx.code_indent_offset and
             md_is_container_mark(ctx, line.indent, off, &off, &container) != 0)
         {
-            if (pivot_line.type == .MD_LINE_TEXT and n_parents == ctx.nContainers() and
+            if (pivot_line.type == .text and n_parents == ctx.nContainers() and
                 (off >= ctx.size or ctx.isNewline(off)) and container.ch != '>')
             {
                 // Noop. List mark + blank line cannot interrupt a paragraph.
-            } else if (pivot_line.type == .MD_LINE_TEXT and n_parents == ctx.nContainers() and
+            } else if (pivot_line.type == .text and n_parents == ctx.nContainers() and
                 ISANYOF2_(container.ch, '.', ')') and container.start != 1)
             {
                 // Noop. Ordered list interrupts a paragraph only when start == 1.
@@ -1535,8 +1535,8 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         }
 
         // Check whether we are table continuation.
-        if (pivot_line.type == .MD_LINE_TABLE and n_parents == ctx.nContainers()) {
-            line.type = .MD_LINE_TABLE;
+        if (pivot_line.type == .table and n_parents == ctx.nContainers()) {
+            line.type = .table;
             break :classify;
         }
 
@@ -1547,7 +1547,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             var level: c_uint = undefined;
 
             if (md_is_atxheader_line(ctx, off, &line.beg, &off, &level) != 0) {
-                line.type = .MD_LINE_ATXHEADER;
+                line.type = .atx_header;
                 line.data = level;
                 break :classify;
             }
@@ -1558,7 +1558,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             off < ctx.size and ctx.isAnyOf2(off, '`', '~'))
         {
             if (md_is_opening_code_fence(ctx, off, &off) != 0) {
-                line.type = .MD_LINE_FENCEDCODE;
+                line.type = .fenced_code;
                 line.data = 1;
                 line.enforce_new_block = TRUE;
                 break :classify;
@@ -1572,7 +1572,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             ctx.html_block_type = md_is_html_block_start_condition(ctx, off);
 
             // HTML block type 7 cannot interrupt paragraph.
-            if (ctx.html_block_type == 7 and pivot_line.type == .MD_LINE_TEXT)
+            if (ctx.html_block_type == 7 and pivot_line.type == .text)
                 ctx.html_block_type = 0;
 
             if (ctx.html_block_type > 0) {
@@ -1582,13 +1582,13 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 }
 
                 line.enforce_new_block = TRUE;
-                line.type = .MD_LINE_HTML;
+                line.type = .html;
                 break :classify;
             }
         }
 
         // Check for table underline.
-        if ((ctx.parser.flags & c.MD_FLAG_TABLES != 0) and pivot_line.type == .MD_LINE_TEXT and
+        if ((ctx.parser.flags & c.MD_FLAG_TABLES != 0) and pivot_line.type == .text and
             off < ctx.size and ctx.isAnyOf3(off, '|', '-', ':') and
             n_parents == ctx.nContainers())
         {
@@ -1598,14 +1598,14 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 md_is_table_underline(ctx, off, &off, &col_count) != 0)
             {
                 line.data = col_count;
-                line.type = .MD_LINE_TABLEUNDERLINE;
+                line.type = .table_underline;
                 break :classify;
             }
         }
 
         // By default, we are normal text line.
-        line.type = .MD_LINE_TEXT;
-        if (pivot_line.type == .MD_LINE_TEXT and n_brothers + n_children == 0) {
+        line.type = .text;
+        if (pivot_line.type == .text and n_brothers + n_children == 0) {
             // Lazy continuation.
             n_parents = ctx.nContainers();
         }
@@ -1659,7 +1659,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     line.end = off;
 
     // But for ATX header, exclude the optional trailing mark.
-    if (line.type == .MD_LINE_ATXHEADER) {
+    if (line.type == .atx_header) {
         var tmp: OFF = line.end;
         while (tmp > line.beg and ctx.isBlank(tmp - 1))
             tmp -= 1;
@@ -1670,7 +1670,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     }
 
     // Trim trailing spaces.
-    if (line.type != .MD_LINE_INDENTEDCODE and line.type != .MD_LINE_FENCEDCODE and line.type != .MD_LINE_HTML) {
+    if (line.type != .indented_code and line.type != .fenced_code and line.type != .html) {
         while (line.end > line.beg and ctx.isBlank(line.end - 1))
             line.end -= 1;
     }
@@ -1684,7 +1684,7 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     p_end.* = off;
 
     // If we belong to a list after seeing a blank line, the list is loose.
-    if (prev_line_has_list_loosening_effect != 0 and line.type != .MD_LINE_BLANK and n_parents + n_brothers > 0) {
+    if (prev_line_has_list_loosening_effect != 0 and line.type != .blank and n_parents + n_brothers > 0) {
         const cont = &ctx.containers.items[@intCast(n_parents + n_brothers - 1)];
         if (cont.ch != '>') {
             const block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + cont.block_byte_off));

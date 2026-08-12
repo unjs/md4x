@@ -846,7 +846,7 @@ pub fn md_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, 
     var ret: c_int = 0;
 
     // Blank line ends current leaf block.
-    if (line.type == .MD_LINE_BLANK) {
+    if (line.type == .blank) {
         ret = md_end_current_block(ctx);
         if (ret < 0) return ret;
         p_pivot_line.* = &md_dummy_blank_line;
@@ -859,7 +859,7 @@ pub fn md_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, 
     }
 
     // Some line types form block on their own.
-    if (line.type == .MD_LINE_HR or line.type == .MD_LINE_ATXHEADER) {
+    if (line.type == .hr or line.type == .atx_header) {
         ret = md_end_current_block(ctx);
         if (ret < 0) return ret;
         ret = md_start_new_block(ctx, line);
@@ -872,8 +872,8 @@ pub fn md_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, 
         return 0;
     }
 
-    // MD_LINE_SETEXTUNDERLINE changes meaning of current block and ends it.
-    if (line.type == .MD_LINE_SETEXTUNDERLINE) {
+    // .setext_underline changes meaning of current block and ends it.
+    if (line.type == .setext_underline) {
         ctx.current_block.*.setType(c.BlockType.h);
         ctx.current_block.*.bits.data = @truncate(line.data);
         ctx.current_block.*.bits.flags |= @as(u8, @truncate(MD_BLOCK_SETEXT_HEADER));
@@ -884,17 +884,17 @@ pub fn md_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, 
         if (ctx.current_block == null) {
             p_pivot_line.* = &md_dummy_blank_line;
         } else {
-            line.type = .MD_LINE_TEXT;
+            line.type = .text;
             p_pivot_line.* = line;
         }
         return 0;
     }
 
-    // MD_LINE_TABLEUNDERLINE changes meaning of current block.
-    if (line.type == .MD_LINE_TABLEUNDERLINE) {
+    // .table_underline changes meaning of current block.
+    if (line.type == .table_underline) {
         ctx.current_block.*.setType(c.BlockType.table);
         ctx.current_block.*.bits.data = @truncate(line.data);
-        @as(*MD_LINE_ANALYSIS, @constCast(pivot_line)).type = .MD_LINE_TABLE;
+        @as(*MD_LINE_ANALYSIS, @constCast(pivot_line)).type = .table;
         ret = md_add_line_into_current_block(ctx, line);
         if (ret < 0) return ret;
         return 0;

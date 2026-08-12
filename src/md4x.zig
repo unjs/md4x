@@ -491,7 +491,7 @@ fn _test_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, l
     const pivot_line = p_pivot_line.*;
     var ret: c_int = 0;
 
-    if (line.type == .MD_LINE_BLANK) {
+    if (line.type == .blank) {
         ret = md_end_current_block(ctx);
         if (ret < 0) return ret;
         p_pivot_line.* = &md_dummy_blank_line;
@@ -503,7 +503,7 @@ fn _test_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, l
         if (ret < 0) return ret;
     }
 
-    if (line.type == .MD_LINE_HR or line.type == .MD_LINE_ATXHEADER) {
+    if (line.type == .hr or line.type == .atx_header) {
         ret = md_end_current_block(ctx);
         if (ret < 0) return ret;
         ret = md_start_new_block(ctx, line);
@@ -516,7 +516,7 @@ fn _test_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, l
         return 0;
     }
 
-    if (line.type == .MD_LINE_SETEXTUNDERLINE) {
+    if (line.type == .setext_underline) {
         ctx.current_block.*.setType(c.BlockType.h);
         ctx.current_block.*.bits.data = @truncate(line.data);
         ctx.current_block.*.bits.flags |= @as(u8, @truncate(MD_BLOCK_SETEXT_HEADER));
@@ -527,16 +527,16 @@ fn _test_process_line(ctx: *MD_CTX, p_pivot_line: *[*c]const MD_LINE_ANALYSIS, l
         if (ctx.current_block == null) {
             p_pivot_line.* = &md_dummy_blank_line;
         } else {
-            line.type = .MD_LINE_TEXT;
+            line.type = .text;
             p_pivot_line.* = line;
         }
         return 0;
     }
 
-    if (line.type == .MD_LINE_TABLEUNDERLINE) {
+    if (line.type == .table_underline) {
         ctx.current_block.*.setType(c.BlockType.table);
         ctx.current_block.*.bits.data = @truncate(line.data);
-        @as(*MD_LINE_ANALYSIS, @constCast(pivot_line)).type = .MD_LINE_TABLE;
+        @as(*MD_LINE_ANALYSIS, @constCast(pivot_line)).type = .table;
         ret = md_add_line_into_current_block(ctx, line);
         if (ret < 0) return ret;
         return 0;
