@@ -1837,13 +1837,13 @@ pub fn md_analyze_link_contents(ctx: *MD_CTX, lines: []const MD_LINE, mark_beg: 
 // ---- Span enter/leave helpers + emission (md4x.c ~4594..5197) ----
 
 pub inline fn mdEnterSpan(ctx: *MD_CTX, detail: *const c.SpanDetail) c_int {
-    const ret = ctx.parser.enter_span.?(detail, ctx.userdata);
+    const ret = ctx.parser.enter_span(detail, ctx.userdata);
     if (ret != 0) ctx.log("Aborted from enter_span() callback.");
     return ret;
 }
 
 pub inline fn mdLeaveSpan(ctx: *MD_CTX, detail: *const c.SpanDetail) c_int {
-    const ret = ctx.parser.leave_span.?(detail, ctx.userdata);
+    const ret = ctx.parser.leave_span(detail, ctx.userdata);
     if (ret != 0) ctx.log("Aborted from leave_span() callback.");
     return ret;
 }
@@ -1853,7 +1853,7 @@ pub inline fn mdLeaveSpan(ctx: *MD_CTX, detail: *const c.SpanDetail) c_int {
 // callback contract wants is formed here, at the single emission boundary.
 pub inline fn mdText(ctx: *MD_CTX, ty: c.TextType, str: [*c]const CHAR, size: SZ) c_int {
     if (size > 0) {
-        const ret = ctx.parser.text.?(ty, str[0..size], ctx.userdata);
+        const ret = ctx.parser.text(ty, str[0..size], ctx.userdata);
         if (ret != 0) {
             ctx.log("Aborted from text() callback.");
             return ret;

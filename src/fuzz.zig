@@ -86,8 +86,6 @@ test "md_parse" {
             var buf: [max_input]u8 = undefined;
             const input = buf[0..smith.slice(&buf)];
             if (!accept(input)) return;
-            var p: c.Parser = .{};
-            p.flags = c.MD_DIALECT_ALL;
             const nop = struct {
                 fn block(_: *const c.BlockDetail, _: ?*anyopaque) c.CallbackResult {
                     return 0;
@@ -99,11 +97,14 @@ test "md_parse" {
                     return 0;
                 }
             };
-            p.enter_block = nop.block;
-            p.leave_block = nop.block;
-            p.enter_span = nop.span;
-            p.leave_span = nop.span;
-            p.text = nop.text;
+            const p: c.Parser = .{
+                .flags = c.MD_DIALECT_ALL,
+                .enter_block = nop.block,
+                .leave_block = nop.block,
+                .enter_span = nop.span,
+                .leave_span = nop.span,
+                .text = nop.text,
+            };
             _ = lib.md_parse(@ptrCast(input.ptr), @intCast(input.len), &p, null);
         }
     }.one, .{});

@@ -55,13 +55,13 @@ const md_start_new_block = blocks.md_start_new_block;
 
 // Block-level enter/leave helpers mirroring MD_ENTER_BLOCK / MD_LEAVE_BLOCK.
 pub inline fn mdEnterBlock(ctx: *MD_CTX, detail: *const c.BlockDetail) c_int {
-    const ret = ctx.parser.enter_block.?(detail, ctx.userdata);
+    const ret = ctx.parser.enter_block(detail, ctx.userdata);
     if (ret != 0) ctx.log("Aborted from enter_block() callback.");
     return ret;
 }
 
 pub inline fn mdLeaveBlock(ctx: *MD_CTX, detail: *const c.BlockDetail) c_int {
-    const ret = ctx.parser.leave_block.?(detail, ctx.userdata);
+    const ret = ctx.parser.leave_block(detail, ctx.userdata);
     if (ret != 0) ctx.log("Aborted from leave_block() callback.");
     return ret;
 }

@@ -339,14 +339,23 @@ pub const CallbackResult = i32;
 /// Details are passed by **const pointer**: the unions are large and this is a
 /// hot path. The type tag lives in the union, so there is no separate type
 /// parameter — recover it with `switch (detail.*)`.
+///
+/// **The five SAX callbacks are REQUIRED** — non-optional, with no default
+/// (PLAN.md item 11). The emission path calls all five unconditionally, so a
+/// nullable field there was a null-function-pointer call: a Debug panic and
+/// ReleaseFast UB. Non-optional turns that into a compile error, which is why
+/// `Parser{}` / `md_parse(text, size, &.{}, null)` no longer type-checks — an
+/// incomplete table is now unrepresentable rather than merely undefined.
+/// `debug_log` stays optional: it is genuinely optional and is the one field
+/// the parser guards (`MD_CTX.log`).
 pub const Parser = struct {
     /// Bitmask of `MD_FLAG_*` values.
     flags: c_uint = 0,
-    enter_block: ?*const fn (*const BlockDetail, ?*anyopaque) CallbackResult = null,
-    leave_block: ?*const fn (*const BlockDetail, ?*anyopaque) CallbackResult = null,
-    enter_span: ?*const fn (*const SpanDetail, ?*anyopaque) CallbackResult = null,
-    leave_span: ?*const fn (*const SpanDetail, ?*anyopaque) CallbackResult = null,
-    text: ?*const fn (TextType, []const MD_CHAR, ?*anyopaque) CallbackResult = null,
+    enter_block: *const fn (*const BlockDetail, ?*anyopaque) CallbackResult,
+    leave_block: *const fn (*const BlockDetail, ?*anyopaque) CallbackResult,
+    enter_span: *const fn (*const SpanDetail, ?*anyopaque) CallbackResult,
+    leave_span: *const fn (*const SpanDetail, ?*anyopaque) CallbackResult,
+    text: *const fn (TextType, []const MD_CHAR, ?*anyopaque) CallbackResult,
     /// Optional diagnostic sink; `MD_*_FLAG_DEBUG` wires it to stderr.
     debug_log: ?*const fn ([]const u8, ?*anyopaque) void = null,
 };

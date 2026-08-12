@@ -141,7 +141,7 @@ pub fn md_text_with_null_replacement(ctx: *MD_CTX, ttype: c.TextType, str_in: [*
         while (off < size and str[off] != 0) off += 1;
 
         if (off > 0) {
-            ret = ctx.parser.text.?(ttype, str[0..off], ctx.userdata);
+            ret = ctx.parser.text(ttype, str[0..off], ctx.userdata);
             if (ret != 0) return ret;
             str += off;
             size -= off;
@@ -150,7 +150,7 @@ pub fn md_text_with_null_replacement(ctx: *MD_CTX, ttype: c.TextType, str_in: [*
 
         if (off >= size) return 0;
 
-        ret = ctx.parser.text.?(c.TextType.nullchar, "\x00", ctx.userdata);
+        ret = ctx.parser.text(c.TextType.nullchar, "\x00", ctx.userdata);
         if (ret != 0) return ret;
         str += 1;
         size -= 1;

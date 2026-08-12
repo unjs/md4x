@@ -663,6 +663,33 @@ test "fnv1a known vector" {
     try std.testing.expectEqual(@as(c_uint, 0xbf9cf968), md_fnv1a(MD_FNV1A_BASE, foobar.ptr, 6));
 }
 
+// PLAN item 11: the emission path calls all five SAX callbacks unconditionally
+// (process.zig's mdEnterBlock/mdLeaveBlock, inlines.zig's mdEnterSpan/
+// mdLeaveSpan/mdText, util.zig's NUL-replacement text emitter). While the
+// fields were `?*const fn ... = null`, `md_parse(text, size, &.{}, null)` was
+// well-typed and every one of those calls was a null-function-pointer call —
+// a Debug panic and ReleaseFast UB. They are now non-optional AND un-defaulted,
+// which is what makes the bad table unrepresentable rather than merely
+// undefined; a negative compile test can't be written in Zig's test runner, so
+// this asserts the shape of the type that produces the compile error instead.
+test "Parser: the five SAX callbacks are non-optional and required (PLAN 11)" {
+    const fields = @typeInfo(c.Parser).@"struct".fields;
+    inline for (.{ "enter_block", "leave_block", "enter_span", "leave_span", "text" }) |name| {
+        const f = fields[std.meta.fieldIndex(c.Parser, name).?];
+        // Non-optional: `null` is not a representable value, so the
+        // unconditional call sites cannot dereference one.
+        try std.testing.expect(@typeInfo(f.type) == .pointer);
+        // No default: `c.Parser{}` does not compile, so a *partially* filled
+        // table cannot be built either — every constructor must name all five.
+        try std.testing.expect(f.defaultValue() == null);
+    }
+    // debug_log is the one genuinely-optional callback and stays nullable +
+    // defaulted; it is guarded at its single call site (MD_CTX.log).
+    const dl = fields[std.meta.fieldIndex(c.Parser, "debug_log").?];
+    try std.testing.expect(@typeInfo(dl.type) == .optional);
+    try std.testing.expect(dl.defaultValue() != null);
+}
+
 // Regression: a callback aborting with a *non-zero* (here positive) return must
 // stop the enclosing emitter immediately, matching md4c's MD_ENTER_BLOCK /
 // MD_LEAVE_BLOCK / MD_TEXT macros (which abort on `ret != 0`). A prior version of
@@ -723,14 +750,14 @@ const AbortProbe = struct {
 
     fn parser(self: *AbortProbe) c.Parser {
         _ = self;
-        var p: c.Parser = .{};
-        p.flags = c.MD_DIALECT_ALL;
-        p.enter_block = AbortProbe.enterBlock;
-        p.leave_block = AbortProbe.leaveBlock;
-        p.enter_span = AbortProbe.enterSpan;
-        p.leave_span = AbortProbe.leaveSpan;
-        p.text = AbortProbe.textCb;
-        return p;
+        return .{
+            .flags = c.MD_DIALECT_ALL,
+            .enter_block = AbortProbe.enterBlock,
+            .leave_block = AbortProbe.leaveBlock,
+            .enter_span = AbortProbe.enterSpan,
+            .leave_span = AbortProbe.leaveSpan,
+            .text = AbortProbe.textCb,
+        };
     }
 };
 
@@ -929,14 +956,14 @@ const HrefProbe = struct {
     }
 
     fn parser() c.Parser {
-        var p: c.Parser = .{};
-        p.flags = c.MD_DIALECT_ALL;
-        p.enter_block = HrefProbe.noopBlock;
-        p.leave_block = HrefProbe.noopBlock;
-        p.enter_span = HrefProbe.enterSpan;
-        p.leave_span = HrefProbe.noopSpan;
-        p.text = HrefProbe.noopText;
-        return p;
+        return .{
+            .flags = c.MD_DIALECT_ALL,
+            .enter_block = HrefProbe.noopBlock,
+            .leave_block = HrefProbe.noopBlock,
+            .enter_span = HrefProbe.enterSpan,
+            .leave_span = HrefProbe.noopSpan,
+            .text = HrefProbe.noopText,
+        };
     }
 };
 
@@ -1036,14 +1063,14 @@ const CapProbe = struct {
     }
 
     fn parser() c.Parser {
-        var p: c.Parser = .{};
-        p.flags = c.MD_DIALECT_ALL;
-        p.enter_block = CapProbe.enterBlock;
-        p.leave_block = CapProbe.leaveBlock;
-        p.enter_span = CapProbe.noopSpan;
-        p.leave_span = CapProbe.noopSpan;
-        p.text = CapProbe.noopText;
-        return p;
+        return .{
+            .flags = c.MD_DIALECT_ALL,
+            .enter_block = CapProbe.enterBlock,
+            .leave_block = CapProbe.leaveBlock,
+            .enter_span = CapProbe.noopSpan,
+            .leave_span = CapProbe.noopSpan,
+            .text = CapProbe.noopText,
+        };
     }
 };
 
@@ -1539,14 +1566,14 @@ const TraceProbe = struct {
     }
 
     fn parser() c.Parser {
-        var p: c.Parser = .{};
-        p.flags = c.MD_DIALECT_ALL;
-        p.enter_block = TraceProbe.enterBlock;
-        p.leave_block = TraceProbe.leaveBlock;
-        p.enter_span = TraceProbe.enterSpan;
-        p.leave_span = TraceProbe.leaveSpan;
-        p.text = TraceProbe.textCb;
-        return p;
+        return .{
+            .flags = c.MD_DIALECT_ALL,
+            .enter_block = TraceProbe.enterBlock,
+            .leave_block = TraceProbe.leaveBlock,
+            .enter_span = TraceProbe.enterSpan,
+            .leave_span = TraceProbe.leaveSpan,
+            .text = TraceProbe.textCb,
+        };
     }
 };
 

@@ -19,6 +19,9 @@
 > - **`MD_PARSER` is gone**, replaced by the plain Zig `Parser` struct: no
 >   `extern`, no `callconv(.c)`, and no `abi_version` / `syntax` field or
 >   `MD_RENDERER` alias (all three were dropped-C-ABI vestiges).
+> - **The five SAX callbacks are required** — non-optional and un-defaulted, so
+>   an incomplete callback table is a compile error rather than a
+>   null-function-pointer call at parse time. Only `debug_log` is optional.
 
 Core function:
 
@@ -43,14 +46,24 @@ pub const CallbackResult = i32;
 
 pub const Parser = struct {
     flags: c_uint = 0,         // Bitmask of MD_FLAG_xxxx values
-    enter_block: ?*const fn (*const BlockDetail, ?*anyopaque) CallbackResult = null,
-    leave_block: ?*const fn (*const BlockDetail, ?*anyopaque) CallbackResult = null,
-    enter_span: ?*const fn (*const SpanDetail, ?*anyopaque) CallbackResult = null,
-    leave_span: ?*const fn (*const SpanDetail, ?*anyopaque) CallbackResult = null,
-    text: ?*const fn (TextType, []const MD_CHAR, ?*anyopaque) CallbackResult = null,
+    // Required — non-optional, no default.
+    enter_block: *const fn (*const BlockDetail, ?*anyopaque) CallbackResult,
+    leave_block: *const fn (*const BlockDetail, ?*anyopaque) CallbackResult,
+    enter_span: *const fn (*const SpanDetail, ?*anyopaque) CallbackResult,
+    leave_span: *const fn (*const SpanDetail, ?*anyopaque) CallbackResult,
+    text: *const fn (TextType, []const MD_CHAR, ?*anyopaque) CallbackResult,
     debug_log: ?*const fn ([]const u8, ?*anyopaque) void = null,  // Optional
 };
 ```
+
+**All five SAX callbacks must be supplied.** The emission path calls them
+unconditionally, so they are non-optional _and_ carry no default: `Parser{}`
+does not compile, and neither does `md_parse(text, size, &.{}, null)`. Every
+callback table must therefore name all five explicitly (`flags` and `debug_log`
+still default). This is deliberate — while the fields were nullable, an omitted
+callback was a null-function-pointer call: a panic in Debug/ReleaseSafe and
+undefined behavior in the shipping ReleaseFast build. `debug_log` is the one
+genuinely optional callback and stays nullable; the parser guards it.
 
 The detail arrives as a **const pointer to the tagged union** (the unions are
 large and this is a hot path). There is no separate type parameter — the block

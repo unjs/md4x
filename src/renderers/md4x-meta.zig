@@ -476,14 +476,15 @@ pub fn md_meta(
         return ret;
     }
 
-    var parser: c.Parser = .{};
-    parser.flags = parser_flags;
-    parser.enter_block = meta_enter_block;
-    parser.leave_block = meta_leave_block;
-    parser.enter_span = meta_enter_span;
-    parser.leave_span = meta_leave_span;
-    parser.text = meta_text;
-    parser.debug_log = if (renderer_flags & MD_META_FLAG_DEBUG != 0) meta_debug_log else null;
+    const parser: c.Parser = .{
+        .flags = parser_flags,
+        .enter_block = meta_enter_block,
+        .leave_block = meta_leave_block,
+        .enter_span = meta_enter_span,
+        .leave_span = meta_leave_span,
+        .text = meta_text,
+        .debug_log = if (renderer_flags & MD_META_FLAG_DEBUG != 0) meta_debug_log else null,
+    };
 
     var ctx: META_CTX = .{};
 

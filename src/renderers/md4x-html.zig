@@ -1385,14 +1385,15 @@ pub fn md_html_ex(
     render.flags = renderer_flags;
     render.opts = opts;
 
-    var parser: c.Parser = .{};
-    parser.flags = parser_flags;
-    parser.enter_block = enter_block_callback;
-    parser.leave_block = leave_block_callback;
-    parser.enter_span = enter_span_callback;
-    parser.leave_span = leave_span_callback;
-    parser.text = text_callback;
-    parser.debug_log = debug_log_callback;
+    const parser: c.Parser = .{
+        .flags = parser_flags,
+        .enter_block = enter_block_callback,
+        .leave_block = leave_block_callback,
+        .enter_span = enter_span_callback,
+        .leave_span = leave_span_callback,
+        .text = text_callback,
+        .debug_log = debug_log_callback,
+    };
 
     // Consider skipping UTF-8 byte order mark (BOM).
     if (renderer_flags & MD_HTML_FLAG_SKIP_UTF8_BOM != 0 and @sizeOf(c.MD_CHAR) == 1) {

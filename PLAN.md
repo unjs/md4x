@@ -35,7 +35,8 @@ see its section below):
 | 8 — `zig build test` in CI + safe | `4855d1b`                       |
 | 9b — out-of-range mark cursor     | `c666da4`                       |
 | 9 — list loosened by `::` / `#`   | `ce1db56`                       |
-| 10 — 16-bit comp/slot/alert index | _the commit adding this row_    |
+| 10 — 16-bit comp/slot/alert index | `7db8d1b`                       |
+| 11 — required `Parser` callbacks  | _the commit adding this row_    |
 
 Zero `TRUE`/`FALSE` tokens remain in `src/`. Verified at `3c3d2f7`: `zig build`,
 `zig build test` (ReleaseFast **and** Debug), 16 spec suites / 1001 assertions,
@@ -84,8 +85,9 @@ behind the full verification gate.
 
 **Items 9–11 are different.** They are live bugs found by an independent audit,
 verified by reproduction — item 9 is user-visible on ordinary MDC prose. They
-are not refactors and must not ride along with one. **9, 9a and 9b are all
-landed** — see the table above; only **10** and **11** are left.
+are not refactors and must not ride along with one. **All of them — 9, 9a, 9b,
+10 and 11 — are landed**; see the table above. Only the idiomatization/doc items
+4, 5, 6 and 7 remain.
 
 **Suggested priority.** `8` is **landed** (it was why three of these bugs went
 unseen); take the rest in any order.
@@ -374,16 +376,40 @@ name. It fails against the pre-fix parser (`expected 65536, found 65538`). It
 is deliberately **not** a `test/regressions.txt` case: the smallest input that
 reaches the cap is ~578 KB, and that file is itself a `diff-corpus.sh` input.
 
-### 11. All five `Parser` callbacks are nullable but unwrapped `.?`
+### ~~11. All five `Parser` callbacks are nullable but unwrapped `.?`~~ — LANDED
 
-`abi.zig:345-349` defaults all five to `= null`, but they are unwrapped `.?` at
-7 sites (`process.zig:60`, `:66`; `inlines.zig:1795`, `:1801`, `:1811`;
-`util.zig:144`, `:153`). `md_parse(text, size, &.{}, null)` is well-typed and is
-**UB in ReleaseFast**. `debug_log` is the only one properly guarded.
+Fixed exactly as PLAN proposed: the five fields in `src/abi.zig` are now
+non-optional **and** un-defaulted, and all 7 `.?` unwraps are plain calls
+(`process.zig:58`, `:64`; `inlines.zig:1840`, `:1846`, `:1856`; `util.zig:144`,
+`:153`). Being un-defaulted is what carries the guarantee: with a default of
+`undefined` or a no-op, `Parser{}` would still compile and a _partially_ filled
+table would still be constructible. `md_parse(text, size, &.{}, null)` now fails
+to compile with `error: missing struct field: enter_block` (+4 notes) — verified
+by temporarily adding exactly that call. `debug_log` stays optional.
 
-Cheapest fix is compile-time: drop the `= null` defaults on the five and make
-them non-optional. All 7 in-tree callers already set all five, so it costs
-nothing and deletes 7 UB sites.
+**PLAN's "all 7 in-tree callers already set all five" was right in substance but
+undercounted.** There are **11** constructors, not 7 — the six renderers, the
+`fuzz.zig` parser-only harness, and **four** probes in `md4x.zig` (`AbortProbe`,
+`HrefProbe`, `CapProbe`, `TraceProbe`) — and every one of them did already set
+all five, so no caller's behavior changed. All 11 moved from
+`var p: c.Parser = .{}` + field assignments to a single struct literal, which is
+what the un-defaulted fields force.
+
+**One site PLAN did not mention:** `MD_CTX.parser` (`types.zig:293`) was
+`c.Parser = .{}` — a field default that no longer exists. It is now
+`types.noop_parser`, an all-no-op table declared next to `MD_CTX`. It is never
+observable in production (`md_parse` overwrites `ctx.parser` before any
+emission); it exists only so the six `MD_CTX = .{ … }` sites — three of which
+are unit tests that build a bare context and never emit — keep working.
+
+Pinned by a `zig build test` case (`Parser: the five SAX callbacks are
+non-optional and required`) that asserts, via `@typeInfo`, that each of the five
+is a non-optional pointer with **no default**, and that `debug_log` is still
+optional-with-default. A true negative compile test is not expressible in Zig's
+test runner, so this asserts the shape of the type that produces the compile
+error instead.
+
+Corpus diff empty at 168 hashes, golden SAX trace unchanged.
 
 ---
 

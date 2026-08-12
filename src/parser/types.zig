@@ -279,6 +279,32 @@ pub const MD_INLINE_ATTR_INFO = struct {
     skip_end: OFF = 0, // Offset after '}' for text skipping.
 };
 
+// An all-no-op SAX callback table (PLAN item 11). `c.Parser`'s five callbacks
+// are non-optional and un-defaulted, so `c.Parser{}` no longer exists — this is
+// the placeholder that keeps MD_CTX's all-default initializer working. It is
+// never observable in production: `md_parse` overwrites `ctx.parser` with the
+// caller's table before any emission. Only the unit tests that build a bare
+// `MD_CTX` (and never emit) ever read it.
+pub const noop_parser: c.Parser = .{
+    .enter_block = noop_callbacks.block,
+    .leave_block = noop_callbacks.block,
+    .enter_span = noop_callbacks.span,
+    .leave_span = noop_callbacks.span,
+    .text = noop_callbacks.text,
+};
+
+const noop_callbacks = struct {
+    fn block(_: *const c.BlockDetail, _: ?*anyopaque) c.CallbackResult {
+        return 0;
+    }
+    fn span(_: *const c.SpanDetail, _: ?*anyopaque) c.CallbackResult {
+        return 0;
+    }
+    fn text(_: c.TextType, _: []const CHAR, _: ?*anyopaque) c.CallbackResult {
+        return 0;
+    }
+};
+
 // Context propagated through all the parsing. Internal struct — no C ABI needed.
 // Field order/comments mirror struct MD_CTX_tag in md4x.c exactly.
 pub const MD_CTX = struct {
@@ -290,7 +316,7 @@ pub const MD_CTX = struct {
     // Immutable stuff (parameters of md_parse()).
     text: [*c]const CHAR = null,
     size: SZ = 0,
-    parser: c.Parser = .{},
+    parser: c.Parser = noop_parser,
     userdata: ?*anyopaque = null,
 
     // When this is true, it allows some optimizations.

@@ -1312,14 +1312,15 @@ pub fn md_ast(
         return ret;
     }
 
-    var parser: c.Parser = .{};
-    parser.flags = parser_flags;
-    parser.enter_block = jsonEnterBlock;
-    parser.leave_block = jsonLeaveBlock;
-    parser.enter_span = jsonEnterSpan;
-    parser.leave_span = jsonLeaveSpan;
-    parser.text = jsonText;
-    parser.debug_log = if (renderer_flags & MD_AST_FLAG_DEBUG != 0) jsonDebugLog else null;
+    const parser: c.Parser = .{
+        .flags = parser_flags,
+        .enter_block = jsonEnterBlock,
+        .leave_block = jsonLeaveBlock,
+        .enter_span = jsonEnterSpan,
+        .leave_span = jsonLeaveSpan,
+        .text = jsonText,
+        .debug_log = if (renderer_flags & MD_AST_FLAG_DEBUG != 0) jsonDebugLog else null,
+    };
 
     var ctx: JsonCtx = .{ .arena = std.heap.ArenaAllocator.init(std.heap.c_allocator) };
     defer ctx.arena.deinit();
