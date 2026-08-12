@@ -25,10 +25,15 @@
 
 const std = @import("std");
 
-// MD_* types + entity + md_parse/md_heal decls now come from the Zig-native
+// MD_* types now come from the Zig-native
 // abi module (replacing md4x.h / entity.h / md4x-heal.h); only genuinely
 // external C headers stay in a @cImport, bound as `sys`.
 const c = @import("abi");
+// Sibling units are imported directly (one Zig module per artifact), not
+// resolved through link-time C-ABI symbols. `abi` holds types only.
+const md4x = @import("../md4x.zig");
+const entity = @import("../entity.zig");
+const heal = @import("md4x-heal.zig");
 const sys = @cImport({
     @cInclude("stdio.h");
     @cInclude("yaml.h");
@@ -64,10 +69,10 @@ const ESCAPE_MAP: [256]u8 = blk: {
     break :blk map;
 };
 
-// MD_HTML_OPTS must match the C struct layout exactly.
-const MD_HTML_OPTS = extern struct {
-    title: ?[*:0]const u8,
-    css_url: ?[*:0]const u8,
+/// Options for `md_html_ex` (full-document mode). Re-exported by lib.zig.
+pub const MD_HTML_OPTS = extern struct {
+    title: ?[*:0]const u8 = null,
+    css_url: ?[*:0]const u8 = null,
 };
 
 const ProcessOutputFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) callconv(.c) void;
@@ -384,9 +389,9 @@ fn render_entity(r: *MD_HTML, text: [*]const u8, size: c.MD_SIZE, fn_append: App
         return;
     } else {
         // Named entity.
-        const ent = c.entity_lookup(@ptrCast(text), size);
+        const ent = entity.entity_lookup(@ptrCast(text), size);
         if (ent != null) {
-            const cps = ent.*.codepoints;
+            const cps = ent.?.codepoints;
             render_utf8_codepoint(r, cps[0], fn_append);
             if (cps[1] != 0)
                 render_utf8_codepoint(r, cps[1], fn_append);
@@ -1350,7 +1355,7 @@ fn md4x_heal_input(input: [*c]const c.MD_CHAR, input_size: c.MD_SIZE, buf: *MD4X
     buf.size = 0;
     buf.cap = 0;
     buf.err = 0;
-    const ret = c.md_heal(@ptrCast(input), input_size, md4x_heal_buf_append, buf);
+    const ret = heal.md_heal(@ptrCast(input), input_size, md4x_heal_buf_append, buf);
     if (buf.err != 0) return -1;
     return ret;
 }
@@ -1373,7 +1378,7 @@ fn buf_realloc(old_ptr: ?[*]u8, old_cap: c_uint, new_cap: c_uint) ?[*]u8 {
     }
 }
 
-export fn md_html_ex(
+pub export fn md_html_ex(
     input: [*c]const c.MD_CHAR,
     input_size: c.MD_SIZE,
     process_output: ProcessOutputFn,
@@ -1422,7 +1427,7 @@ export fn md_html_ex(
         }
     }
 
-    const ret = c.md_parse(@ptrCast(input_ptr), size, &parser, @ptrCast(&render));
+    const ret = md4x.md_parse(@ptrCast(input_ptr), size, &parser, @ptrCast(&render));
 
     if (renderer_flags & MD_HTML_FLAG_CODE_META != 0) {
         if (ret == 0)
@@ -1442,7 +1447,7 @@ export fn md_html_ex(
     return ret;
 }
 
-export fn md_html(
+pub export fn md_html(
     input: [*c]const c.MD_CHAR,
     input_size: c.MD_SIZE,
     process_output: ProcessOutputFn,

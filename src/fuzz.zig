@@ -31,17 +31,9 @@ const std = @import("std");
 // (md_parse, md_html, ... md_heal — all distinct symbols) are emitted into the
 // test binary; the matching callable declarations come from the C headers via
 // the `@cImport` below, and the linker wires the two together.
-comptime {
-    _ = @import("md4x.zig"); // md_parse + the parser internals (shared by all renderers)
-    _ = @import("entity.zig"); // entity_lookup (referenced by parser + renderers)
-    _ = @import("renderers/md4x-html.zig");
-    _ = @import("renderers/md4x-ast.zig");
-    _ = @import("renderers/md4x-ansi.zig");
-    _ = @import("renderers/md4x-text.zig");
-    _ = @import("renderers/md4x-meta.zig");
-    _ = @import("renderers/md4x-markdown.zig");
-    _ = @import("renderers/md4x-heal.zig");
-}
+// Importing the library root pulls the parser + every renderer into THIS
+// module, which is what gets them instrumented by `--fuzz`.
+const lib = @import("lib.zig");
 
 // MD_* types + parser/renderer entry points come from the Zig abi module; the
 // definitions are pulled into this module by the `@import` statements above, so
@@ -121,7 +113,7 @@ test "md_parse" {
                     return 0;
                 }
             }.f;
-            _ = c.md_parse(@ptrCast(input.ptr), @intCast(input.len), &p, null);
+            _ = lib.md_parse(@ptrCast(input.ptr), @intCast(input.len), &p, null);
         }
     }.one, .{});
 }
@@ -129,7 +121,7 @@ test "md_parse" {
 test "md_html" {
     try std.testing.fuzz({}, struct {
         fn one(_: void, smith: *std.testing.Smith) anyerror!void {
-            try fuzzRenderer(c.md_html, smith);
+            try fuzzRenderer(lib.md_html, smith);
         }
     }.one, .{});
 }
@@ -137,7 +129,7 @@ test "md_html" {
 test "md_ast" {
     try std.testing.fuzz({}, struct {
         fn one(_: void, smith: *std.testing.Smith) anyerror!void {
-            try fuzzRenderer(c.md_ast, smith);
+            try fuzzRenderer(lib.md_ast, smith);
         }
     }.one, .{});
 }
@@ -145,7 +137,7 @@ test "md_ast" {
 test "md_ansi" {
     try std.testing.fuzz({}, struct {
         fn one(_: void, smith: *std.testing.Smith) anyerror!void {
-            try fuzzRenderer(c.md_ansi, smith);
+            try fuzzRenderer(lib.md_ansi, smith);
         }
     }.one, .{});
 }
@@ -153,7 +145,7 @@ test "md_ansi" {
 test "md_text" {
     try std.testing.fuzz({}, struct {
         fn one(_: void, smith: *std.testing.Smith) anyerror!void {
-            try fuzzRenderer(c.md_text, smith);
+            try fuzzRenderer(lib.md_text, smith);
         }
     }.one, .{});
 }
@@ -161,7 +153,7 @@ test "md_text" {
 test "md_meta" {
     try std.testing.fuzz({}, struct {
         fn one(_: void, smith: *std.testing.Smith) anyerror!void {
-            try fuzzRenderer(c.md_meta, smith);
+            try fuzzRenderer(lib.md_meta, smith);
         }
     }.one, .{});
 }
@@ -169,7 +161,7 @@ test "md_meta" {
 test "md_markdown" {
     try std.testing.fuzz({}, struct {
         fn one(_: void, smith: *std.testing.Smith) anyerror!void {
-            try fuzzRenderer(c.md_markdown, smith);
+            try fuzzRenderer(lib.md_markdown, smith);
         }
     }.one, .{});
 }
@@ -181,7 +173,7 @@ test "md_heal" {
             var buf: [max_input]u8 = undefined;
             const input = buf[0..smith.slice(&buf)];
             if (!accept(input)) return;
-            _ = c.md_heal(@ptrCast(input.ptr), @intCast(input.len), healSink, null);
+            _ = lib.md_heal(@ptrCast(input.ptr), @intCast(input.len), healSink, null);
         }
     }.one, .{});
 }

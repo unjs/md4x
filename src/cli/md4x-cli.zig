@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const abi = @import("abi");
+const lib = @import("md4x");
 const build_options = @import("build_options");
 
 const MD_CHAR = abi.MD_CHAR;
@@ -44,21 +45,11 @@ fn eprint(comptime fmt: []const u8, args: anytype) void {
 }
 
 // ---------------------------------------------------------------------------
-// Renderer entry points (resolved at link time against the renderer libs).
+// Renderer entry points. They live in this artifact's module graph (Phase 4a),
+// so these are direct Zig calls, not link-time C-ABI symbol resolution.
 // ---------------------------------------------------------------------------
-const ProcessOutput = ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void;
-
-const MD_HTML_OPTS = extern struct {
-    title: [*c]const u8 = null,
-    css_url: [*c]const u8 = null,
-};
-
-extern fn md_html_ex(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint, opts: [*c]const MD_HTML_OPTS) c_int;
-extern fn md_ast(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
-extern fn md_ansi(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
-extern fn md_text(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
-extern fn md_markdown(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
-// md_heal is declared in the abi module.
+const ProcessOutput = abi.ProcessOutput;
+const MD_HTML_OPTS = lib.MD_HTML_OPTS;
 
 // ---------------------------------------------------------------------------
 // Renderer flag values (mirror the former md4x-*.h headers).
@@ -169,37 +160,37 @@ fn process_file(in: *libc.FILE, out: *libc.FILE) c_int {
         .html => {
             var html_flags = r_flags;
             var html_opts: MD_HTML_OPTS = .{};
-            var opts_ptr: [*c]const MD_HTML_OPTS = null;
+            var opts_ptr: ?*const MD_HTML_OPTS = null;
             if (want_fullhtml) {
                 html_flags |= MD_HTML_FLAG_FULL_HTML;
                 html_opts.title = if (html_title) |t| t.ptr else null;
                 html_opts.css_url = if (css_path) |u| u.ptr else null;
                 opts_ptr = &html_opts;
             }
-            ret = md_html_ex(input_ptr, in_sz, process_output, &out_buf, p_flags, html_flags, opts_ptr);
+            ret = lib.md_html_ex(input_ptr, in_sz, process_output, &out_buf, p_flags, html_flags, opts_ptr);
         },
         .json => {
             var j_flags = MD_AST_FLAG_DEBUG | MD_AST_FLAG_SKIP_UTF8_BOM;
             if (want_heal) j_flags |= MD_AST_FLAG_HEAL;
-            ret = md_ast(input_ptr, in_sz, process_output, &out_buf, p_flags, j_flags);
+            ret = lib.md_ast(input_ptr, in_sz, process_output, &out_buf, p_flags, j_flags);
         },
         .ansi => {
             var a_flags = MD_ANSI_FLAG_DEBUG | MD_ANSI_FLAG_SKIP_UTF8_BOM;
             if (want_heal) a_flags |= MD_ANSI_FLAG_HEAL;
-            ret = md_ansi(input_ptr, in_sz, process_output, &out_buf, p_flags, a_flags);
+            ret = lib.md_ansi(input_ptr, in_sz, process_output, &out_buf, p_flags, a_flags);
         },
         .text => {
             var t_flags = MD_TEXT_FLAG_DEBUG | MD_TEXT_FLAG_SKIP_UTF8_BOM;
             if (want_heal) t_flags |= MD_TEXT_FLAG_HEAL;
-            ret = md_text(input_ptr, in_sz, process_output, &out_buf, p_flags, t_flags);
+            ret = lib.md_text(input_ptr, in_sz, process_output, &out_buf, p_flags, t_flags);
         },
         .markdown => {
             var pm_flags = MD_MARKDOWN_FLAG_DEBUG | MD_MARKDOWN_FLAG_SKIP_UTF8_BOM;
             if (want_heal) pm_flags |= MD_MARKDOWN_FLAG_HEAL;
-            ret = md_markdown(input_ptr, in_sz, process_output, &out_buf, p_flags, pm_flags);
+            ret = lib.md_markdown(input_ptr, in_sz, process_output, &out_buf, p_flags, pm_flags);
         },
         .heal => {
-            ret = abi.md_heal(input.ptr, in_sz, process_output, &out_buf);
+            ret = lib.md_heal(input.ptr, in_sz, process_output, &out_buf);
         },
     }
 

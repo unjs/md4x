@@ -36,6 +36,7 @@
 
 const std = @import("std");
 const utbl = @import("unicode_tables.zig");
+const entity = @import("entity.zig");
 const types = @import("parser/types.zig");
 const util = @import("parser/util.zig");
 const refdefs = @import("parser/refdefs.zig");
@@ -351,10 +352,10 @@ comptime {
     _ = &md_analyze_link_contents;
 }
 
-// Entity hook — thin wrapper over entity_lookup (declared via entity.h). The
+// Entity hook — thin wrapper over entity.zig's entity_lookup. The
 // inline engine (Pass C) calls this to resolve named entities to codepoints.
-inline fn entity_lookup_wrap(name: [*c]const u8, name_size: usize) ?*const c.ENTITY {
-    return c.entity_lookup(name, name_size);
+inline fn entity_lookup_wrap(name: [*c]const u8, name_size: usize) ?*const entity.ENTITY {
+    return entity.entity_lookup(name, name_size);
 }
 
 // Test-only re-exports of internal foundation functions, used by the

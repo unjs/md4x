@@ -22,8 +22,9 @@
 
 ```
 src/
-  md4x.zig            # Parser root (exports md_parse; imports src/parser/ modules)
-  abi.zig             # Shared MD_* types/enums/flags, MD_PARSER, cross-module decls
+  lib.zig             # Library root: parser + entity + all renderers in ONE module
+  md4x.zig            # Parser root (md_parse; imports src/parser/ modules)
+  abi.zig             # Shared MD_* types/enums/flags, MD_PARSER (types only, leaf)
   parser/             # Parser implementation, split from the monolithic md4x.zig
     types.zig         # MD_CTX + internal structs, enums, shared @import("abi")
     util.zig          # char/UTF-8/unicode helpers, buffers, entity recognizers, attributes
@@ -132,7 +133,13 @@ Installs only `zig-out/bin/md4x`. **No static libraries or headers are installed
 
 The project can also be consumed as a Zig package dependency via `build.zig.zon`.
 
-`build.zig` compiles each Zig unit (parser, renderers, entity table) as a **static library** via the `addParserLib`/`addEntityLib`/`addZigRenderer` helpers and links them into each artifact. These libs are an **internal** implementation detail — they still communicate via C-ABI symbols (`md_parse`, `md_html`, `entity_lookup`, … declared `extern` in `abi.zig`), which Phase 4 of `PLAN.md` collapses into a single Zig module per artifact. Roots: `src/cli/md4x-cli.zig` (CLI), `src/md4x-wasm.zig` (WASM), `src/md4x-napi.zig` (NAPI). The WASM JS loader (`packages/md4x/lib/wasm/common.mjs`) provides no-op `args_`/`environ_` WASI import stubs that Zig's `wasm32-wasi` startup references.
+**One Zig module graph per artifact.** `src/lib.zig` is the library root: it imports the parser, the entity table, and every renderer, and re-exports their entry points. Each artifact root pulls it in — `src/md4x-wasm.zig` (WASM), `src/md4x-napi.zig` (NAPI), and `src/fuzz.zig` via a relative `@import("lib.zig")`; `src/cli/md4x-cli.zig` via the named `md4x` module, because a module may not `@import` outside its own directory. The units therefore call each other by **direct Zig call**; there are no per-unit static libraries and no link-time C-ABI symbol resolution between them.
+
+To add a renderer, add it to `src/lib.zig` — not to `build.zig`.
+
+Two build-graph rules worth knowing: the `abi` module must be created **once** and shared by every module in an artifact (a second `createModule` on `src/abi.zig` fails with _"file exists in modules 'abi' and 'abi0'"_), and `src/abi.zig` must stay a **pure leaf** — types only, no imports, no function declarations. Anything that would make `abi` import the parser or a renderer creates a cycle. Entry-point declarations belong in `src/lib.zig`.
+
+The WASM JS loader (`packages/md4x/lib/wasm/common.mjs`) provides no-op `args_`/`environ_` WASI import stubs that Zig's `wasm32-wasi` startup references.
 
 Build targets:
 

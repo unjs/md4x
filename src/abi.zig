@@ -1,18 +1,22 @@
 //! Zig-native ABI type definitions for the MD4X parser.
 //!
 //! This module replaces the former C headers `md4x.h` and `entity.h` as the
-//! single source of truth for the shared MD_* types, enums, flags, the
-//! MD_PARSER struct, and the cross-module function declarations. The parser
-//! (`src/parser/types.zig`) and every renderer import it as `c` so that the
-//! pre-existing `c.MD_*` / `c.entity_lookup` / `c.md_parse` / `c.md_heal`
-//! references keep resolving unchanged.
+//! single source of truth for the shared MD_* types, enums, flags, and the
+//! MD_PARSER struct. The parser (`src/parser/types.zig`) and every renderer
+//! import it as `c` so that the pre-existing `c.MD_*` references keep resolving
+//! unchanged.
 //!
 //! The type/struct/flag declarations below are a verbatim transcription of
 //! `zig translate-c md4x.h`, so they are byte-for-byte layout-identical to what
-//! `@cImport("md4x.h")` produced — the C ABI shape is preserved exactly.
-//! `md_parse`, `md_heal`, and `entity_lookup` are declared `extern` (resolved at
-//! link time against the parser / heal / entity static libs), mirroring the old
-//! header prototypes.
+//! `@cImport("md4x.h")` produced. Phase 4c of `PLAN.md` idiomatizes them.
+//!
+//! **This module is a pure leaf: types only, no imports, no function
+//! declarations.** It used to also declare `md_parse` / `md_heal` /
+//! `entity_lookup` / the renderer entry points as `pub extern fn`, resolved at
+//! link time against separate static libs. Those now live in `src/lib.zig` as
+//! re-exports of the real Zig definitions, so the units call each other
+//! directly. Do not reintroduce function declarations here — an import from
+//! `abi` back into the parser or a renderer would make this module cyclic.
 
 const __helpers = @import("std").zig.c_translation.helpers;
 
@@ -214,42 +218,15 @@ pub const MD_DIALECT_GITHUB = (((MD_FLAG_PERMISSIVEAUTOLINKS | MD_FLAG_TABLES) |
 pub const MD_DIALECT_ALL = (((((((((MD_FLAG_PERMISSIVEAUTOLINKS | MD_FLAG_TABLES) | MD_FLAG_STRIKETHROUGH) | MD_FLAG_TASKLISTS) | MD_FLAG_LATEXMATHSPANS) | MD_FLAG_WIKILINKS) | MD_FLAG_UNDERLINE) | MD_FLAG_FRONTMATTER) | MD_FLAG_COMPONENTS) | MD_FLAG_ATTRIBUTES) | MD_FLAG_ALERTS;
 
 // ---------------------------------------------------------------------------
-// Cross-module function declarations (resolved at link time).
-// `md_parse` was declared by md4x.h; `md_heal` by md4x-heal.h.
+// Renderer ABI types + flag values (formerly the md4x-*.h headers). The entry
+// points themselves are Zig functions re-exported by lib.zig.
 // ---------------------------------------------------------------------------
-pub extern fn md_parse(text: [*c]const MD_CHAR, size: MD_SIZE, parser: [*c]const MD_PARSER, userdata: ?*anyopaque) c_int;
-pub extern fn md_heal(input: [*c]const u8, input_size: c_uint, process_output: ?*const fn ([*c]const u8, c_uint, ?*anyopaque) callconv(.c) void, userdata: ?*anyopaque) c_int;
+/// Output sink handed to every renderer entry point.
+pub const ProcessOutput = ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void;
 
-// ---------------------------------------------------------------------------
-// From entity.h — HTML entity lookup. Layout-compatible with entity.zig's
-// `ENTITY` (the `.name` field is unused by consumers; only `.codepoints` is
-// read). `entity_lookup` is resolved at link time against the entity lib.
-// ---------------------------------------------------------------------------
-pub const struct_ENTITY_tag = extern struct {
-    name: [*:0]const u8,
-    codepoints: [2]c_uint,
-};
-pub const ENTITY = struct_ENTITY_tag;
-pub extern fn entity_lookup(name: [*c]const u8, name_size: usize) [*c]const ENTITY;
-
-// ---------------------------------------------------------------------------
-// Renderer ABIs (formerly the md4x-*.h headers). Entry points are resolved at
-// link time against the renderer static libs. Flag values mirror the headers.
-// ---------------------------------------------------------------------------
-const ProcessOutput = ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void;
-
-pub const MD_HTML_OPTS = extern struct {
-    title: [*c]const u8 = null,
-    css_url: [*c]const u8 = null,
-};
-
-pub extern fn md_html(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
-pub extern fn md_html_ex(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint, opts: [*c]const MD_HTML_OPTS) c_int;
-pub extern fn md_ast(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
-pub extern fn md_ansi(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
-pub extern fn md_text(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
-pub extern fn md_markdown(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
-pub extern fn md_meta(input: [*c]const MD_CHAR, input_size: MD_SIZE, process_output: ProcessOutput, userdata: ?*anyopaque, parser_flags: c_uint, renderer_flags: c_uint) c_int;
+/// Output sink for `md_heal` (heal predates the MD_CHAR typedef and uses
+/// `const char*` / `unsigned` directly).
+pub const HealProcessOutput = ?*const fn ([*c]const u8, c_uint, ?*anyopaque) callconv(.c) void;
 
 pub const MD_HTML_FLAG_DEBUG: c_uint = 0x0001;
 pub const MD_HTML_FLAG_VERBATIM_ENTITIES: c_uint = 0x0002;

@@ -28,6 +28,8 @@ const std = @import("std");
 // The md4x ABI surface (MD_* types/flags, parser + renderer entry points,
 // entity) now lives in the Zig-native abi module; libc comes from std.c.
 const c = @import("abi");
+// Parser + renderers live in this artifact's module graph (Phase 4a).
+const lib = @import("lib.zig");
 
 // We manage the result/output buffer memory with libc malloc/realloc/free so
 // that the JS-side md4x_free(md4x_result_ptr()) (which frees the result buffer)
@@ -117,12 +119,12 @@ fn render(fn_ptr: md4x_render_fn, input: [*c]const u8, input_size: c_uint, rende
 }
 
 export fn md4x_to_html(input: [*c]const u8, input_size: c_uint, renderer_flags: c_uint) callconv(.c) c_int {
-    return render(c.md_html, input, input_size, renderer_flags);
+    return render(lib.md_html, input, input_size, renderer_flags);
 }
 
 export fn md4x_to_html_meta(input: [*c]const u8, input_size: c_uint) callconv(.c) c_int {
     var buf = md4x_buf{ .data = null, .size = 0, .cap = 0, .err = 0 };
-    const ret = c.md_html(input, input_size, buf_append, &buf, c.MD_DIALECT_ALL, c.MD_HTML_FLAG_CODE_META);
+    const ret = lib.md_html(input, input_size, buf_append, &buf, c.MD_DIALECT_ALL, c.MD_HTML_FLAG_CODE_META);
     if (ret != 0 or buf.err != 0) {
         std.c.free(buf.data);
         g_result_data = null;
@@ -135,16 +137,16 @@ export fn md4x_to_html_meta(input: [*c]const u8, input_size: c_uint) callconv(.c
 }
 
 export fn md4x_to_ast(input: [*c]const u8, input_size: c_uint, renderer_flags: c_uint) callconv(.c) c_int {
-    return render(c.md_ast, input, input_size, renderer_flags);
+    return render(lib.md_ast, input, input_size, renderer_flags);
 }
 
 export fn md4x_to_ansi(input: [*c]const u8, input_size: c_uint, renderer_flags: c_uint) callconv(.c) c_int {
-    return render(c.md_ansi, input, input_size, renderer_flags);
+    return render(lib.md_ansi, input, input_size, renderer_flags);
 }
 
 export fn md4x_to_ansi_meta(input: [*c]const u8, input_size: c_uint) callconv(.c) c_int {
     var buf = md4x_buf{ .data = null, .size = 0, .cap = 0, .err = 0 };
-    const ret = c.md_ansi(input, input_size, buf_append, &buf, c.MD_DIALECT_ALL, c.MD_ANSI_FLAG_CODE_META);
+    const ret = lib.md_ansi(input, input_size, buf_append, &buf, c.MD_DIALECT_ALL, c.MD_ANSI_FLAG_CODE_META);
     if (ret != 0 or buf.err != 0) {
         std.c.free(buf.data);
         g_result_data = null;
@@ -157,20 +159,20 @@ export fn md4x_to_ansi_meta(input: [*c]const u8, input_size: c_uint) callconv(.c
 }
 
 export fn md4x_to_meta(input: [*c]const u8, input_size: c_uint, renderer_flags: c_uint) callconv(.c) c_int {
-    return render(c.md_meta, input, input_size, renderer_flags);
+    return render(lib.md_meta, input, input_size, renderer_flags);
 }
 
 export fn md4x_to_text(input: [*c]const u8, input_size: c_uint, renderer_flags: c_uint) callconv(.c) c_int {
-    return render(c.md_text, input, input_size, renderer_flags);
+    return render(lib.md_text, input, input_size, renderer_flags);
 }
 
 export fn md4x_to_markdown(input: [*c]const u8, input_size: c_uint, renderer_flags: c_uint) callconv(.c) c_int {
-    return render(c.md_markdown, input, input_size, renderer_flags);
+    return render(lib.md_markdown, input, input_size, renderer_flags);
 }
 
 export fn md4x_heal(input: [*c]const u8, input_size: c_uint) callconv(.c) c_int {
     var buf = md4x_buf{ .data = null, .size = 0, .cap = 0, .err = 0 };
-    const ret = c.md_heal(input, input_size, buf_append, &buf);
+    const ret = lib.md_heal(input, input_size, buf_append, &buf);
     if (ret != 0 or buf.err != 0) {
         std.c.free(buf.data);
         g_result_data = null;

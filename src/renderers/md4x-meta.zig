@@ -25,10 +25,15 @@
 
 const std = @import("std");
 
-// MD_* types + entity + md_parse/md_heal decls now come from the Zig-native
+// MD_* types now come from the Zig-native
 // abi module (replacing md4x.h / entity.h / md4x-heal.h); only genuinely
 // external C headers stay in a @cImport, bound as `sys`.
 const c = @import("abi");
+// Sibling units are imported directly (one Zig module per artifact), not
+// resolved through link-time C-ABI symbols. `abi` holds types only.
+const md4x = @import("../md4x.zig");
+const entity = @import("../entity.zig");
+const heal = @import("md4x-heal.zig");
 const sys = @cImport({
     @cInclude("stdio.h");
 });
@@ -161,9 +166,9 @@ fn meta_append_entity(ctx: *META_CTX, text: [*]const u8, size: c.MD_SIZE) c_int 
         n = encode_utf8(codepoint, &utf8);
         return meta_buf_append(&ctx.heading_buf, &ctx.heading_buf_size, &ctx.heading_buf_cap, &utf8, n);
     } else {
-        const ent = c.entity_lookup(@ptrCast(text), size);
+        const ent = entity.entity_lookup(@ptrCast(text), size);
         if (ent != null) {
-            const cps = ent.*.codepoints;
+            const cps = ent.?.codepoints;
             n = encode_utf8(cps[0], &utf8);
             if (meta_buf_append(&ctx.heading_buf, &ctx.heading_buf_size, &ctx.heading_buf_cap, &utf8, n) != 0)
                 return -1;
@@ -436,7 +441,7 @@ fn md4x_heal_input(input: [*c]const c.MD_CHAR, input_size: c.MD_SIZE, buf: *MD4X
     buf.size = 0;
     buf.cap = 0;
     buf.err = 0;
-    const ret = c.md_heal(@ptrCast(input), input_size, md4x_heal_buf_append, buf);
+    const ret = heal.md_heal(@ptrCast(input), input_size, md4x_heal_buf_append, buf);
     if (buf.err != 0) return -1;
     return ret;
 }
@@ -449,7 +454,7 @@ fn heal_buf_free(buf: *MD4X_HEAL_BUF) void {
 // ***  Public API                    ***
 // **************************************
 
-export fn md_meta(
+pub export fn md_meta(
     input: [*c]const c.MD_CHAR,
     input_size: c.MD_SIZE,
     process_output: ProcessOutputFn,
@@ -492,7 +497,7 @@ export fn md_meta(
         }
     }
 
-    const ret = c.md_parse(@ptrCast(input_ptr), size, &parser, @ptrCast(&ctx));
+    const ret = md4x.md_parse(@ptrCast(input_ptr), size, &parser, @ptrCast(&ctx));
 
     if (ret != 0 or ctx.err != 0) {
         meta_free(&ctx);

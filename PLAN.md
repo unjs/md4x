@@ -70,35 +70,40 @@ C-ABI symbols** (`md_parse`, `md_html`, `entity_lookup`, … as `export` /
 > touches the block-analysis emission path that constraint #5 fences off and
 > rewrites ~35 renderer callbacks.
 
-### 4a — Collapse the static-lib graph into one Zig module per artifact
+### 4a — Collapse the static-lib graph into one Zig module per artifact — ✅ DONE
 
-**Why:** de-externing `md_parse`/entry points/callbacks is impossible while the
-parser and renderers are separate libs linked by C-ABI symbols — a direct Zig
-call requires they live in one compilation. `src/fuzz.zig` already proves the
-single-module pattern (it `@import`s the parser + every renderer + entity into
-one module and works).
+Landed. `src/lib.zig` is the library root: it imports the parser, entity table,
+and all seven renderers and re-exports their entry points (Option A). Every
+artifact pulls it in — wasm/napi/fuzz relatively, the CLI through a named `md4x`
+module (its root is in `src/cli/`, and a module may not `@import` outside its own
+directory). `build.zig` lost `addParserLib` / `addEntityLib` / `addZigRenderer`
+and the `zig_renderers` list; adding a renderer is now an edit to `src/lib.zig`.
 
-**Steps:**
+`abi.zig` is now a **pure leaf**: types, enums, and flags only. Its `pub extern
+fn` declarations are gone — entry points live in `lib.zig` as re-exports of the
+real definitions, and the units call each other by direct Zig call. Two types
+moved to their real definition sites: `ENTITY` to `entity.zig` (so the generated
+file was not touched) and `MD_HTML_OPTS` to `md4x-html.zig`. The CLI's duplicate
+local `extern fn` block and its private `MD_HTML_OPTS` copy are gone too.
 
-1. Decide the aggregation shape. Option A (recommended): an `md4x.zig`-level
-   library root that `@import`s the parser + renderers + entity and re-exports
-   their entry points, so each artifact imports _one_ module. Option B: each
-   artifact imports the pieces it needs directly (what fuzz.zig does).
-2. In `build.zig`, stop building/​linking `addParserLib` / `addEntityLib` /
-   `addZigRenderer` as separate static libs for the CLI/wasm/napi; instead add
-   their sources to each artifact's module graph via imports (libyaml stays the
-   only C compiled in). Keep per-artifact `target`/`optimize`/`strip`.
-3. Replace `abi.zig`'s `pub extern fn md_parse/md_heal/entity_lookup/md_html/…`
-   with re-exports of the real Zig definitions (e.g.
-   `pub const md_parse = @import("…").md_parse;`), now that they're in-module.
-   Watch for: a file imported twice in one artifact is deduped by Zig (same
-   module) — fine; `export` kept on the defs is harmless within one artifact.
-4. Confirm no duplicate-symbol errors per artifact and that wasm `--export`
-   list + napi registration still resolve.
+Gotchas found, worth remembering:
 
-**Risk:** moderate (build graph), low output-risk (calling convention still
-`callconv(.c)` internally at this step). **Gate:** corpus + all tests + wasm +
-napi + fuzz-zig.
+- The `abi` module must be created **once** per artifact and shared. Two
+  `b.createModule` calls on `src/abi.zig` fail with _"file exists in modules
+  'abi' and 'abi0'"_. It is now built once in `build()` and threaded through
+  `PkgBuildOptions.abi`.
+- `entity_lookup` returns a Zig optional (`?*const ENTITY`), not the `[*c]`
+  the extern declaration used, so the five `ent.*.codepoints` call sites became
+  `ent.?.codepoints`.
+- Entry points needed `pub` added to their `export fn` for `lib.zig` to
+  re-export them. They keep `export` + `callconv(.c)` at this step — 4b removes
+  that.
+- `const parser = @import("../md4x.zig")` shadowed the renderers' local
+  `var parser: MD_PARSER`; the import is named `md4x`.
+
+**Gate: green.** Corpus diff-clean (168 hashes), all 16 spec/extension suites
+(spec.txt 652), 30 pathological, `zig build test` in ReleaseFast **and** Debug,
+`fuzz-zig` smoke, and 616 JS binding tests against freshly built wasm + napi.
 
 ### 4b — De-extern `md_parse` + renderer entry points
 
