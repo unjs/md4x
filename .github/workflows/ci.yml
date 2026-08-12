@@ -29,6 +29,16 @@ jobs:
       - name: Build
         run: zig build && zig build wasm && zig build wasm-small && zig build napi-all && bun scripts/build-standalone.ts
 
+      # The parser-internal invariants (abort matrix, OOM sweep, golden SAX
+      # event trace) live only in `zig build test` — the Python suites can only
+      # diff rendered HTML. Run both safe optimize modes: the default is
+      # ReleaseSafe, and Debug additionally arms undefined-fill plus allocator
+      # length validation, which is what catches wrong-length frees.
+      - name: Zig unit tests
+        run: |
+          zig build test
+          zig build test -Doptimize=Debug
+
       - name: Tests
         run: bun ./scripts/run-tests.ts
 

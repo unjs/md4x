@@ -29,7 +29,8 @@ hashes, golden SAX trace unchanged, nothing re-recorded):
 | 2 — `MD_MARK_*` → `MarkFlags`     | `dbd8720`                       |
 | 6 — doc gaps (first two bullets)  | `494cf3f`, `73d6e27`            |
 | 9a — quadratic `{...}` attrs scan | `521bca5`                       |
-| 1c — attr builder OOM free length | _the commit adding this row_    |
+| 1c — attr builder OOM free length | `efd4025`                       |
+| 8 — `zig build test` in CI + safe | _the commit adding this row_    |
 
 Zero `TRUE`/`FALSE` tokens remain in `src/`. Verified at `3c3d2f7`: `zig build`,
 `zig build test` (ReleaseFast **and** Debug), 16 spec suites / 1001 assertions,
@@ -83,8 +84,8 @@ are not refactors, they must not ride along with one, and item 9 deliberately
 encodes the bug. Read the gate exception on item 9 before touching it. (9a, the
 reachable DoS, is **landed** — see the table above.)
 
-**Suggested priority.** `8` next (it is why three of these bugs went unseen),
-then the rest.
+**Suggested priority.** `8` is **landed** (it was why three of these bugs went
+unseen); take the rest in any order.
 
 **Ordering constraint.** Items 7/5 and bug 9b all rewrite overlapping parser
 files and must stay **serial**. Renderer-only and docs-only work parallelizes
@@ -171,32 +172,33 @@ switch `_test_run_inline` to `alloc_array_a` — at which point `std.c.malloc` /
 `std.c.realloc` disappear from the parser entirely and the reworded `AGENTS.md`
 bullet can state that absolutely rather than conditionally.
 
-### 8. `zig build test` runs in neither CI nor safe mode
+### ~~8. `zig build test` runs in neither CI nor safe mode~~ — LANDED
 
-Two independent problems with the verification infrastructure:
+All three sub-problems are fixed; see the landed table above.
 
-- **Not in CI.** `zig build test` appears in neither `.github/workflows/` nor
-  `scripts/run-tests.ts` (which runs only the Python HTML-diff suites +
-  pathological tests). So the abort matrix, the OOM sweep and the golden SAX
-  trace — which `AGENTS.md` correctly calls the only guards on parser-internal
-  behavior — **never run on a PR**.
-- **Defaults to ReleaseFast.** `build.zig:42` defaults `optimize` to
-  `.ReleaseFast` and `build.zig:89-99` hands it to the test artifact, so a bare
-  `zig build test` runs with bounds checks, `@intCast` range checks, overflow
-  checks and `unreachable` panics **disabled** — exactly the checks that make
-  the OOM sweep meaningful. Its "never a crash" assertion degrades to "no hard
-  segfault". PLAN's gate is fine because it also runs
-  `-Doptimize=Debug`, but anyone following `AGENTS.md`'s Testing section alone
-  believes they checked something they did not.
-
-Fix: add `zig build test` to CI (or `run-tests.ts`), and pin the test artifact
-independently of the global default —
-`.optimize = if (optimize == .Debug) .Debug else .ReleaseSafe`.
-
-Also add abort-matrix cases pinning the **doc-level** abort behavior (constraint
-#6): `md_parse` must return `5` for a `+5` and `-7` for a `-7` on the `.doc`
-block. The matrix currently excludes doc explicitly (`detail.* != .doc`,
-`md4x.zig:695` / `:700`), so nothing catches a regression in either direction.
+- **Now in CI, twice over.** `scripts/run-tests.ts` runs `zig build test` before
+  the `.txt` suites (so the documented "run all test suites" entry point covers
+  parser internals), and `.github/workflows/ci.yml` gained a dedicated
+  `Zig unit tests` step running both `zig build test` and
+  `zig build test -Doptimize=Debug`. That workflow's single `build` job triggers
+  on `pull_request`, so both now run on every PR.
+- **Test artifact pinned to a safe mode.** `build.zig` no longer hands the
+  global `-Doptimize` (default `.ReleaseFast`) to the test artifact:
+  `.optimize = if (optimize == .Debug) .Debug else .ReleaseSafe`. Confirmed as
+  `-OReleaseSafe` by `zig build test --summary all`. The pin is self-checking —
+  the `test artifact is built with runtime safety armed` case asserts
+  `std.debug.runtime_safety`, so removing it fails the suite. Enabling
+  ReleaseSafe surfaced **no** new failures.
+- **Doc-level abort behavior pinned.** `AbortProbe` gained `abort_on_enter_doc`
+  / `abort_on_leave_doc` (deliberately separate from the `!= .doc` block flags,
+  because the doc block has a different observable contract), and two new tests
+  pin constraint #6's doc-level exception in both directions: `md_parse`
+  returns `5` for a `+5` and `-7` for a `-7` on `.doc`, and an
+  `enter_block(.doc)` abort emits nothing at all. Verified by mutation: flipping
+  `process.zig`'s two `!= 0` bookends to `< 0` (the exact "fix" constraint #6
+  forbids) fails both new tests with `expected 5, found 0`, while the corpus
+  gate, the spec suites and the golden SAX trace all stay green — which is
+  precisely why they were needed. Mutation reverted.
 
 ---
 
@@ -341,10 +343,11 @@ nothing and deletes 7 UB sites.
    parity (upstream `MD_ENTER_BLOCK` aborts on `!= 0`).
 
    **Do NOT "fix" those two `!= 0` tests into `< 0`.** That would silently break
-   md4c parity, and the corpus gate would stay green. The abort-matrix test does
-   not currently pin this: it explicitly excludes the doc block
-   (`detail.* != .doc`, `md4x.zig:695` / `:700`), so nothing catches a
-   regression in either direction — see item 8.
+   md4c parity, and the corpus gate would stay green. This IS now pinned (item
+   8, landed): the abort matrix still excludes the doc block from its
+   intermediate-boundary cases (`detail.* != .doc`), but the companion test
+   `callback abort: doc-level enter/leave propagate BOTH signs (md4c parity)`
+   asserts `md_parse` returns `5` for a `+5` and `-7` for a `-7` on `.doc`.
 
 7. **Keep docs in sync** — `AGENTS.md` / `docs/*.md` / `CHANGELOG.md`.
 
@@ -355,9 +358,9 @@ nothing and deletes 7 UB sites.
 ```sh
 bun fmt
 zig build
-zig build test                                      # ReleaseFast (default)
+zig build test                                      # ReleaseSafe (pinned in build.zig)
 zig build test -Doptimize=Debug                     # undefined-fill + allocator length checks
-bun scripts/run-tests.ts                            # 16 spec suites + pathological (1001 assertions)
+bun scripts/run-tests.ts                            # zig build test + 16 spec suites + pathological (1001 assertions)
 python3 test/pathological-tests.py -p zig-out/bin/md4x
 bash scripts/diff-corpus.sh > /tmp/md4x-now.sha
 diff /home/dev/.md4x-gate/baseline.sha /tmp/md4x-now.sha   # MUST be empty

@@ -89,7 +89,11 @@ filling in the fields the type actually carries.
 - Strings passed to callbacks are **not** null-terminated — always use the size parameter
 - Any callback may abort parsing by returning non-zero
 
-**Abort-code contract:** `md_parse` propagates a **negative** callback code verbatim, but returns `0` for a **positive** one (md4c parity). OOM and a callback returning `-1` are intentionally unified as `-1` in the emission path. This is pinned by the abort-matrix native test in `src/md4x.zig` (`zig build test`) — do not change it.
+**Abort-code contract:** at the **intermediate** block/span/text boundaries, `md_parse` propagates a **negative** callback code verbatim, but returns `0` for a **positive** one (md4c parity — those boundaries test `ret < 0`). OOM and a callback returning `-1` are intentionally unified as `-1` in the emission path.
+
+**Doc-level exception:** `md_process_doc`'s own `enter_block(.doc)` / `leave_block(.doc)` bookends test `!= 0`, not `< 0`, and `md_parse` returns that value verbatim. So a callback aborting on the **`.doc`** block propagates in **both** directions: `md_parse` returns `5` for a `+5` and `-7` for a `-7`. This too is genuine md4c parity (upstream `MD_ENTER_BLOCK` aborts on `!= 0`) — do not "fix" the two `!= 0` tests into `< 0`.
+
+Both halves are pinned by the abort-matrix native tests in `src/md4x.zig` (`zig build test`) — do not change them.
 
 That contract is why `CallbackResult` is a plain `i32` rather than a Zig error
 union (PLAN.md's deferred §8.2): the code has to carry an arbitrary

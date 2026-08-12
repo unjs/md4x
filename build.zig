@@ -88,11 +88,21 @@ pub fn build(b: *std.Build) void {
     // --- Unit tests (`zig build test`) ---
     // Compile src/md4x.zig as a test artifact. It imports src/entity.zig
     // directly, so nothing needs linking in.
+    //
+    // The test artifact is pinned to a SAFE optimize mode, independently of the
+    // global -Doptimize default (which is .ReleaseFast, for the shipping
+    // artifacts). Bounds checks, @intCast range checks, overflow checks and
+    // `unreachable` panics are exactly what makes the OOM sweep and the abort
+    // matrix meaningful; under ReleaseFast the sweep's "never a crash"
+    // assertion degrades to "no hard segfault". -Doptimize=Debug still selects
+    // Debug (undefined-fill + allocator length validation); everything else
+    // maps to ReleaseSafe.
+    const test_optimize: std.builtin.OptimizeMode = if (optimize == .Debug) .Debug else .ReleaseSafe;
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/md4x.zig"),
             .target = target,
-            .optimize = optimize,
+            .optimize = test_optimize,
             .link_libc = true,
             .single_threaded = true,
         }),

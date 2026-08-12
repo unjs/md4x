@@ -35,6 +35,7 @@
 // building + text-collecting buffer.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const utbl = @import("unicode_tables.zig");
 const entity = @import("entity.zig");
 const types = @import("parser/types.zig");
@@ -620,6 +621,17 @@ fn _test_run_analyze(parser: *const c.Parser, text: [*c]const CHAR, size: SZ, ou
     return ret;
 }
 
+// build.zig pins the test artifact to a SAFE optimize mode independently of the
+// global -Doptimize default (which is .ReleaseFast, for the shipping
+// artifacts). Bounds checks, @intCast range checks, overflow checks and
+// `unreachable` panics are precisely what make the OOM sweep's "never a crash"
+// assertion mean anything; under ReleaseFast it degrades to "no hard segfault".
+// This test fails loudly if that pin is ever removed.
+test "test artifact is built with runtime safety armed" {
+    try std.testing.expect(std.debug.runtime_safety);
+    try std.testing.expect(builtin.mode == .ReleaseSafe or builtin.mode == .Debug);
+}
+
 test "unicode classifiers wired to tables" {
     // ASCII fast-path sanity.
     try std.testing.expect(md_is_unicode_whitespace(' '));
@@ -668,17 +680,24 @@ const AbortProbe = struct {
     abort_on_leave_block: bool = false,
     abort_on_enter_span: bool = false,
     abort_on_leave_span: bool = false,
+    // The DOC block is deliberately split out from abort_on_{enter,leave}_block:
+    // md_process_doc's own bookends test `!= 0`, not `< 0`, so the doc block has
+    // a DIFFERENT observable contract (see the doc-level test below).
+    abort_on_enter_doc: bool = false,
+    abort_on_leave_doc: bool = false,
 
     fn enterBlock(detail: *const c.BlockDetail, ud: ?*anyopaque) c.CallbackResult {
         const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
         self.enter_calls += 1;
         if (self.abort_on_block_p and detail.* == .p) return self.abort_code;
         if (self.abort_on_enter_block and detail.* != .doc) return self.abort_code;
+        if (self.abort_on_enter_doc and detail.* == .doc) return self.abort_code;
         return 0;
     }
     fn leaveBlock(detail: *const c.BlockDetail, ud: ?*anyopaque) c.CallbackResult {
         const self: *AbortProbe = @ptrCast(@alignCast(ud.?));
         if (self.abort_on_leave_block and detail.* != .doc) return self.abort_code;
+        if (self.abort_on_leave_doc and detail.* == .doc) return self.abort_code;
         return 0;
     }
     fn enterSpan(detail: *const c.SpanDetail, ud: ?*anyopaque) c.CallbackResult {
@@ -772,6 +791,49 @@ test "callback abort: md_parse return-value matrix (md4c parity)" {
         var pp = pos.parser();
         try std.testing.expectEqual(@as(c_int, 0), md_parse(@ptrCast(cs.input.ptr), @intCast(cs.input.len), &pp, &pos));
     }
+}
+
+// The DOC block is the documented EXCEPTION to the matrix above, and it is the
+// code that is right, not the old wording. md_process_doc's own bookends test
+// `!= 0`, not `< 0` (process.zig, `mdEnterBlock(ctx, &.{ .doc = {} })` and
+// `mdLeaveBlock(ctx, &.{ .doc = {} })`), and md_parse returns md_process_doc's
+// value verbatim. So a POSITIVE code on the .doc block DOES propagate:
+// md_parse returns 5, not 0. That is genuine md4c parity — upstream's
+// MD_ENTER_BLOCK / MD_LEAVE_BLOCK abort on `!= 0`, and md_process_doc is the
+// one place the callback result is not funnelled through an MD_CHECK(< 0)
+// boundary before reaching the caller.
+//
+// Do NOT "fix" those two `!= 0` tests into `< 0` to make the doc block match
+// the intermediate boundaries: it would silently break md4c parity, and the
+// corpus gate would stay green because every bundled renderer aborts with
+// negative codes only. This test is the only guard in either direction.
+test "callback abort: doc-level enter/leave propagate BOTH signs (md4c parity)" {
+    const input = "# h\n\npara with *em*\n";
+    inline for (.{ "enter_doc", "leave_doc" }) |field| {
+        // Negative code → propagated verbatim (same as every other boundary).
+        var neg: AbortProbe = .{ .abort_code = -7 };
+        @field(neg, "abort_on_" ++ field) = true;
+        var pn = neg.parser();
+        try std.testing.expectEqual(@as(c_int, -7), md_parse(@ptrCast(input.ptr), @intCast(input.len), &pn, &neg));
+
+        // Positive code → ALSO propagated verbatim (the doc-level exception;
+        // at every other boundary this would be 0).
+        var pos: AbortProbe = .{ .abort_code = 5 };
+        @field(pos, "abort_on_" ++ field) = true;
+        var pp = pos.parser();
+        try std.testing.expectEqual(@as(c_int, 5), md_parse(@ptrCast(input.ptr), @intCast(input.len), &pp, &pos));
+    }
+}
+
+// An abort on enter_block(.doc) must stop the parse before ANY content is
+// emitted — the `!= 0` bookend returns straight out of md_process_doc.
+test "callback abort: enter_block(.doc) emits nothing" {
+    var probe: AbortProbe = .{ .abort_code = 5, .abort_on_enter_doc = true };
+    var p = probe.parser();
+    const input = "# h\n\npara\n";
+    try std.testing.expectEqual(@as(c_int, 5), md_parse(@ptrCast(input), @intCast(input.len), &p, &probe));
+    try std.testing.expectEqual(@as(u32, 0), probe.text_calls);
+    try std.testing.expectEqual(@as(u32, 1), probe.enter_calls);
 }
 
 test "no callback abort: md_parse returns 0" {

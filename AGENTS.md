@@ -161,7 +161,7 @@ The only C compiled into any artifact is the vendored **libyaml**. Remaining `@c
 ## Testing
 
 ```sh
-# Run all test suites:
+# Run all test suites (Zig unit tests + the .txt suites + pathological):
 bun scripts/run-tests.ts
 
 # Individual test suite:
@@ -171,14 +171,19 @@ python3 test/run-testsuite.py -s test/spec.txt -p zig-out/bin/md4x
 python3 test/pathological-tests.py -p zig-out/bin/md4x
 
 # Zig unit tests (parser internals, e.g. callback-abort behavior):
-zig build test
+zig build test                     # ReleaseSafe
+zig build test -Doptimize=Debug    # + undefined-fill and allocator length validation
 ```
 
 Test format: Markdown examples with `.` separator and expected HTML output. The test runner pipes input through `md4x` and compares normalized output.
 
+**The test artifact is pinned to a safe optimize mode** (`build.zig`: `.optimize = if (optimize == .Debug) .Debug else .ReleaseSafe`), independently of the global `-Doptimize` default of `.ReleaseFast` that the shipping artifacts use. Bounds checks, `@intCast` range checks, overflow checks and `unreachable` panics are exactly what make the OOM sweep's "never a crash" assertion mean anything — under `ReleaseFast` it would degrade to "no hard segfault". Do not hand the global `optimize` to the test artifact. The pin is self-checking: the `test artifact is built with runtime safety armed` case asserts `std.debug.runtime_safety`.
+
+**Both entry points run these in CI.** `bun scripts/run-tests.ts` invokes `zig build test` before the `.txt` suites, and `.github/workflows/ci.yml` has a dedicated `Zig unit tests` step running both `zig build test` and `zig build test -Doptimize=Debug` on every PR. They used to run in neither, so the three invariants below were unguarded on a PR.
+
 The HTML-diff suites cannot express parser-internal behavior; those invariants are covered by Zig unit tests in `src/md4x.zig`, run via `zig build test`:
 
-- **Abort matrix** — for each of the five SAX callbacks, that a negative code propagates verbatim and a positive one stops emission but returns 0.
+- **Abort matrix** — for each of the five SAX callbacks, that a negative code propagates verbatim and a positive one stops emission but returns 0. Plus the **doc-level exception**: `md_process_doc`'s own bookends test `!= 0`, not `< 0`, so a callback aborting on the `.doc` block propagates **both** signs verbatim — `md_parse` returns `5` for a `+5` and `-7` for a `-7`. That is genuine md4c parity; do not "fix" those two `!= 0` tests into `< 0`, and keep the doc-level cases, which are the only guard in either direction.
 - **OOM sweep** — a `FailingAllocator` walks every internal allocation index over a document exercising ref-defs, tables, code metadata, attributes, components, and autolinks, asserting each run is crash- and leak-free. The document also carries a link title with 15 substrings, which is the only thing driving `md_build_attr_append_substr` past its initial capacity of 8 — keep it (a growth path with no coverage is how the wrong-length free of PLAN item 1c survived).
 - **Golden SAX event trace** — the full ordered stream of `enter_block`/`leave_block`/`enter_span`/`leave_span`/`text` events over a document covering every block type, span type, and text type, with each detail union arm's field values and every `Attribute`'s substring type/offset table spelled out. The corpus harness only compares each renderer's final bytes, so it can miss a detail-packaging change that renderers paper over; this compares the raw SAX stream instead. **Phase 4c rewrote exactly this mechanism (and the expected string survived it unchanged), so treat a trace diff as a stop-the-line regression.** The expected value is a _recorded_ baseline: to re-record after a deliberate change, temporarily `std.debug.print` `probe.out.items` from the test, and say in the commit message what changed and why.
 
