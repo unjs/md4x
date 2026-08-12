@@ -28,7 +28,8 @@ hashes, golden SAX trace unchanged, nothing re-recorded):
 | 1b — renderer state fields        | `3c3d2f7`                       |
 | 2 — `MD_MARK_*` → `MarkFlags`     | `dbd8720`                       |
 | 6 — doc gaps (first two bullets)  | `494cf3f`, `73d6e27`            |
-| 9a — quadratic `{...}` attrs scan | _the commit adding this row_    |
+| 9a — quadratic `{...}` attrs scan | `521bca5`                       |
+| 1c — attr builder OOM free length | _the commit adding this row_    |
 
 Zero `TRUE`/`FALSE` tokens remain in `src/`. Verified at `3c3d2f7`: `zig build`,
 `zig build test` (ReleaseFast **and** Debug), 16 spec suites / 1001 assertions,
@@ -54,11 +55,26 @@ stack pass forms). Measured on `'*a*{'`: 160 KB 3020 ms → 8 ms; 1 MB 117.5 s �
 vs. new binary over brace-heavy inputs across all six formats (zero
 mismatches).
 
+**1c** (landed after 9a, same gate — corpus diff empty at 168 hashes, plus wasm
+309 / napi 307, which also retro-covered 9a): `MD_ATTRIBUTE_BUILD` gained a
+second capacity field, `types_alloc`, and `md_build_attr_append_substr` now
+publishes each capacity only **after** the realloc it describes returns, so a
+failure between the two reallocs leaves each array's length field describing the
+block that actually exists. `md_free_attribute` frees `substr_types` by
+`types_alloc` and `substr_offsets` by `substr_alloc + 1`, and no longer gates on
+`substr_alloc > 0` — that guard would have stranded the already-owned `text`
+buffer when the very first growth fails. Order of work matters here and was
+followed: the OOM sweep document first gained a 15-substring link title
+(`[t](/u "a&amp;b&amp;…&amp;h")`), which made `zig build test -Doptimize=Debug`
+abort with `panic: Invalid free` inside `md_free_attribute` — the `old_alloc > 0`
+growth branch had never executed in the suite at all — and only then was the fix
+applied. Keep that title: without it the branch reverts to zero coverage.
+
 ---
 
-Items 1c–8 are **ordinary idiomatization or doc upkeep**, except 1c which is a
-real (latent) bug. The structural work is finished and there is no remaining
-C-ABI seam. Land them in any order, each behind the full verification gate.
+Items 4–8 are **ordinary idiomatization or doc upkeep**. The structural work is
+finished and there is no remaining C-ABI seam. Land them in any order, each
+behind the full verification gate.
 
 **Items 9–11 are different.** They are live bugs found by an independent audit,
 verified by reproduction — item 9 is user-visible on ordinary MDC prose. They
@@ -67,48 +83,16 @@ are not refactors, they must not ride along with one, and item 9 deliberately
 encodes the bug. Read the gate exception on item 9 before touching it. (9a, the
 reachable DoS, is **landed** — see the table above.)
 
-**Suggested priority.** `1c` next (it blocks 5), then `8` (it is why three of
-these bugs went unseen), then the rest.
+**Suggested priority.** `8` next (it is why three of these bugs went unseen),
+then the rest.
 
-**Ordering constraint.** Items 1c/7/5 and bug 9b all rewrite overlapping parser
+**Ordering constraint.** Items 7/5 and bug 9b all rewrite overlapping parser
 files and must stay **serial**. Renderer-only and docs-only work parallelizes
 freely.
 
 **Do not fold a bug fix into a refactor commit**, and do not let a refactor
 "tidy" an adjacent bug — constraint #4 makes the refactors type/name-only, and
 the audit's value came from each finding being independently reviewable.
-
-### 1c. `md_build_attr_append_substr` frees at the wrong length on OOM
-
-**A real bug**, not idiomatization. `util.zig:511-536` commits
-`build.substr_alloc` to the new capacity _before_ either realloc runs, and can
-return `error.OutOfMemory` between them; `md_free_attribute`
-(`util.zig:546-550`) derives **both** freed lengths from that advanced value.
-Growing from `substr_alloc == 8`: if the types realloc fails, `substr_types` is
-still 8 but freed as 12 **and** `substr_offsets` is still 9 but freed as 13 (two
-mismatches); if the offsets realloc fails, offsets is still 9 but freed as 13.
-No leak or double-free — purely a wrong freed length, i.e. exactly the
-exact-length invariant `AGENTS.md` pins to these helpers.
-
-Production is **unaffected** (ReleaseFast + `c_allocator`, whose `free` ignores
-the length). It matters under `std.testing.allocator`, where a large allocation
-(`substr_alloc > 512`) takes the large-alloc path and the length drives the
-unmap size — and it blocks making `ctx.alloc` freely injectable.
-
-**Why the gate never caught it:** the OOM sweep's richest attribute is the title
-`"a &amp; b"` — 3 substrings — so `substr_alloc` never leaves 8 and the
-`old_alloc > 0` growth branch **has never executed in the test suite at all**.
-
-Fix: a second `types_alloc` capacity field (the two arrays legitimately diverge
-mid-growth, so one field cannot express the state); don't publish capacity until
-both blocks exist; free `substr_types` by `types_alloc` and `substr_offsets` by
-`substr_alloc + 1`. `md_push_block_bytes` (`blocks.zig:82`) already does this
-correctly and is the in-repo model. **Extend the OOM sweep document with a
-≥8-substring attribute** (e.g. `[t](/u "a&amp;b&amp;c&amp;d&amp;e&amp;f&amp;g&amp;h")`) so the growth
-path is covered at all — demonstrate the failure before fixing it.
-
-Land this **before** item 5: routing three more buffers into a builder that
-already gets one exact length wrong is backwards.
 
 ### 4. General naming (§3.1/§8.6)
 
@@ -145,8 +129,9 @@ bypass `ctx.alloc`, the `FailingAllocator` sweep can neither inject OOM into
 them nor leak-check them — so every path above is correct only _by inspection_.
 Prioritize accordingly; this is lower value than it looks.
 
-**Land item 1c first.** Routing three more buffers into a builder that already
-gets one exact length wrong is backwards.
+**Item 1c is landed**, so the builder these would join now frees every buffer at
+its exact length. Follow the same discipline: one length field per buffer,
+published only after the block it describes exists.
 
 **Fold in while you are here (preventive, not live):** `md_merge_lines_alloc`
 (`util.zig:407`) has no zero-length guard. In Zig 0.16

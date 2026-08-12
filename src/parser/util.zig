@@ -498,7 +498,15 @@ pub const MD_ATTRIBUTE_BUILD = struct {
     substr_types: [*c]c.TextType = null,
     substr_offsets: [*c]OFF = null,
     substr_count: c_int = 0,
+    // Exact element count owned by `substr_offsets` MINUS one (the tables are
+    // sized `substr_alloc` / `substr_alloc + 1`), and the capacity the append
+    // loop grows against.
     substr_alloc: c_int = 0,
+    // Exact element count owned by `substr_types`. Normally equal to
+    // `substr_alloc`, but the two legitimately diverge when growth fails between
+    // the two reallocs, so one field cannot express the state (PLAN item 1c).
+    // Each array must be freed at its OWN length.
+    types_alloc: c_int = 0,
     // Exact element count owned by `text` (the decoded-text buffer), so it can be
     // freed through ctx.alloc (PLAN C). 0 when `text` is borrowed (trivial path)
     // or unset; md_free_attribute only frees `text` when this is > 0.
@@ -512,19 +520,24 @@ pub const MD_BUILD_ATTR_NO_ESCAPES: c_uint = 0x0001;
 pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, ttype: c.TextType, off: OFF) error{OutOfMemory}!void {
     if (build.substr_count >= build.substr_alloc) {
         const old_alloc: usize = @intCast(build.substr_alloc);
-        build.substr_alloc = if (build.substr_alloc > 0)
+        const new_alloc: c_int = if (build.substr_alloc > 0)
             build.substr_alloc + @divTrunc(build.substr_alloc, 2)
         else
             8;
-        const alloc_u: usize = @intCast(build.substr_alloc);
+        const alloc_u: usize = @intCast(new_alloc);
 
+        // A capacity field is published only AFTER the block it describes exists,
+        // so md_free_attribute always frees at the length actually allocated
+        // (same discipline as md_push_block_bytes in blocks.zig).
+        //
         // realloc substr_types (routed through ctx.alloc; exact old length passed).
-        const new_types = realloc_array_a(c.TextType, ctx.alloc, build.substr_types, old_alloc, alloc_u);
+        const new_types = realloc_array_a(c.TextType, ctx.alloc, build.substr_types, @intCast(build.types_alloc), alloc_u);
         if (new_types == null) {
             ctx.log("realloc() failed.");
             return error.OutOfMemory;
         }
         build.substr_types = new_types;
+        build.types_alloc = new_alloc;
 
         // realloc substr_offsets (+1 for final offset == raw_size).
         const old_off_alloc: usize = if (old_alloc > 0) old_alloc + 1 else 0;
@@ -534,6 +547,7 @@ pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, tty
             return error.OutOfMemory;
         }
         build.substr_offsets = new_offsets;
+        build.substr_alloc = new_alloc;
     }
 
     build.substr_types[@intCast(build.substr_count)] = ttype;
@@ -542,21 +556,25 @@ pub fn md_build_attr_append_substr(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD, tty
 }
 
 pub fn md_free_attribute(ctx: *MD_CTX, build: *MD_ATTRIBUTE_BUILD) void {
-    if (build.substr_alloc > 0) {
-        const types_n: usize = @intCast(build.substr_alloc);
-        free_array_a(CHAR, ctx.alloc, build.text, build.text_alloc);
-        free_array_a(c.TextType, ctx.alloc, build.substr_types, types_n);
-        free_array_a(OFF, ctx.alloc, build.substr_offsets, types_n + 1);
-        // Reset so a second call is a safe no-op. md_build_attribute() frees the
-        // build itself on an OOM mid-build and returns -1; callers then also free
-        // it in their error cleanup, which would otherwise double-free. (Idempotent
-        // free; only reachable under heap-allocation failure. Original C lacked this.)
-        build.text = null;
-        build.text_alloc = 0;
-        build.substr_types = null;
-        build.substr_offsets = null;
-        build.substr_alloc = 0;
-    }
+    // Each buffer is freed at its OWN tracked length: an OOM between the two
+    // reallocs in md_build_attr_append_substr leaves types_alloc > substr_alloc,
+    // and the very first growth can fail with `text` already owned while neither
+    // capacity is published. free_array_a no-ops on a zero count, which is what
+    // the trivial path (borrowed `text`, embedded trivial_* tables, all lengths
+    // 0) relies on.
+    free_array_a(CHAR, ctx.alloc, build.text, build.text_alloc);
+    free_array_a(c.TextType, ctx.alloc, build.substr_types, @intCast(build.types_alloc));
+    free_array_a(OFF, ctx.alloc, build.substr_offsets, if (build.substr_alloc > 0) @as(usize, @intCast(build.substr_alloc)) + 1 else 0);
+    // Reset so a second call is a safe no-op. md_build_attribute() frees the
+    // build itself on an OOM mid-build and returns -1; callers then also free
+    // it in their error cleanup, which would otherwise double-free. (Idempotent
+    // free; only reachable under heap-allocation failure. Original C lacked this.)
+    build.text = null;
+    build.text_alloc = 0;
+    build.substr_types = null;
+    build.substr_offsets = null;
+    build.substr_alloc = 0;
+    build.types_alloc = 0;
 }
 
 pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, flags: c_uint, attr: *c.Attribute, build: *MD_ATTRIBUTE_BUILD) error{OutOfMemory}!void {

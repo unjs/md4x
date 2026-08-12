@@ -908,10 +908,19 @@ test "OOM: full md_parse sweep is crash- and leak-free under FailingAllocator" {
     // non-trivial path), and inline/block components with attributes. std.testing.
     // allocator flags any leak; FailingAllocator turns each successive internal
     // allocation into OOM so every abort/cleanup path runs.
+    //
+    // The second titled link carries a 15-substring title (8 entities separated
+    // by literal text), which is the ONLY thing in this document that drives
+    // md_build_attr_append_substr past its initial capacity of 8. Without it the
+    // `old_alloc > 0` growth branch never executes at all, and the two reallocs'
+    // partial-failure states (types grown, offsets not) are never freed — which
+    // is precisely how the wrong-length free of PLAN item 1c stayed invisible.
+    // Do not shrink it below 9 substrings.
     const src =
         "[a]: /x \"t\"\n[b]: /y\n[a]: /dup\n\n" ++
         "# Heading *em* `c`\n\nParagraph linking [a] and [b] with **strong**.\n\n" ++
         "A [titled](/u \"a &amp; b\") link and :badge[New]{color=\"blue\" #id .cls}.\n\n" ++
+        "Grown [t](/u \"a&amp;b&amp;c&amp;d&amp;e&amp;f&amp;g&amp;h\") title.\n\n" ++
         "| a | b |\n|:--|--:|\n| 1 | 2 |\n| 3 | 4 |\n\n" ++
         "```js [app.js] {1-2,4} extra\ncode line\nmore code\n```\n\n" ++
         "::alert{type=\"info\"}\nNested **content** here.\n::\n\n" ++
