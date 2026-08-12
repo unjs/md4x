@@ -143,11 +143,20 @@ byte-identical output.
 
 **Steps (test-first):**
 
-1. **Strengthen the abort/OOM matrix first.** The abort-code contract is md4c
-   parity: a NEGATIVE callback code is propagated verbatim, a POSITIVE one
-   returns 0 (pinned by the abort-matrix native test in `md4x.zig`). OOM and a
-   callback returning `-1` are intentionally unified as `-1`. Add tests that
-   freeze this for every callback kind **before** changing signatures.
+1. ~~**Strengthen the abort/OOM matrix first.**~~ ✅ **DONE.** The abort matrix
+   (negative code propagated verbatim, positive one stops emission but returns
+   0, for all five callbacks) and the `FailingAllocator` OOM sweep were already
+   in place. What was missing was anything freezing the **detail payloads** this
+   step rewrites, so a **golden SAX event trace** test was added to `md4x.zig`:
+   the full ordered event stream over a document covering every block type, span
+   type, and text type, with each detail struct's field values and every
+   `MD_ATTRIBUTE`'s substring type/offset table spelled out. The corpus harness
+   compares only each renderer's final bytes and can miss a packaging change two
+   renderers paper over; this compares the raw SAX stream. Verified by mutation:
+   perturbing `det.header.level` fails the trace test with a readable diff.
+   **Treat a trace diff during 4c as stop-the-line.** The expected value is a
+   recorded baseline — to re-record, temporarily `std.debug.print`
+   `probe.out.items` from the test and justify the change in the commit.
 2. **Detail representation:** convert the `extern struct` detail types
    (`MD_BLOCK_*_DETAIL`, `MD_SPAN_*_DETAIL`, `MD_ATTRIBUTE`) to idiomatic Zig —
    a `union(enum)` of typed details (exhaustive `switch`, no type confusion) or

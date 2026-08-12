@@ -167,7 +167,11 @@ zig build test
 
 Test format: Markdown examples with `.` separator and expected HTML output. The test runner pipes input through `md4x` and compares normalized output.
 
-The HTML-diff suites cannot express parser-internal behavior (e.g. SAX callback return-code handling); those invariants are covered by Zig unit tests in `src/md4x.zig`, run via `zig build test`.
+The HTML-diff suites cannot express parser-internal behavior; those invariants are covered by Zig unit tests in `src/md4x.zig`, run via `zig build test`:
+
+- **Abort matrix** — for each of the five SAX callbacks, that a negative code propagates verbatim and a positive one stops emission but returns 0.
+- **OOM sweep** — a `FailingAllocator` walks every internal allocation index over a document exercising ref-defs, tables, code metadata, attributes, components, and autolinks, asserting each run is crash- and leak-free.
+- **Golden SAX event trace** — the full ordered stream of `enter_block`/`leave_block`/`enter_span`/`leave_span`/`text` events over a document covering every block type, span type, and text type, with each detail struct's field values and every `MD_ATTRIBUTE`'s substring type/offset table spelled out. The corpus harness only compares each renderer's final bytes, so it can miss a detail-packaging change that renderers paper over; this compares the raw SAX stream instead. **Phase 4c rewrites exactly this mechanism, so treat a trace diff as a stop-the-line regression.** The expected value is a _recorded_ baseline: to re-record after a deliberate change, temporarily `std.debug.print` `probe.out.items` from the test, and say in the commit message what changed and why.
 
 Test suites: `spec.txt`, `spec-tables.txt`, `spec-strikethrough.txt`, `spec-tasklists.txt`, `spec-wiki-links.txt`, `spec-latex-math.txt`, `spec-permissive-autolinks.txt`, `spec-hard-soft-breaks.txt`, `spec-underline.txt`, `spec-frontmatter.txt`, `spec-components.txt`, `spec-attributes.txt`, `spec-alerts.txt`, `spec-markdown.txt`, `regressions.txt`, `coverage.txt`
 

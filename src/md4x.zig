@@ -956,3 +956,700 @@ test "OOM: full md_parse sweep is crash- and leak-free under FailingAllocator" {
         try std.testing.expect(ret == 0 or ret == -1);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Golden SAX event trace (Phase 4c step 1).
+//
+// The abort matrix above freezes md_parse's RETURN codes. This freezes what the
+// parser actually HANDS to a renderer: the full ordered sequence of
+// enter_block/leave_block/enter_span/leave_span/text events, each with its
+// detail struct's field values spelled out — including every MD_ATTRIBUTE's
+// substring type/offset table.
+//
+// Phase 4c re-packages that detail mechanism (extern struct + ?*anyopaque ->
+// idiomatic Zig types; the [*c] substring arrays -> slices) across the emission
+// path and all seven renderers. The corpus harness only compares each
+// renderer's final bytes, so it can miss a packaging change that two renderers
+// happen to paper over. This test compares the raw SAX stream instead, so any
+// change in event order, event type, detail field, or substring table is a
+// direct failure with a readable diff.
+//
+// The expected trace is a RECORDED baseline, not a hand-derived spec: its job
+// is to make 4c's "byte-identical behavior" claim mechanically checkable. If a
+// deliberate behavior change ever lands, re-record it and say so in the commit.
+// ---------------------------------------------------------------------------
+
+const TraceProbe = struct {
+    out: std.ArrayListUnmanaged(u8) = .empty,
+    alloc: std.mem.Allocator,
+    depth: usize = 0,
+    oom: bool = false,
+
+    fn raw(self: *TraceProbe, comptime fmt: []const u8, args: anytype) void {
+        if (self.oom) return;
+        self.out.print(self.alloc, fmt, args) catch {
+            self.oom = true;
+        };
+    }
+
+    fn indent(self: *TraceProbe) void {
+        var i: usize = 0;
+        while (i < self.depth) : (i += 1) self.raw("  ", .{});
+    }
+
+    /// Escape control characters so one event is always one line.
+    fn quoted(self: *TraceProbe, str: [*c]const u8, size: SZ) void {
+        self.raw("\"", .{});
+        var i: SZ = 0;
+        while (i < size) : (i += 1) {
+            const ch = str[i];
+            switch (ch) {
+                '\n' => self.raw("\\n", .{}),
+                '\r' => self.raw("\\r", .{}),
+                '\t' => self.raw("\\t", .{}),
+                '"' => self.raw("\\\"", .{}),
+                '\\' => self.raw("\\\\", .{}),
+                0 => self.raw("\\0", .{}),
+                else => {
+                    if (ch < 0x20 or ch == 0x7f) {
+                        self.raw("\\x{x:0>2}", .{ch});
+                    } else {
+                        self.raw("{c}", .{ch});
+                    }
+                },
+            }
+        }
+        self.raw("\"", .{});
+    }
+
+    /// An MD_ATTRIBUTE, including its substring type/offset table — the part
+    /// Phase 4c converts from [*c] arrays to slices.
+    fn attr(self: *TraceProbe, name: []const u8, a: c.MD_ATTRIBUTE) void {
+        self.raw(" {s}=", .{name});
+        if (a.text == null) {
+            self.raw("<null>", .{});
+            return;
+        }
+        self.quoted(a.text, a.size);
+        // substr_offsets is terminated by an entry equal to .size; substr_types
+        // has one fewer entry than substr_offsets.
+        if (a.substr_offsets == null or a.substr_types == null) {
+            self.raw("[<no-substr>]", .{});
+            return;
+        }
+        self.raw("[", .{});
+        var i: usize = 0;
+        while (a.substr_offsets[i] != a.size) : (i += 1) {
+            if (i > 0) self.raw(",", .{});
+            self.raw("{s}@{d}", .{ textTypeName(a.substr_types[i]), a.substr_offsets[i] });
+        }
+        self.raw("|end@{d}]", .{a.size});
+    }
+
+    fn blockTypeName(t: c.MD_BLOCKTYPE) []const u8 {
+        return switch (t) {
+            c.MD_BLOCK_DOC => "DOC",
+            c.MD_BLOCK_QUOTE => "QUOTE",
+            c.MD_BLOCK_UL => "UL",
+            c.MD_BLOCK_OL => "OL",
+            c.MD_BLOCK_LI => "LI",
+            c.MD_BLOCK_HR => "HR",
+            c.MD_BLOCK_H => "H",
+            c.MD_BLOCK_CODE => "CODE",
+            c.MD_BLOCK_HTML => "HTML",
+            c.MD_BLOCK_P => "P",
+            c.MD_BLOCK_TABLE => "TABLE",
+            c.MD_BLOCK_THEAD => "THEAD",
+            c.MD_BLOCK_TBODY => "TBODY",
+            c.MD_BLOCK_TR => "TR",
+            c.MD_BLOCK_TH => "TH",
+            c.MD_BLOCK_TD => "TD",
+            c.MD_BLOCK_FRONTMATTER => "FRONTMATTER",
+            c.MD_BLOCK_COMPONENT => "COMPONENT",
+            c.MD_BLOCK_TEMPLATE => "TEMPLATE",
+            c.MD_BLOCK_ALERT => "ALERT",
+            else => "BLOCK?",
+        };
+    }
+
+    fn spanTypeName(t: c.MD_SPANTYPE) []const u8 {
+        return switch (t) {
+            c.MD_SPAN_EM => "EM",
+            c.MD_SPAN_STRONG => "STRONG",
+            c.MD_SPAN_A => "A",
+            c.MD_SPAN_IMG => "IMG",
+            c.MD_SPAN_CODE => "CODE",
+            c.MD_SPAN_DEL => "DEL",
+            c.MD_SPAN_LATEXMATH => "LATEXMATH",
+            c.MD_SPAN_LATEXMATH_DISPLAY => "LATEXMATH_DISPLAY",
+            c.MD_SPAN_WIKILINK => "WIKILINK",
+            c.MD_SPAN_U => "U",
+            c.MD_SPAN_COMPONENT => "COMPONENT",
+            c.MD_SPAN_SPAN => "SPAN",
+            else => "SPAN?",
+        };
+    }
+
+    fn textTypeName(t: c.MD_TEXTTYPE) []const u8 {
+        return switch (t) {
+            c.MD_TEXT_NORMAL => "NORMAL",
+            c.MD_TEXT_NULLCHAR => "NULLCHAR",
+            c.MD_TEXT_BR => "BR",
+            c.MD_TEXT_SOFTBR => "SOFTBR",
+            c.MD_TEXT_ENTITY => "ENTITY",
+            c.MD_TEXT_CODE => "CODE",
+            c.MD_TEXT_HTML => "HTML",
+            c.MD_TEXT_LATEXMATH => "LATEXMATH",
+            else => "TEXT?",
+        };
+    }
+
+    fn rawStr(self: *TraceProbe, name: []const u8, p: [*c]const c.MD_CHAR, size: SZ) void {
+        self.raw(" {s}=", .{name});
+        if (p == null) self.raw("<null>", .{}) else self.quoted(p, size);
+    }
+
+    fn blockDetail(self: *TraceProbe, ty: c.MD_BLOCKTYPE, detail: ?*anyopaque) void {
+        const d = detail orelse {
+            self.raw(" <no-detail>", .{});
+            return;
+        };
+        switch (ty) {
+            c.MD_BLOCK_UL => {
+                const x: *c.MD_BLOCK_UL_DETAIL = @ptrCast(@alignCast(d));
+                self.raw(" is_tight={d} mark='{c}'", .{ x.is_tight, x.mark });
+            },
+            c.MD_BLOCK_OL => {
+                const x: *c.MD_BLOCK_OL_DETAIL = @ptrCast(@alignCast(d));
+                self.raw(" start={d} is_tight={d} delim='{c}'", .{ x.start, x.is_tight, x.mark_delimiter });
+            },
+            c.MD_BLOCK_LI => {
+                const x: *c.MD_BLOCK_LI_DETAIL = @ptrCast(@alignCast(d));
+                self.raw(" is_task={d} task_mark='{c}' off={d}", .{ x.is_task, if (x.task_mark == 0) @as(u8, '-') else x.task_mark, x.task_mark_offset });
+            },
+            c.MD_BLOCK_H => {
+                const x: *c.MD_BLOCK_H_DETAIL = @ptrCast(@alignCast(d));
+                self.raw(" level={d}", .{x.level});
+            },
+            c.MD_BLOCK_CODE => {
+                const x: *c.MD_BLOCK_CODE_DETAIL = @ptrCast(@alignCast(d));
+                self.attr("info", x.info);
+                self.attr("lang", x.lang);
+                self.raw(" fence='{c}'", .{if (x.fence_char == 0) @as(u8, '-') else x.fence_char});
+                self.attr("filename", x.filename);
+                self.rawStr("meta", x.meta, x.meta_size);
+                self.raw(" highlights=[", .{});
+                var i: c_uint = 0;
+                while (i < x.highlight_count) : (i += 1) {
+                    if (i > 0) self.raw(",", .{});
+                    self.raw("{d}", .{x.highlights[i]});
+                }
+                self.raw("]", .{});
+            },
+            c.MD_BLOCK_TABLE => {
+                const x: *c.MD_BLOCK_TABLE_DETAIL = @ptrCast(@alignCast(d));
+                self.raw(" cols={d} head_rows={d} body_rows={d}", .{ x.col_count, x.head_row_count, x.body_row_count });
+            },
+            c.MD_BLOCK_TH, c.MD_BLOCK_TD => {
+                const x: *c.MD_BLOCK_TD_DETAIL = @ptrCast(@alignCast(d));
+                self.raw(" align={d}", .{x.@"align"});
+            },
+            c.MD_BLOCK_COMPONENT => {
+                const x: *c.MD_BLOCK_COMPONENT_DETAIL = @ptrCast(@alignCast(d));
+                self.attr("tag", x.tag_name);
+                self.rawStr("props", x.raw_props, x.raw_props_size);
+                self.rawStr("title", x.title, x.title_size);
+            },
+            c.MD_BLOCK_TEMPLATE => {
+                const x: *c.MD_BLOCK_TEMPLATE_DETAIL = @ptrCast(@alignCast(d));
+                self.attr("name", x.name);
+            },
+            c.MD_BLOCK_ALERT => {
+                const x: *c.MD_BLOCK_ALERT_DETAIL = @ptrCast(@alignCast(d));
+                self.attr("type", x.type_name);
+            },
+            else => self.raw(" <detail:opaque>", .{}),
+        }
+    }
+
+    fn spanDetail(self: *TraceProbe, ty: c.MD_SPANTYPE, detail: ?*anyopaque) void {
+        const d = detail orelse {
+            self.raw(" <no-detail>", .{});
+            return;
+        };
+        switch (ty) {
+            c.MD_SPAN_A => {
+                const x: *c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(d));
+                self.attr("href", x.href);
+                self.attr("title", x.title);
+                self.rawStr("attrs", x.raw_attrs, x.raw_attrs_size);
+                self.raw(" autolink={d}", .{x.is_autolink});
+            },
+            c.MD_SPAN_IMG => {
+                const x: *c.MD_SPAN_IMG_DETAIL = @ptrCast(@alignCast(d));
+                self.attr("src", x.src);
+                self.attr("title", x.title);
+                self.rawStr("attrs", x.raw_attrs, x.raw_attrs_size);
+            },
+            c.MD_SPAN_WIKILINK => {
+                const x: *c.MD_SPAN_WIKILINK_DETAIL = @ptrCast(@alignCast(d));
+                self.attr("target", x.target);
+            },
+            c.MD_SPAN_COMPONENT => {
+                const x: *c.MD_SPAN_COMPONENT_DETAIL = @ptrCast(@alignCast(d));
+                self.attr("tag", x.tag_name);
+                self.rawStr("props", x.raw_props, x.raw_props_size);
+            },
+            c.MD_SPAN_SPAN => {
+                const x: *c.MD_SPAN_SPAN_DETAIL = @ptrCast(@alignCast(d));
+                self.rawStr("attrs", x.raw_attrs, x.raw_attrs_size);
+            },
+            // em/strong/code/del/u carry MD_SPAN_ATTRS_DETAIL (or null).
+            else => {
+                const x: *c.MD_SPAN_ATTRS_DETAIL = @ptrCast(@alignCast(d));
+                self.rawStr("attrs", x.raw_attrs, x.raw_attrs_size);
+            },
+        }
+    }
+
+    fn enterBlock(ty: c.MD_BLOCKTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *TraceProbe = @ptrCast(@alignCast(ud.?));
+        self.indent();
+        self.raw("+block {s}", .{blockTypeName(ty)});
+        self.blockDetail(ty, detail);
+        self.raw("\n", .{});
+        self.depth += 1;
+        return 0;
+    }
+    fn leaveBlock(ty: c.MD_BLOCKTYPE, _: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *TraceProbe = @ptrCast(@alignCast(ud.?));
+        if (self.depth > 0) self.depth -= 1;
+        self.indent();
+        self.raw("-block {s}\n", .{blockTypeName(ty)});
+        return 0;
+    }
+    fn enterSpan(ty: c.MD_SPANTYPE, detail: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *TraceProbe = @ptrCast(@alignCast(ud.?));
+        self.indent();
+        self.raw("+span {s}", .{spanTypeName(ty)});
+        self.spanDetail(ty, detail);
+        self.raw("\n", .{});
+        self.depth += 1;
+        return 0;
+    }
+    fn leaveSpan(ty: c.MD_SPANTYPE, _: ?*anyopaque, ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *TraceProbe = @ptrCast(@alignCast(ud.?));
+        if (self.depth > 0) self.depth -= 1;
+        self.indent();
+        self.raw("-span {s}\n", .{spanTypeName(ty)});
+        return 0;
+    }
+    fn textCb(ty: c.MD_TEXTTYPE, str: [*c]const CHAR, size: SZ, ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *TraceProbe = @ptrCast(@alignCast(ud.?));
+        self.indent();
+        self.raw("text {s} ", .{textTypeName(ty)});
+        self.quoted(@ptrCast(str), size);
+        self.raw("\n", .{});
+        return 0;
+    }
+
+    fn parser() c.MD_PARSER {
+        var p: c.MD_PARSER = std.mem.zeroes(c.MD_PARSER);
+        p.flags = c.MD_DIALECT_ALL;
+        p.enter_block = TraceProbe.enterBlock;
+        p.leave_block = TraceProbe.leaveBlock;
+        p.enter_span = TraceProbe.enterSpan;
+        p.leave_span = TraceProbe.leaveSpan;
+        p.text = TraceProbe.textCb;
+        return p;
+    }
+};
+
+/// Exercises every block type, span type, and text type that carries a detail
+/// struct, so the trace covers the whole packaging surface Phase 4c rewrites.
+const trace_doc =
+    \\---
+    \\title: Doc
+    \\tags: [a, b]
+    \\---
+    \\
+    \\# Heading *one*
+    \\
+    \\Setext
+    \\======
+    \\
+    \\Para **strong**, *em*, `code`, ~~del~~, _u_, &amp; ent, &#65; num.
+    \\
+    \\Link [text](/url "the title") and auto <https://a.example/> and
+    \\bare https://b.example/ and mail@c.example and www.d.example.
+    \\
+    \\![alt](/img.png "img title"){.responsive}
+    \\
+    \\Math $x^2$ and $$y_1$$ and [[Wiki Target]].
+    \\
+    \\Attrs: **bold**{.hi} *it*{#id} `cs`{.l} ~~d~~{.r} _uu_{.a} [sp]{.cls}
+    \\
+    \\Hard break\
+    \\after break, soft
+    \\break here.
+    \\
+    \\> quoted
+    \\
+    \\> [!WARNING]
+    \\> alert body
+    \\
+    \\- [ ] todo
+    \\- [x] done
+    \\- plain
+    \\
+    \\1. one
+    \\1. two
+    \\
+    \\* loose
+    \\
+    \\* list
+    \\
+    \\---
+    \\
+    \\    indented code
+    \\
+    \\```js [app.js] {1-2,4}
+    \\const x = 1;
+    \\const y = 2;
+    \\```
+    \\
+    \\<div class="raw">
+    \\block html
+    \\</div>
+    \\
+    \\Inline <b>html</b> span.
+    \\
+    \\| left | center | right | plain |
+    \\| :--- | :----: | ----: | ----- |
+    \\| a    | b      | c     | d     |
+    \\| e    | f      | g     | h     |
+    \\
+    \\::card{#cid .ccls color="blue" flag}
+    \\
+    \\---
+    \\icon: star
+    \\---
+    \\
+    \\default slot
+    \\
+    \\#header
+    \\## Slot heading
+    \\
+    \\#footer
+    \\footer text
+    \\::
+    \\
+    \\:::danger STOP {level="high"}
+    \\titled container
+    \\:::
+    \\
+    \\Inline :badge[New]{color="red"} and :icon-star standalone.
+    \\
+    \\<!-- a comment -->
+    \\
+;
+
+test "SAX event trace: golden baseline (freezes detail packaging for Phase 4c)" {
+    var probe = TraceProbe{ .alloc = std.testing.allocator };
+    defer probe.out.deinit(std.testing.allocator);
+    var p = TraceProbe.parser();
+
+    // A NUL byte in the input drives MD_TEXT_NULLCHAR, which no other suite
+    // covers (the fuzz harness and the JS surface both exclude NUL).
+    const input = trace_doc ++ "\nnul\x00char\n";
+
+    const ret = md_parse(@ptrCast(input.ptr), @intCast(input.len), &p, &probe);
+    try std.testing.expectEqual(@as(c_int, 0), ret);
+    try std.testing.expect(!probe.oom);
+
+    try std.testing.expectEqualStrings(expected_trace, probe.out.items);
+}
+
+const expected_trace =
+    \\+block DOC <no-detail>
+    \\  +block FRONTMATTER <detail:opaque>
+    \\    text NORMAL "title: Doc"
+    \\    text NORMAL "\n"
+    \\    text NORMAL "tags: [a, b]"
+    \\    text NORMAL "\n"
+    \\  -block FRONTMATTER
+    \\  +block H level=1
+    \\    text NORMAL "Heading "
+    \\    +span EM <no-detail>
+    \\      text NORMAL "one"
+    \\    -span EM
+    \\  -block H
+    \\  +block H level=1
+    \\    text NORMAL "Setext"
+    \\  -block H
+    \\  +block P <detail:opaque>
+    \\    text NORMAL "Para "
+    \\    +span STRONG <no-detail>
+    \\      text NORMAL "strong"
+    \\    -span STRONG
+    \\    text NORMAL ", "
+    \\    +span EM <no-detail>
+    \\      text NORMAL "em"
+    \\    -span EM
+    \\    text NORMAL ", "
+    \\    +span CODE <no-detail>
+    \\      text CODE "code"
+    \\    -span CODE
+    \\    text NORMAL ", "
+    \\    +span DEL <no-detail>
+    \\      text NORMAL "del"
+    \\    -span DEL
+    \\    text NORMAL ", "
+    \\    +span U <no-detail>
+    \\      text NORMAL "u"
+    \\    -span U
+    \\    text NORMAL ", "
+    \\    text ENTITY "&amp;"
+    \\    text NORMAL " ent, "
+    \\    text ENTITY "&#65;"
+    \\    text NORMAL " num."
+    \\  -block P
+    \\  +block P <detail:opaque>
+    \\    text NORMAL "Link "
+    \\    +span A href="/url"[NORMAL@0|end@4] title="the title"[NORMAL@0|end@9] attrs=<null> autolink=0
+    \\      text NORMAL "text"
+    \\    -span A
+    \\    text NORMAL " and auto "
+    \\    +span A href="https://a.example/"[NORMAL@0|end@18] title=<null> attrs=<null> autolink=1
+    \\      text NORMAL "https://a.example/"
+    \\    -span A
+    \\    text NORMAL " and"
+    \\    text SOFTBR "\n"
+    \\    text NORMAL "bare "
+    \\    +span A href="https://b.example/"[NORMAL@0|end@18] title=<null> attrs=<null> autolink=1
+    \\      text NORMAL "https://b.example/"
+    \\    -span A
+    \\    text NORMAL " and "
+    \\    +span A href="mailto:mail@c.example"[NORMAL@0|end@21] title=<null> attrs=<null> autolink=1
+    \\      text NORMAL "mail@c.example"
+    \\    -span A
+    \\    text NORMAL " and "
+    \\    +span A href="http://www.d.example"[NORMAL@0|end@20] title=<null> attrs=<null> autolink=1
+    \\      text NORMAL "www.d.example"
+    \\    -span A
+    \\    text NORMAL "."
+    \\  -block P
+    \\  +block P <detail:opaque>
+    \\    +span IMG src="/img.png"[NORMAL@0|end@8] title="img title"[NORMAL@0|end@9] attrs=".responsive"
+    \\      text NORMAL "alt"
+    \\    -span IMG
+    \\  -block P
+    \\  +block P <detail:opaque>
+    \\    text NORMAL "Math "
+    \\    +span LATEXMATH <no-detail>
+    \\      text LATEXMATH "x^2"
+    \\    -span LATEXMATH
+    \\    text NORMAL " and "
+    \\    +span LATEXMATH_DISPLAY <no-detail>
+    \\      text LATEXMATH "y_1"
+    \\    -span LATEXMATH_DISPLAY
+    \\    text NORMAL " and "
+    \\    +span WIKILINK target="Wiki Target"[NORMAL@0|end@11]
+    \\      text NORMAL "Wiki Target"
+    \\    -span WIKILINK
+    \\    text NORMAL "."
+    \\  -block P
+    \\  +block P <detail:opaque>
+    \\    text NORMAL "Attrs: "
+    \\    +span STRONG attrs=".hi"
+    \\      text NORMAL "bold"
+    \\    -span STRONG
+    \\    text NORMAL " "
+    \\    +span EM attrs="#id"
+    \\      text NORMAL "it"
+    \\    -span EM
+    \\    text NORMAL " "
+    \\    +span CODE attrs=".l"
+    \\      text CODE "cs"
+    \\    -span CODE
+    \\    text NORMAL " "
+    \\    +span DEL attrs=".r"
+    \\      text NORMAL "d"
+    \\    -span DEL
+    \\    text NORMAL " "
+    \\    +span U attrs=".a"
+    \\      text NORMAL "uu"
+    \\    -span U
+    \\    text NORMAL " "
+    \\    +span SPAN attrs=".cls"
+    \\      text NORMAL "sp"
+    \\    -span SPAN
+    \\  -block P
+    \\  +block P <detail:opaque>
+    \\    text NORMAL "Hard break"
+    \\    text BR "\n"
+    \\    text NORMAL "after break, soft"
+    \\    text SOFTBR "\n"
+    \\    text NORMAL "break here."
+    \\  -block P
+    \\  +block QUOTE <detail:opaque>
+    \\    +block P <detail:opaque>
+    \\      text NORMAL "quoted"
+    \\    -block P
+    \\  -block QUOTE
+    \\  +block ALERT type="WARNING"[NORMAL@0|end@7]
+    \\    +block P <detail:opaque>
+    \\      text NORMAL "alert body"
+    \\    -block P
+    \\  -block ALERT
+    \\  +block UL is_tight=1 mark='-'
+    \\    +block LI is_task=1 task_mark=' ' off=502
+    \\      text NORMAL "todo"
+    \\    -block LI
+    \\    +block LI is_task=1 task_mark='x' off=513
+    \\      text NORMAL "done"
+    \\    -block LI
+    \\    +block LI is_task=0 task_mark='-' off=0
+    \\      text NORMAL "plain"
+    \\    -block LI
+    \\  -block UL
+    \\  +block OL start=1 is_tight=1 delim='.'
+    \\    +block LI is_task=0 task_mark='-' off=0
+    \\      text NORMAL "one"
+    \\    -block LI
+    \\    +block LI is_task=0 task_mark='-' off=0
+    \\      text NORMAL "two"
+    \\    -block LI
+    \\  -block OL
+    \\  +block UL is_tight=0 mark='*'
+    \\    +block LI is_task=0 task_mark='-' off=0
+    \\      +block P <detail:opaque>
+    \\        text NORMAL "loose"
+    \\      -block P
+    \\    -block LI
+    \\    +block LI is_task=0 task_mark='-' off=0
+    \\      +block P <detail:opaque>
+    \\        text NORMAL "list"
+    \\      -block P
+    \\    -block LI
+    \\  -block UL
+    \\  +block HR <detail:opaque>
+    \\  -block HR
+    \\  +block CODE info=<null> lang=<null> fence='-' filename=<null> meta=<null> highlights=[]
+    \\    text CODE "indented code"
+    \\    text CODE "\n"
+    \\  -block CODE
+    \\  +block CODE info="js [app.js] {1-2,4}"[NORMAL@0|end@19] lang="js"[NORMAL@0|end@2] fence='`' filename="app.js"[NORMAL@0|end@6] meta=<null> highlights=[1,2,4]
+    \\    text CODE "const x = 1;"
+    \\    text CODE "\n"
+    \\    text CODE "const y = 2;"
+    \\    text CODE "\n"
+    \\  -block CODE
+    \\  +block HTML <detail:opaque>
+    \\    text HTML "<div class=\"raw\">"
+    \\    text HTML "\n"
+    \\    text HTML "block html"
+    \\    text HTML "\n"
+    \\    text HTML "</div>"
+    \\    text HTML "\n"
+    \\  -block HTML
+    \\  +block P <detail:opaque>
+    \\    text NORMAL "Inline "
+    \\    text HTML "<b>"
+    \\    text NORMAL "html"
+    \\    text HTML "</b>"
+    \\    text NORMAL " span."
+    \\  -block P
+    \\  +block TABLE cols=4 head_rows=1 body_rows=2
+    \\    +block THEAD <no-detail>
+    \\      +block TR <no-detail>
+    \\        +block TH align=1
+    \\          text NORMAL "left"
+    \\        -block TH
+    \\        +block TH align=2
+    \\          text NORMAL "center"
+    \\        -block TH
+    \\        +block TH align=3
+    \\          text NORMAL "right"
+    \\        -block TH
+    \\        +block TH align=0
+    \\          text NORMAL "plain"
+    \\        -block TH
+    \\      -block TR
+    \\    -block THEAD
+    \\    +block TBODY <no-detail>
+    \\      +block TR <no-detail>
+    \\        +block TD align=1
+    \\          text NORMAL "a"
+    \\        -block TD
+    \\        +block TD align=2
+    \\          text NORMAL "b"
+    \\        -block TD
+    \\        +block TD align=3
+    \\          text NORMAL "c"
+    \\        -block TD
+    \\        +block TD align=0
+    \\          text NORMAL "d"
+    \\        -block TD
+    \\      -block TR
+    \\      +block TR <no-detail>
+    \\        +block TD align=1
+    \\          text NORMAL "e"
+    \\        -block TD
+    \\        +block TD align=2
+    \\          text NORMAL "f"
+    \\        -block TD
+    \\        +block TD align=3
+    \\          text NORMAL "g"
+    \\        -block TD
+    \\        +block TD align=0
+    \\          text NORMAL "h"
+    \\        -block TD
+    \\      -block TR
+    \\    -block TBODY
+    \\  -block TABLE
+    \\  +block COMPONENT tag="card"[NORMAL@0|end@4] props="#cid .ccls color=\"blue\" flag" title=<null>
+    \\    +block FRONTMATTER <detail:opaque>
+    \\      text NORMAL "icon: star"
+    \\      text NORMAL "\n"
+    \\    -block FRONTMATTER
+    \\    +block P <detail:opaque>
+    \\      text NORMAL "default slot"
+    \\    -block P
+    \\    +block TEMPLATE name="header"[NORMAL@0|end@6]
+    \\      +block H level=2
+    \\        text NORMAL "Slot heading"
+    \\      -block H
+    \\    -block TEMPLATE
+    \\    +block TEMPLATE name="footer"[NORMAL@0|end@6]
+    \\      +block P <detail:opaque>
+    \\        text NORMAL "footer text"
+    \\      -block P
+    \\    -block TEMPLATE
+    \\  -block COMPONENT
+    \\  +block COMPONENT tag="danger"[NORMAL@0|end@6] props="level=\"high\"" title="STOP"
+    \\    +block P <detail:opaque>
+    \\      text NORMAL "titled container"
+    \\    -block P
+    \\  -block COMPONENT
+    \\  +block P <detail:opaque>
+    \\    text NORMAL "Inline "
+    \\    +span COMPONENT tag="badge"[NORMAL@0|end@5] props="color=\"red\""
+    \\      text NORMAL "New"
+    \\    -span COMPONENT
+    \\    text NORMAL " and "
+    \\    +span COMPONENT tag="icon-star"[NORMAL@0|end@9] props=<null>
+    \\    -span COMPONENT
+    \\    text NORMAL " standalone."
+    \\  -block P
+    \\  +block HTML <detail:opaque>
+    \\    text HTML "<!-- a comment -->"
+    \\    text HTML "\n"
+    \\  -block HTML
+    \\  +block P <detail:opaque>
+    \\    text NORMAL "nul"
+    \\    text NULLCHAR "\0"
+    \\    text NORMAL "char"
+    \\  -block P
+    \\-block DOC
+++ "\n";
