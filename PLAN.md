@@ -36,7 +36,8 @@ see its section below):
 | 9b — out-of-range mark cursor     | `c666da4`                       |
 | 9 — list loosened by `::` / `#`   | `ce1db56`                       |
 | 10 — 16-bit comp/slot/alert index | `7db8d1b`                       |
-| 11 — required `Parser` callbacks  | _the commit adding this row_    |
+| 11 — required `Parser` callbacks  | `7785acc`                       |
+| 7 — delete the dead `growArray`   | _the commit adding this row_    |
 
 Zero `TRUE`/`FALSE` tokens remain in `src/`. Verified at `3c3d2f7`: `zig build`,
 `zig build test` (ReleaseFast **and** Debug), 16 spec suites / 1001 assertions,
@@ -87,13 +88,14 @@ behind the full verification gate.
 verified by reproduction — item 9 is user-visible on ordinary MDC prose. They
 are not refactors and must not ride along with one. **All of them — 9, 9a, 9b,
 10 and 11 — are landed**; see the table above. Only the idiomatization/doc items
-4, 5, 6 and 7 remain.
+4, 5 and 6 remain.
 
 **Suggested priority.** `8` is **landed** (it was why three of these bugs went
 unseen); take the rest in any order.
 
-**Ordering constraint.** Items 7 and 5 rewrite overlapping parser files and must
-stay **serial**. Renderer-only and docs-only work parallelizes freely.
+**Ordering constraint.** Items 7 and 5 rewrote overlapping parser files and had
+to stay **serial**; 7 is now landed, so 5 is unblocked. Renderer-only and
+docs-only work parallelizes freely.
 
 **Do not fold a bug fix into a refactor commit**, and do not let a refactor
 "tidy" an adjacent bug — constraint #4 makes the refactors type/name-only, and
@@ -160,21 +162,40 @@ tolerate a null title).
   The accumulated WIP entries are correct; only the heading is wrong. This is a
   release-process question, not a doc-sync one — resolve it at the next release.
 
-### 7. Delete the dead `growArray` / `c_realloc_array` idiom
+### ~~7. Delete the dead `growArray` / `c_realloc_array` idiom~~ — LANDED
 
-`AGENTS.md` currently instructs: _"Any remaining `[*c]T` buffer still grows via
-`util.growArray(...)`"_. **That set is empty.** Census: `growArray` has zero
-production callers (only the `md4x.zig:840` unit test); `c_realloc_array` is
-called only from inside `growArray` itself; the three aliases (`md4x.zig:170`,
-`blocks.zig:45`, `inlines.zig:51`) are never called; `c_malloc_array`'s single
-use is the test-only `_test_run_inline` driver at `md4x.zig:384`.
+Census re-verified at `7785acc` before deleting anything (line numbers had
+drifted from PLAN's, but the shape was exactly as described): `growArray`
+(`util.zig:754`) had zero production callers — only the unit test at
+`md4x.zig:1165`; `c_realloc_array` (`util.zig:741`) was called only from inside
+`growArray` (`util.zig:760`); its three aliases (`md4x.zig:155`,
+`blocks.zig:44`, `inlines.zig:38`) were never called; and `c_malloc_array`
+(`util.zig:733`) had one use, the test-only `_test_run_inline` driver at
+`md4x.zig:368`. Nothing had gained a production caller — in particular item 9a's
+new `brace_pairs` array is an `ArrayListUnmanaged`, not a `[*c]T`.
 
-So the doc actively steers contributors toward a raw-libc path the
-`FailingAllocator` sweep cannot see — a doc bug that manufactures future bugs.
-Delete `growArray` + `c_realloc_array` + the three aliases (~45 lines), and
-switch `_test_run_inline` to `alloc_array_a` — at which point `std.c.malloc` /
-`std.c.realloc` disappear from the parser entirely and the reworded `AGENTS.md`
-bullet can state that absolutely rather than conditionally.
+All three helpers plus the three aliases are deleted, and `_test_run_inline`
+allocates its line array through `ctx.alloc` (`alloc_array_a`, freed by
+`free_array_a` at the identical `size + 2` count). **`std.c.malloc` and
+`std.c.realloc` now have zero occurrences in `src/md4x.zig`, `src/abi.zig` and
+`src/parser/`**, so the `AGENTS.md` "Growable arrays" bullet states the absolute
+instead of steering new code onto a raw-libc path the `FailingAllocator` sweep
+cannot inject into.
+
+**Residual libc in the parser (item 5's remit):** eight `std.c.free` calls, all
+freeing `md_merge_lines_alloc` buffers — `refdefs.zig:391`, `:393`, `:735`,
+`:736`, `:780`; `inlines.zig:1274`; `process.zig:273` (the `ptr_stack` walk);
+and `md4x.zig:392` (the same walk in the test-only `_test_run_inline`). No
+`std.c.malloc`/`realloc` anywhere; the five `extern "c"` declarations in
+`util.zig` (`qsort`/`bsearch`/`memcmp`/`strcspn`/`memmove`) are not allocation.
+
+The retired `growArray` test is replaced by one over the **live** helpers
+(`alloc_array_a` / `realloc_array_a` / `free_array_a`), which had no direct
+coverage: it pins zero-count → null, data survival across a grow **and** across
+the `md_parse_highlights` shrink-to-fit, a null `old` meaning "fresh alloc", and
+the injected-OOM contract (null return, old block intact and still freeable).
+The one property genuinely lost is `growArray`'s 1.5× schedule, which no longer
+exists in any form.
 
 ### ~~8. `zig build test` runs in neither CI nor safe mode~~ — LANDED
 

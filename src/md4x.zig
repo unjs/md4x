@@ -151,8 +151,6 @@ const bsearch = util.bsearch;
 const memcmp = util.memcmp;
 const strcspn = util.strcspn;
 const memmove = util.memmove;
-const c_malloc_array = util.c_malloc_array;
-const c_realloc_array = util.c_realloc_array;
 
 // ----------------------------------------------------------------------------
 // Reference definitions + link recognizers — re-exposed from parser/refdefs.zig.
@@ -365,7 +363,8 @@ fn _test_run_inline(parser: *const c.Parser, text: [*c]const CHAR, size: SZ) c_i
     ctx.table_cell_boundaries_head = -1;
     ctx.table_cell_boundaries_tail = -1;
 
-    const lines = c_malloc_array(MD_LINE, @as(usize, size) + 2);
+    const n_lines_cap: usize = @as(usize, size) + 2;
+    const lines = util.alloc_array_a(MD_LINE, ctx.alloc, n_lines_cap);
     var n_lines: MD_SIZE = 0;
     var beg: OFF = 0;
     var off: OFF = 0;
@@ -394,7 +393,10 @@ fn _test_run_inline(parser: *const c.Parser, text: [*c]const CHAR, size: SZ) c_i
     }
     ctx.ptr_stack.top = -1;
 
-    std.c.free(lines);
+    // Exact-length free: the same n_lines_cap the array was allocated with (the
+    // std allocators validate it; a wrong count panics in the ReleaseSafe test
+    // artifact).
+    util.free_array_a(MD_LINE, ctx.alloc, lines, n_lines_cap);
     // Hashtable before ref_defs: it indexes into ctx.ref_defs (see md_parse_impl).
     md_free_ref_def_hashtable(&ctx);
     md_free_ref_defs(&ctx);
@@ -1162,32 +1164,51 @@ test "decode_utf8: 1/2/3/4-byte sequences + truncation fallback" {
     try std.testing.expectEqual(@as(SZ, 1), sz);
 }
 
-test "growArray: 1.5x growth schedule + data survives realloc" {
-    var arr: [*c]u32 = null;
-    var alloc: c_int = 0;
-    var n: c_int = 0;
-    defer std.c.free(arr);
+// The typed `[*c]T` buffers (MD_ATTRIBUTE's text/substr tables, the table
+// pipe/align scratch, the code-block meta buffer and the highlight array) all go
+// through these three helpers. This pins the libc-shaped contract they rely on:
+// null for a zero count, data survival across a grow AND a shrink-to-fit (which
+// md_parse_highlights depends on), a null `old` meaning "fresh alloc", and — on
+// injected OOM — a null return with the OLD block left intact and freeable.
+test "typed array helpers: alloc/realloc/free roundtrip + injected failure" {
+    const a = std.testing.allocator;
 
-    // First push from empty grows to min_alloc.
-    try util.growArray(u32, &arr, &alloc, n, 8);
-    try std.testing.expectEqual(@as(c_int, 8), alloc);
-    arr[@intCast(n)] = 100;
-    n += 1;
+    // Zero count allocates nothing; free of a null/zero pair is a no-op.
+    try std.testing.expect(util.alloc_array_a(u32, a, 0) == null);
+    util.free_array_a(u32, a, null, 0);
 
-    // No realloc until n reaches capacity.
-    while (n < 8) : (n += 1) {
-        try util.growArray(u32, &arr, &alloc, n, 8);
-        try std.testing.expectEqual(@as(c_int, 8), alloc);
-        arr[@intCast(n)] = @intCast(n);
-    }
+    // A null `old` makes realloc_array_a a fresh allocation (libc parity).
+    var arr = util.realloc_array_a(u32, a, null, 0, 8);
+    try std.testing.expect(arr != null);
+    var i: usize = 0;
+    while (i < 8) : (i += 1) arr[i] = @intCast(100 + i);
 
-    // n == alloc == 8 → grow by 1.5x to 12.
-    try util.growArray(u32, &arr, &alloc, n, 8);
-    try std.testing.expectEqual(@as(c_int, 12), alloc);
-
-    // Data written before the realloc must survive it.
+    // Grow: data written before the realloc must survive it.
+    arr = util.realloc_array_a(u32, a, arr, 8, 12);
+    try std.testing.expect(arr != null);
     try std.testing.expectEqual(@as(u32, 100), arr[0]);
-    try std.testing.expectEqual(@as(u32, 7), arr[7]);
+    try std.testing.expectEqual(@as(u32, 107), arr[7]);
+
+    // Shrink-to-fit (the md_parse_highlights pattern) keeps the live prefix.
+    arr = util.realloc_array_a(u32, a, arr, 12, 4);
+    try std.testing.expect(arr != null);
+    try std.testing.expectEqual(@as(u32, 100), arr[0]);
+    try std.testing.expectEqual(@as(u32, 103), arr[3]);
+
+    // Exact-length free: a wrong count would panic in this ReleaseSafe artifact.
+    util.free_array_a(u32, a, arr, 4);
+
+    // Injected failure: alloc returns null, and a failed realloc returns null
+    // while leaving the old block valid (so the caller can still free it).
+    var fa = std.testing.FailingAllocator.init(a, .{ .fail_index = 1 });
+    const fal = fa.allocator();
+    const keep = util.alloc_array_a(u32, fal, 4);
+    try std.testing.expect(keep != null);
+    keep[0] = 42;
+    try std.testing.expect(util.alloc_array_a(u32, fal, 4) == null);
+    try std.testing.expect(util.realloc_array_a(u32, fal, keep, 4, 64) == null);
+    try std.testing.expectEqual(@as(u32, 42), keep[0]);
+    util.free_array_a(u32, fal, keep, 4);
 }
 
 // PLAN 8.5: the typed MD_CTX growable arrays now allocate through ctx.alloc, so

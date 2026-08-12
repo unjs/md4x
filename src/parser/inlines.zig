@@ -35,7 +35,6 @@ const md_free_attribute = util.md_free_attribute;
 const md_is_entity = util.md_is_entity;
 const md_lookup_line = util.md_lookup_line;
 const md_temp_buffer = util.md_temp_buffer;
-const c_realloc_array = util.c_realloc_array;
 
 const MD_LINK_ATTR = refdefs.MD_LINK_ATTR;
 const md_is_autolink = refdefs.md_is_autolink;

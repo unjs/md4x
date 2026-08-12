@@ -41,7 +41,6 @@ const md_ascii_case_eq = util.md_ascii_case_eq;
 const md_ascii_eq = util.md_ascii_eq;
 const memcmp = util.memcmp;
 const strcspn = util.strcspn;
-const c_realloc_array = util.c_realloc_array;
 
 const md_is_link_reference_definition = refdefs.md_is_link_reference_definition;
 

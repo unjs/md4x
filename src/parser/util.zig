@@ -720,49 +720,6 @@ pub extern "c" fn memcmp(a: ?*const anyopaque, b: ?*const anyopaque, n: usize) c
 pub extern "c" fn strcspn(s: [*c]const u8, reject: [*c]const u8) usize;
 pub extern "c" fn memmove(dest: ?*anyopaque, src: ?*const anyopaque, n: usize) ?*anyopaque;
 
-// ----------------------------------------------------------------------------
-// libc malloc/realloc wrappers used where md4c relies on realloc(NULL,…) and
-// freeing pointers across allocations whose previous size is not tracked in a
-// Zig slice. These mirror the C runtime exactly (the C parser uses raw
-// malloc/realloc/free for these attribute build buffers).
-// ----------------------------------------------------------------------------
-// NOTE: these return a plain `[*c]T`, which is itself nullable — callers check
-// `== null` (mirroring C's `malloc`/`realloc` returning a possibly-NULL pointer).
-// Do NOT wrap in `?[*c]T`: an optional C-pointer is a malformed type in Zig and
-// produces garbage payloads (observed via valgrind as uninitialised reads).
-pub fn c_malloc_array(comptime T: type, count: usize) [*c]T {
-    if (count == 0) {
-        // C: malloc(0) is impl-defined; md4c only mallocs raw_size>0 here.
-        return @ptrCast(@alignCast(std.c.malloc(0)));
-    }
-    return @ptrCast(@alignCast(std.c.malloc(count * @sizeOf(T))));
-}
-
-pub fn c_realloc_array(comptime T: type, old: [*c]T, count: usize) [*c]T {
-    return @ptrCast(@alignCast(std.c.realloc(old, count * @sizeOf(T))));
-}
-
-// Grow a `[*c]T` array using the duplicated `n >= alloc` realloc-grow idiom that
-// appears on several MD_CTX growable arrays (marks, containers, block/slot/alert
-// info, inline attrs, ref defs). `n` is the live element count and `alloc.*` the
-// current capacity; when full, capacity grows by 1.5x (or to `min_alloc` from
-// empty) via libc realloc. On success `ptr.*`/`alloc.*` are updated together; on
-// realloc failure both are left unchanged and error.OutOfMemory is returned (the
-// caller logs + maps to its own abort contract). The growth schedule, the
-// `n >= alloc` trigger, and the realloc ABI are byte-identical to the hand-written
-// blocks this replaces — only the duplication is removed.
-pub fn growArray(comptime T: type, ptr: *[*c]T, alloc: *c_int, n: c_int, min_alloc: c_int) error{OutOfMemory}!void {
-    if (n < alloc.*) return;
-    const new_alloc: c_int = if (alloc.* > 0)
-        alloc.* + @divTrunc(alloc.*, 2)
-    else
-        min_alloc;
-    const new_arr = c_realloc_array(T, ptr.*, @intCast(new_alloc));
-    if (new_arr == null) return error.OutOfMemory;
-    ptr.* = new_arr;
-    alloc.* = new_alloc;
-}
-
 // --- raw byte-arena helpers routed through a std.mem.Allocator ----------------
 //
 // PLAN C ("fuller OOM matrix"): `malloc`/`realloc`/`free`-shaped wrappers over
@@ -807,9 +764,14 @@ pub fn arena_free(alloc: std.mem.Allocator, old: ?*anyopaque, old_len: usize) vo
 // Typed-array variants of the same idea (PLAN C): `malloc`/`realloc`/`free`-shaped
 // over a std.mem.Allocator but keeping the `[*c]T` element-pointer shape that the
 // C ABI buffers need (e.g. MD_ATTRIBUTE's `substr_types`/`substr_offsets`/`text`).
-// Mirror c_malloc_array/c_realloc_array semantics (return `[*c]T`, null on OOM,
-// old block kept on realloc OOM) but track the exact element count so the std
+// They keep libc's `malloc`/`realloc` semantics (return `[*c]T`, null on OOM, old
+// block kept on realloc OOM) but track the exact element count so the std
 // allocators can free/validate them — letting a FailingAllocator reach these.
+//
+// NOTE: they return a plain `[*c]T`, which is itself nullable — callers check
+// `== null` (mirroring C's `malloc`/`realloc` returning a possibly-NULL pointer).
+// Do NOT wrap in `?[*c]T`: an optional C-pointer is a malformed type in Zig and
+// produces garbage payloads (observed via valgrind as uninitialised reads).
 pub fn alloc_array_a(comptime T: type, alloc: std.mem.Allocator, count: usize) [*c]T {
     if (count == 0) return null;
     const slice = alloc.alloc(T, count) catch return null;
