@@ -18,97 +18,45 @@
 
 ## What's left
 
-Items 1–8 are **ordinary idiomatization or doc upkeep**: the structural work is
-finished, there is no remaining C-ABI seam, and none of it is load-bearing for
-correctness. Land them in any order, each behind the full verification gate.
+**Landed 2026-08-12** (all behind the full gate, corpus diff-clean at 168
+hashes, golden SAX trace unchanged, nothing re-recorded):
 
-**Items 9–11 are different.** They are live bugs found by an independent audit
-during this session — one of them (item 9) is user-visible and reproduces on
-ordinary MDC prose. They are not refactors, they must not ride along with one,
+| Item                             | Commits                         |
+| -------------------------------- | ------------------------------- |
+| 3 — `MD_LINETYPE` member rename  | `49855c4`                       |
+| 1 — `TRUE`/`FALSE` → `bool`      | `5ab9a3d`, `c501ac1`, `e648b3b` |
+| 1b — renderer state fields       | `3c3d2f7`                       |
+| 2 — `MD_MARK_*` → `MarkFlags`    | `dbd8720`                       |
+| 6 — doc gaps (first two bullets) | `494cf3f`, `73d6e27`            |
+
+Zero `TRUE`/`FALSE` tokens remain in `src/`. Verified at `3c3d2f7`: `zig build`,
+`zig build test` (ReleaseFast **and** Debug), 16 spec suites / 1001 assertions,
+30 pathological, corpus diff empty, fuzz smoke, wasm (309) and napi (307).
+
+---
+
+Items 1c–8 are **ordinary idiomatization or doc upkeep**, except 1c which is a
+real (latent) bug. The structural work is finished and there is no remaining
+C-ABI seam. Land them in any order, each behind the full verification gate.
+
+**Items 9–11 are different.** They are live bugs found by an independent audit,
+verified by reproduction — item 9 is user-visible on ordinary MDC prose and 9a
+is a reachable DoS. They are not refactors, they must not ride along with one,
 and item 9 deliberately **breaks the "corpus diff must be empty" rule** because
 the baseline currently encodes the bug. Read the gate exception on item 9 before
 touching it.
 
-**Ordering.** Items 1c/2/7/5 all rewrite overlapping parser files and must stay
-serial. Item 1b is renderer-only and runs in parallel with them. Current chain:
-`1 → 1c → 2 → 7 → 5`, with `1b` alongside, and the bug items sequenced by
-whoever picks them up.
+**Suggested priority.** `9a` first — it is reachable from untrusted input with
+default flags and contradicts a documented guarantee. Then `1c` (it blocks 5),
+then `8` (it is why three of these bugs went unseen), then the rest.
 
-### 1. `TRUE` / `FALSE` → `bool` (~213 sites)
+**Ordering constraint.** Items 1c/7/5 and bug 9b all rewrite overlapping parser
+files and must stay **serial**. Bug 9a also lives in `inlines.zig`, so it
+serializes against 9b. Renderer-only and docs-only work parallelizes freely.
 
-The two `c_int` constants survive across the parser where the value is
-genuinely two-state:
-
-| File                     | Uses |
-| ------------------------ | ---: |
-| `src/parser/blocks.zig`  |   77 |
-| `src/parser/inlines.zig` |   62 |
-| `src/parser/refdefs.zig` |   59 |
-| `src/parser/util.zig`    |    5 |
-| `src/parser/process.zig` |    5 |
-| `src/md4x.zig`           |    5 |
-| `src/parser/types.zig`   |    2 |
-
-**Exception — do not convert:** tri-state recognizers that also signal OOM keep
-returning `c_int` (`-1` / `0` / `N`). Check each site before flipping it; a
-"boolean" that can also be `-1` is not a `bool`.
-
-**Named must-not-convert sites** (found by audit; a token-level sweep hits all
-of these because they contain `TRUE`/`FALSE` tokens whose real return domain is
-`0..7`, not two-state):
-
-- `md_is_html_block_end_condition` (`blocks.zig:592`) — returns 0..7. Its
-  `return TRUE` is the literal HTML-block **type 1**. Call sites test `> 0`,
-  `== 6 or == 7`, and — the critical one — `== ctx.html_block_type`
-  (`blocks.zig:1580`), the primary close-detection test, which under `bool`
-  degrades to "any end condition closes any block type". **The corpus gate
-  cannot catch this.** Sub-trap: four arms are
-  `return if (md_line_contains(...) != 0) N else FALSE` — integer-valued, so if
-  `md_line_contains` becomes `bool` those `else FALSE` must become `else 0`.
-- `md_is_html_block_start_condition` (`blocks.zig:504`) — returns 0..7; its lone
-  `FALSE` token is a C-ism for 0. Its doc comment ("or FALSE (0)") is what
-  should be fixed, not the function.
-- `is_link` in `md_resolve_links` (`inlines.zig:1102`) — **already correct as
-  `c_int`**; it carries `-1` OOM and is read `< 0` in three places. Do not
-  "finish" it. This is the one case where the right answer looks like an
-  unfinished conversion.
-- `MD_CONTAINER.is_loose` (`types.zig:134`) — holds the value **4**, not 1
-  (assigned `flags & MD_BLOCK_LOOSE_LIST`, mask `0x04`). A Zig `bool` holding
-  byte 4 is **illegal behavior — UB in the shipping ReleaseFast build**.
-  Converting it requires rewriting the assignment as `!= 0`; an
-  `@intCast`/`@truncate` "fix" is wrong. Default action: skip.
-- `MD_CTX.frontmatter_state` (0/1/2), `MD_CTX.html_block_type` (0..7),
-  `MD_CONTAINER.comp_fm_state` — tri-state, no `TRUE`/`FALSE` tokens. Safe under
-  a token grep; a "flip the `c_int` flags in `MD_CTX`" sweep would eat them.
-
-**Golden-trace hazard.** `src/md4x.zig` `_test_run_analyze` prints six flag
-fields with `{d}`: `line.enforce_new_block`, `co.is_loose`, `co.is_task`,
-`co.is_alert`, `ctx.last_line_has_list_loosening_effect`,
-`ctx.last_list_item_starts_with_two_blank_lines`. `{d}` on a `bool` does not
-compile, and the obvious fix (`{}`/`{any}`) prints `true`/`false` where the
-recorded baseline has `1`/`0` — a stop-the-line trace diff. Keep the output
-byte-identical with an explicit `@intFromBool(...)` at each print site.
-**Do not re-record the baseline.**
-
-### 1b. `TRUE` / `FALSE` → `bool` in the renderers (24 sites)
-
-Item 1's scope names only `md4x-ast.zig`'s `tag_is_dynamic`, but that is 1 of 25
-boolean-like `c_int` fields in the renderers. As scoped, item 1 leaves the parser
-on `bool` and six renderers on `c_int` for the identical idiom.
-
-| File                | Count | Fields                                                                                                                              |
-| ------------------- | ----: | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `md4x-markdown.zig` |     9 | `in_code_block`, `in_code_span`, `need_newline`, `need_indent`, `li_opened`, `in_frontmatter`, `in_table`, `in_thead`, `thead_done` |
-| `md4x-ansi.zig`     |     6 | `in_code_block`, `need_newline`, `need_indent`, `li_opened`, `in_alert`, `in_comp_frontmatter`                                      |
-| `md4x-text.zig`     |     5 | `in_code_block`, `need_newline`, `need_indent`, `li_opened`, `in_frontmatter`                                                       |
-| `md4x-html.zig`     |     2 | `in_frontmatter`, `in_code_block`                                                                                                   |
-| `md4x-meta.zig`     |     2 | `in_frontmatter`, `in_heading`                                                                                                      |
-
-All are plain (non-`extern`) renderer state structs, so layout-safe. Each still
-needs the individual assigned-a-non-0/1 audit — that has **not** been cleared.
-The `tag_is_dynamic`-first dispatch rule must survive its own type change.
-
-Renderer-only, so this runs **in parallel** with the parser chain.
+**Do not fold a bug fix into a refactor commit**, and do not let a refactor
+"tidy" an adjacent bug — constraint #4 makes the refactors type/name-only, and
+the audit's value came from each finding being independently reviewable.
 
 ### 1c. `md_build_attr_append_substr` frees at the wrong length on OOM
 
@@ -142,29 +90,6 @@ path is covered at all — demonstrate the failure before fixing it.
 Land this **before** item 5: routing three more buffers into a builder that
 already gets one exact length wrong is backwards.
 
-`inlines.zig` and `blocks.zig` are the mark engine and block state machine —
-**constraint #4 applies**, so change the type only, never the control flow.
-The internal `MD_CTX` / `MD_CONTAINER` `c_int` flags (`is_task`, `is_alert`,
-`is_ordered_list`, …) and the AST renderer's `tag_is_dynamic: c_int` are part of
-this sweep.
-
-### 2. `MD_MARK_*` namespacing (§8.7) (~150 sites)
-
-The mark flags are still loose `MD_MARK_*` consts. Group them into a namespaced
-declaration (or a packed flags struct) the way `BlockType`/`SpanType` were
-handled in 4c.
-
-**This lives in the emphasis/mark-resolution engine — the single most
-delicate file in the project.** Do it as its own commit, gate it hard, and
-never combine it with a logic change.
-
-### 3. `MD_LINETYPE` member rename (§8.8)
-
-`src/parser/types.zig:40` — members are still `MD_LINE_BLANK`, `MD_LINE_HR`, …
-on an otherwise idiomatic Zig enum. Rename to `.blank`, `.hr`, … matching the
-`BlockType`/`SpanType` convention 4c established. Mechanical; the compiler finds
-every site.
-
 ### 4. General naming (§3.1/§8.6)
 
 Function and local naming is still largely md4c's `md_snake_case`. Upstream
@@ -184,14 +109,43 @@ allocation goes through the injectable allocator and the exact-length rule.
 See the "Raw byte arenas" bullet in `AGENTS.md` for the allocation discipline
 these must adopt.
 
+**Audit verdict: this is PURE IDIOMATIZATION, not a bug fix.** The current
+arrangement was independently verified leak-correct: no wrong-length free (these
+are `u8` allocs with alignment 1, so `CAllocator.allocStrat` picks `.raw` /
+plain `malloc` on every shipping target — including Windows, where an
+over-aligned request would otherwise route through `_aligned_malloc` and make
+the bare `std.c.free` corrupt the CRT heap), and no leak on any path (the
+`md_is_link_reference_definition` abort path frees the merged label before
+returning; `md_is_link_reference` frees its multiline label unconditionally;
+`md_is_inline_link_spec`'s title reaches **either** `inlines.zig:1229` **or**
+the `ptr_stack` walk at `process.zig:275`, never both).
+
+**The real justification is test coverage, not correctness.** Because these
+bypass `ctx.alloc`, the `FailingAllocator` sweep can neither inject OOM into
+them nor leak-check them — so every path above is correct only _by inspection_.
+Prioritize accordingly; this is lower value than it looks.
+
+**Land item 1c first.** Routing three more buffers into a builder that already
+gets one exact length wrong is backwards.
+
+**Fold in while you are here (preventive, not live):** `md_merge_lines_alloc`
+(`util.zig:407`) has no zero-length guard. In Zig 0.16
+`Allocator.allocBytesWithAlignment` short-circuits `byte_count == 0` and returns
+`@ptrFromInt(maxInt(usize))` **without calling the vtable**; that sentinel would
+reach `std.c.free` at `refdefs.zig:782`, the `ptr_stack` walk, and
+`inlines.zig:1229`. It diverges from C (where `malloc(0)` returns a freeable
+pointer) and from the two sibling helpers in the same file that _do_
+special-case zero (`arena_alloc`, `alloc_array_a`). Currently **unreachable** —
+all three call sites are guarded by non-local invariants
+(`contents_beg < contents_end`; multiline implies `lines[i+1].beg > lines[i].end`;
+`refdefs.zig:867` gates on `title_contents_beg < title_contents_end`) — but it
+is a one-line guard protecting a catastrophic outcome via invariants three call
+frames away, and item 5 disturbs exactly those call sites:
+`if (n == 0) { p_str.* = null; p_size.* = 0; return 0; }` (callers already
+tolerate a null title).
+
 ### 6. Doc gaps
 
-- **`docs/renderers.md` has no markdown-renderer section.** `md_markdown` ships,
-  has a CLI format (`--format=markdown`), and is covered by `spec-markdown.txt`
-  and the corpus, but is the only renderer with no API section. Add one matching
-  the others (signature, flags, rendering details).
-- **`docs/renderers.md`'s `MD_HTML_OPTS` snippet is stale** — it shows
-  `[*c]const u8` fields where the real type is `?[*:0]const u8`.
 - **`CHANGELOG.md`'s WIP heading says `v0.0.18` but the last tag is `v0.0.26`.**
   The accumulated WIP entries are correct; only the heading is wrong. This is a
   release-process question, not a doc-sync one — resolve it at the next release.
