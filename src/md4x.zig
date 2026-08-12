@@ -281,6 +281,7 @@ fn md_parse_impl(alloc: std.mem.Allocator, text: [*c]const CHAR, size: SZ, parse
     ctx.slot_info.deinit(ctx.alloc);
     ctx.block_alert_info.deinit(ctx.alloc);
     ctx.inline_attrs.deinit(ctx.alloc);
+    ctx.brace_pairs.deinit(ctx.alloc);
 
     return ret;
 }
@@ -399,6 +400,7 @@ fn _test_run_inline(parser: *const c.Parser, text: [*c]const CHAR, size: SZ) c_i
     util.free_array_a(CHAR, ctx.alloc, ctx.buffer, @intCast(ctx.alloc_buffer));
     ctx.marks.deinit(ctx.alloc);
     ctx.inline_attrs.deinit(ctx.alloc);
+    ctx.brace_pairs.deinit(ctx.alloc);
     return ret;
 }
 
@@ -614,6 +616,7 @@ fn _test_run_analyze(parser: *const c.Parser, text: [*c]const CHAR, size: SZ, ou
     util.free_array_a(CHAR, ctx.alloc, ctx.buffer, @intCast(ctx.alloc_buffer));
     ctx.marks.deinit(ctx.alloc);
     ctx.inline_attrs.deinit(ctx.alloc);
+    ctx.brace_pairs.deinit(ctx.alloc);
     return ret;
 }
 

@@ -1070,6 +1070,67 @@ pub fn md_analyze_bracket(ctx: *MD_CTX, mark_index: c_int) void {
     }
 }
 
+// ---- Document-wide `{`…`}` pairing for the inline-attribute scans ----
+//
+// Both attribute scans (md_resolve_links' `[text]{attrs}` probe and
+// md_resolve_attrs' trailing-`{attrs}` probe) ask the same question of a `{` at
+// offset `s`: where is the offset at which the running brace balance returns to
+// its value before `s` — i.e. the matching `}` — if anywhere before ctx.size?
+//
+// Both used to answer it by scanning forward from `s` to ctx.size counting
+// depth, per candidate. That is quadratic whenever the scans run long: on
+// unbalanced input (`'*a*{' x N`) every candidate re-reads the whole remaining
+// document, and on deeply nested input (`'*a*{' x N ++ '}' x N`) so does every
+// successful one. PLAN item 9a; both shapes were measured at 4x per doubling.
+//
+// The matching is a property of the document alone, so it is computed once, in
+// one linear right-to-left pass, and then queried by binary search. The answer
+// is identical to the old scan's by construction: the depth scan from `s` stops
+// at the first `}` that is not consumed by a nearer `{`, which is exactly the
+// pair the stack pass forms.
+
+// Build ctx.brace_pairs: every matched `{`…`}` pair in the document, ascending
+// by `.open`. Walking right-to-left and popping the nearest pending `}` yields
+// the pairs in DESCENDING open order, so the result is reversed at the end.
+fn md_build_brace_pairs(ctx: *MD_CTX) error{OutOfMemory}!void {
+    errdefer ctx.brace_pairs.clearRetainingCapacity();
+
+    // Pending (not yet matched) `}` offsets, innermost last.
+    var closers: std.ArrayListUnmanaged(OFF) = .empty;
+    defer closers.deinit(ctx.alloc);
+
+    var off: OFF = ctx.size;
+    while (off > 0) {
+        off -= 1;
+        switch (ctx.ch(off)) {
+            '}' => try closers.append(ctx.alloc, off),
+            '{' => {
+                if (closers.pop()) |close|
+                    try ctx.brace_pairs.append(ctx.alloc, .{ .open = off, .close = close });
+            },
+            else => {},
+        }
+    }
+
+    std.mem.reverse(types.MD_BRACE_PAIR, ctx.brace_pairs.items);
+    ctx.brace_pairs_built = true;
+}
+
+// Offset of the `}` matching the `{` at `open_off`, or null when it has none.
+fn md_match_brace(ctx: *MD_CTX, open_off: OFF) error{OutOfMemory}!?OFF {
+    if (!ctx.brace_pairs_built) try md_build_brace_pairs(ctx);
+
+    const pairs = ctx.brace_pairs.items;
+    var lo: usize = 0;
+    var hi: usize = pairs.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (pairs[mid].open < open_off) lo = mid + 1 else hi = mid;
+    }
+    if (lo < pairs.len and pairs[lo].open == open_off) return pairs[lo].close;
+    return null;
+}
+
 // md4x.c ~3677.
 pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
     var opener_index = ctx.unresolved_link_head;
@@ -1237,18 +1298,12 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
             if (is_link == 0 and (ctx.parser.flags & c.MD_FLAG_ATTRIBUTES != 0) and opener.ch == '[') {
                 // Might be a [text]{attrs} span.
                 if (closer.end < ctx.size and ctx.ch(closer.end) == '{') {
-                    var scan: OFF = closer.end + 1;
-                    var depth: c_int = 1;
-                    while (scan < ctx.size and depth > 0) {
-                        if (ctx.ch(scan) == '{') depth += 1 else if (ctx.ch(scan) == '}') depth -= 1;
-                        scan += 1;
-                    }
-                    if (depth == 0) {
+                    if (md_match_brace(ctx, closer.end) catch return -1) |brace_end| {
                         is_link = 1;
                         ctx.marks.items[@intCast(opener_index + 1)].ch = 'S';
                         ctx.marks.items[@intCast(opener_index + 1)].beg = closer.end + 1;
-                        ctx.marks.items[@intCast(opener_index + 1)].end = scan - 1;
-                        closer.end = scan;
+                        ctx.marks.items[@intCast(opener_index + 1)].end = brace_end;
+                        closer.end = brace_end + 1;
                     }
                 }
             }
@@ -1710,18 +1765,12 @@ pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
 
         if (mark.end >= ctx.size or ctx.ch(mark.end) != '{') continue;
 
-        var scan: OFF = mark.end + 1;
-        var depth: c_int = 1;
-        while (scan < ctx.size and depth > 0) {
-            if (ctx.ch(scan) == '{') depth += 1 else if (ctx.ch(scan) == '}') depth -= 1;
-            scan += 1;
-        }
-        if (depth != 0) continue;
+        const brace_end = (md_match_brace(ctx, mark.end) catch return -1) orelse continue;
 
         const attrs_beg = mark.end + 1;
-        md_push_inline_attr(ctx, i, attrs_beg, scan - 1) catch return -1;
+        md_push_inline_attr(ctx, i, attrs_beg, brace_end) catch return -1;
 
-        if (mark.ch != '*' and mark.ch != '_') mark.end = scan;
+        if (mark.ch != '*' and mark.ch != '_') mark.end = brace_end + 1;
     }
 
     return 0;

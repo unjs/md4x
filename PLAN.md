@@ -21,17 +21,38 @@
 **Landed 2026-08-12** (all behind the full gate, corpus diff-clean at 168
 hashes, golden SAX trace unchanged, nothing re-recorded):
 
-| Item                             | Commits                         |
-| -------------------------------- | ------------------------------- |
-| 3 — `MD_LINETYPE` member rename  | `49855c4`                       |
-| 1 — `TRUE`/`FALSE` → `bool`      | `5ab9a3d`, `c501ac1`, `e648b3b` |
-| 1b — renderer state fields       | `3c3d2f7`                       |
-| 2 — `MD_MARK_*` → `MarkFlags`    | `dbd8720`                       |
-| 6 — doc gaps (first two bullets) | `494cf3f`, `73d6e27`            |
+| Item                              | Commits                         |
+| --------------------------------- | ------------------------------- |
+| 3 — `MD_LINETYPE` member rename   | `49855c4`                       |
+| 1 — `TRUE`/`FALSE` → `bool`       | `5ab9a3d`, `c501ac1`, `e648b3b` |
+| 1b — renderer state fields        | `3c3d2f7`                       |
+| 2 — `MD_MARK_*` → `MarkFlags`     | `dbd8720`                       |
+| 6 — doc gaps (first two bullets)  | `494cf3f`, `73d6e27`            |
+| 9a — quadratic `{...}` attrs scan | _the commit adding this row_    |
 
 Zero `TRUE`/`FALSE` tokens remain in `src/`. Verified at `3c3d2f7`: `zig build`,
 `zig build test` (ReleaseFast **and** Debug), 16 spec suites / 1001 assertions,
 30 pathological, corpus diff empty, fuzz smoke, wasm (309) and napi (307).
+
+**9a** (landed after the table above, same gate — corpus diff empty at 168
+hashes, 32 pathological including the two new brace cases): the document's
+`{`…`}` pairing is computed **once per parse** in one linear right-to-left pass
+(`md_build_brace_pairs`, lazily on the first candidate) into the new
+`MD_CTX.brace_pairs` array, and both scan sites query it by binary search
+(`md_match_brace`) instead of re-scanning to `ctx.size`. Two shapes were
+quadratic, not one: the unbalanced `'*a*{' × N` from the report, **and** the
+deeply nested `'*a*{' × N ++ '}' × N`, where every scan _succeeds_ but still
+walks to the closers. PLAN's suggested `brace_fail_floor` memo was therefore not
+adopted — it is also **vacuous** on its own benchmark: a failed scan from `s`
+proves `bal(x) > bal(s)` for every `x > s`, so any later candidate `s'` has
+`bal(s') > floor` and the O(1) test can never fire on `'*a*{' × N` (each
+candidate sits one level deeper). Pairing the whole document instead is O(size),
+covers both shapes, and is output-identical by construction (the depth scan from
+`{` stops at the first `}` not consumed by a nearer `{` — exactly the pair the
+stack pass forms). Measured on `'*a*{'`: 160 KB 3020 ms → 8 ms; 1 MB 117.5 s →
+65 ms. Also verified by a 1500-document randomized differential run of the old
+vs. new binary over brace-heavy inputs across all six formats (zero
+mismatches).
 
 ---
 
@@ -40,19 +61,18 @@ real (latent) bug. The structural work is finished and there is no remaining
 C-ABI seam. Land them in any order, each behind the full verification gate.
 
 **Items 9–11 are different.** They are live bugs found by an independent audit,
-verified by reproduction — item 9 is user-visible on ordinary MDC prose and 9a
-is a reachable DoS. They are not refactors, they must not ride along with one,
-and item 9 deliberately **breaks the "corpus diff must be empty" rule** because
-the baseline currently encodes the bug. Read the gate exception on item 9 before
-touching it.
+verified by reproduction — item 9 is user-visible on ordinary MDC prose. They
+are not refactors, they must not ride along with one, and item 9 deliberately
+**breaks the "corpus diff must be empty" rule** because the baseline currently
+encodes the bug. Read the gate exception on item 9 before touching it. (9a, the
+reachable DoS, is **landed** — see the table above.)
 
-**Suggested priority.** `9a` first — it is reachable from untrusted input with
-default flags and contradicts a documented guarantee. Then `1c` (it blocks 5),
-then `8` (it is why three of these bugs went unseen), then the rest.
+**Suggested priority.** `1c` next (it blocks 5), then `8` (it is why three of
+these bugs went unseen), then the rest.
 
 **Ordering constraint.** Items 1c/7/5 and bug 9b all rewrite overlapping parser
-files and must stay **serial**. Bug 9a also lives in `inlines.zig`, so it
-serializes against 9b. Renderer-only and docs-only work parallelizes freely.
+files and must stay **serial**. Renderer-only and docs-only work parallelizes
+freely.
 
 **Do not fold a bug fix into a refactor commit**, and do not let a refactor
 "tidy" an adjacent bug — constraint #4 makes the refactors type/name-only, and
@@ -199,43 +219,6 @@ block. The matrix currently excludes doc explicitly (`detail.* != .doc`,
 
 > These are **not** refactors and must not ride along with one. Each needs its
 > own commit and its own regression test.
-
-### 9a. Quadratic blow-up in the `{...}` attributes scan — HIGHEST PRIORITY
-
-**Measured, reproduced, and security-relevant.** `inlines.zig:1730`
-(`md_resolve_attrs`) and `:1257` (`md_resolve_links`) both scan forward to
-`ctx.size` — the whole **document**, not the block — and bail only when brace
-depth returns to 0. With **unbalanced** braces depth never reaches 0, so every
-candidate closer re-scans the entire remaining document.
-
-Measured on `zig-out/bin/md4x`, no flags:
-
-| Input  | Size   | Unbalanced `'*a*{'` | Control `'*a* '` |
-| ------ | ------ | ------------------: | ---------------: |
-| ×10000 | 40 KB  |              185 ms |             3 ms |
-| ×20000 | 80 KB  |              717 ms |             4 ms |
-| ×40000 | 160 KB |             2952 ms |             7 ms |
-
-Clean 4× per doubling. The `[t]{` variant via `:1257` behaves identically.
-Extrapolated, a 1 MB paste is ~2 minutes.
-
-`MD_FLAG_ATTRIBUTES` is **on by default** in the CLI and in both JS bindings, so
-this is reachable from untrusted input — anyone pasting markdown into a service
-built on md4x. `docs/parser-api.md` explicitly advertises a **"Linear time
-guarantee"**, and `test/pathological-tests.py` has **no brace-based case**,
-which is why it was never caught. The identical loop is in the deleted C, so
-this is inherited, not a port defect — but it ships.
-
-Fix (output-preserving, O(size)): add an `MD_CTX` field in the style of the
-existing `html_*_horizon` cache. Let `bal(x)` be the running `'{'`−`'}'` prefix
-balance. A scan from `s` succeeds iff some `x > s` has `bal(x) = bal(s) − 1`; a
-**failed** scan from `s` proves `bal(x) >= bal(s)` for all `x >= s`. So record
-`brace_fail_floor = bal(s)` on first failure, and any later candidate `s'` with
-`bal(s') <= brace_fail_floor` fails in O(1). Candidates are visited in
-increasing `mark.end` in `md_resolve_attrs`, so maintaining `bal` incrementally
-makes the pass linear.
-
-Add `'*a*{' ×50000` and `'[t]{' ×50000` cases to `test/pathological-tests.py`.
 
 ### 9b. Out-of-range pointer in `md_scan_left_for_resolved_mark`
 

@@ -106,7 +106,13 @@ pathological = {
             re.compile(r"<p>(\]\(\[\r?\n){49999}\]\(\[</p>")),
     "many link ref. def. instantiations":
             (("[x]: " + "x" * 50000 + "\n[x]" * 50000),
-            re.compile(""))
+            re.compile("")),
+    "many unclosed inline attributes":
+            (("*a*{" * 50000),
+            re.compile("(<em>a</em>[{]){50000}")),
+    "many unclosed span attributes":
+            (("[t]{" * 50000),
+            re.compile(r"(\[t\]\{){50000}"))
 }
 
 whitespace_re = re.compile('/s+/')

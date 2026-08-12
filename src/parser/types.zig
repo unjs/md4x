@@ -244,6 +244,14 @@ pub const MD_BLOCK_ALERT_INFO = struct {
     type_end: OFF = 0,
 };
 
+// A matched `{`…`}` brace pair in the document (offsets of the braces
+// themselves). Produced by the document-wide pairing pass that backs the
+// inline-attribute scans; see MD_CTX.brace_pairs.
+pub const MD_BRACE_PAIR = struct {
+    open: OFF = 0,
+    close: OFF = 0,
+};
+
 pub const MD_INLINE_ATTR_INFO = struct {
     closer_index: c_int = 0, // Index of the closer mark that has attrs after it.
     attrs_beg: OFF = 0, // Offset of attrs content (after '{').
@@ -355,6 +363,15 @@ pub const MD_CTX = struct {
     // Inline attribute info array. (PLAN 8.1: ArrayListUnmanaged; reset per
     // resolve pass with clearRetainingCapacity to reuse the buffer.)
     inline_attrs: std.ArrayListUnmanaged(MD_INLINE_ATTR_INFO) = .empty,
+
+    // Document-wide `{`…`}` pairing for the inline-attribute scans, built once
+    // per parse (lazily, on the first `{` candidate — a document without one
+    // never pays for it) and then queried by binary search on `.open`. The
+    // per-candidate "scan forward to ctx.size counting brace depth" it replaces
+    // was quadratic on unbalanced braces; see md_build_brace_pairs()
+    // (inlines.zig). Sorted ascending by `.open`; unmatched `{` are absent.
+    brace_pairs: std.ArrayListUnmanaged(MD_BRACE_PAIR) = .empty,
+    brace_pairs_built: bool = false,
 
     // Character accessors. `CH(off)` / `STR(off)` from md4x.c operate on the
     // enclosing `ctx`; here they are methods on *const MD_CTX.

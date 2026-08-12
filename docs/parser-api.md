@@ -101,6 +101,10 @@ from a callback's `-1`.
 - Code span mark limits (32 backticks max)
 - Table column limits (128 max)
 - Link reference definition abuse limits
+- Inline `{...}` attributes: the document's `{`…`}` pairing is computed once per
+  parse (one linear pass, lazily on the first candidate) and then queried by
+  binary search, so a candidate never re-scans the document — unbalanced or
+  deeply nested braces stay linear
 
 **Callback sequence example** for `* foo **bar [link](http://example.com) baz**`:
 
