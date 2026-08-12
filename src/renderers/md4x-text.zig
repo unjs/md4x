@@ -165,12 +165,13 @@ fn render_entity(r: *MD_TEXT, text: [*]const u8, size: c.MD_SIZE, fn_append: App
 }
 
 fn render_attribute(r: *MD_TEXT, attr: *const c.MD_ATTRIBUTE, fn_append: AppendFn) void {
+    const total = attr.size();
     var i: usize = 0;
-    while (attr.substr_offsets[i] < attr.size) : (i += 1) {
+    while (i < attr.substr_types.len and attr.substr_offsets[i] < total) : (i += 1) {
         const ttype = attr.substr_types[i];
         const off = attr.substr_offsets[i];
         const size = attr.substr_offsets[i + 1] - off;
-        const text: [*]const u8 = @ptrCast(attr.text + off);
+        const text: [*]const u8 = attr.text.ptr + off;
 
         switch (ttype) {
             c.MD_TEXT_NULLCHAR => render_utf8_codepoint(r, 0x0000, render_verbatim),
@@ -217,7 +218,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
         c.MD_BLOCK_LI => {
             const li: *const c.MD_BLOCK_LI_DETAIL = @ptrCast(@alignCast(detail.?));
             render_indent(r);
-            if (li.is_task != 0) {
+            if (li.is_task) {
                 if (li.task_mark == 'x' or li.task_mark == 'X') {
                     render_verbatim_lit(r, "[x] ");
                 } else {
@@ -315,7 +316,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             }
             r.quote_depth += 1;
             render_indent(r);
-            if (det.type_name.text != null and det.type_name.size > 0)
+            if (det.type_name.text.len > 0)
                 render_attribute(r, &det.type_name, render_verbatim);
             render_newline(r);
         },

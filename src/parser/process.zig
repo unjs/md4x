@@ -397,8 +397,8 @@ pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_coun
         util.free_array_a(c_uint, ctx.alloc, arr, @intCast(capacity));
         return null;
     }
-    // Shrink-to-fit so the freed length equals the stored highlight_count (the
-    // ABI MD_BLOCK_CODE_DETAIL has no capacity field). A shrink realloc resizes
+    // Shrink-to-fit so the freed length equals the reported count (the detail
+    // carries `highlights` as a slice, with no capacity). A shrink realloc resizes
     // in place on c_allocator / the testing allocator, so it effectively never
     // fails here; if it ever did (OOM), drop the highlights cleanly rather than
     // leave a capacity≠count buffer the caller would free by the wrong length.
@@ -506,7 +506,9 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
 
         // Parse highlights into expanded integer array.
         if (has_highlights != 0 and hl_end > hl_beg) {
-            det.highlights = md_parse_highlights(ctx, ctx.str(hl_beg), hl_end - hl_beg, &det.highlight_count);
+            var hl_count: c_uint = 0;
+            const hl = md_parse_highlights(ctx, ctx.str(hl_beg), hl_end - hl_beg, &hl_count);
+            if (hl != null) det.highlights = hl[0..hl_count];
         }
 
         // Build meta from remaining text (exclude [..] and {..} regions).
@@ -558,8 +560,8 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
                 }
                 @memcpy(meta_copy[0..meta_len], meta_buf[0..meta_len]);
                 meta_copy[meta_len] = 0;
-                det.meta = meta_copy;
-                det.meta_size = @intCast(meta_len);
+                // The slice excludes the NUL; md_free_code_detail frees len + 1.
+                det.meta = meta_copy[0..meta_len];
             }
 
             util.free_array_a(CHAR, ctx.alloc, meta_buf, meta_cap);
@@ -569,14 +571,38 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
     return 0;
 }
 
+// Release the two heap buffers a fenced-code detail owns. Both are allocated
+// through `ctx.alloc` and freed by their exact element count: `meta` is stored
+// as a slice that excludes its trailing NUL, so it frees `len + 1`.
+fn md_free_code_detail(ctx: *MD_CTX, code: *const c.MD_BLOCK_CODE_DETAIL) void {
+    if (code.meta.len > 0)
+        util.free_array_a(CHAR, ctx.alloc, @constCast(code.meta.ptr), code.meta.len + 1);
+    if (code.highlights.len > 0)
+        util.free_array_a(c_uint, ctx.alloc, @constCast(code.highlights.ptr), code.highlights.len);
+}
+
 // md4x.c ~5714.
 pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
-    const DetUnion = extern union {
-        header: c.MD_BLOCK_H_DETAIL,
-        code: c.MD_BLOCK_CODE_DETAIL,
-        table: c.MD_BLOCK_TABLE_DETAIL,
+    // Formerly an `extern union` relying on every member sharing offset 0. The
+    // detail structs are ordinary Zig structs now, so the members live side by
+    // side and `detailPtr` selects the right one — reproducing the union's
+    // behavior exactly, including handing detail-less block types a non-null
+    // pointer the callback never reads.
+    const DetSet = struct {
+        header: c.MD_BLOCK_H_DETAIL = .{},
+        code: c.MD_BLOCK_CODE_DETAIL = .{},
+        table: c.MD_BLOCK_TABLE_DETAIL = .{},
+
+        fn detailPtr(self: *@This(), ty: c.MD_BLOCKTYPE) ?*anyopaque {
+            return switch (ty) {
+                c.MD_BLOCK_H => @ptrCast(&self.header),
+                c.MD_BLOCK_CODE => @ptrCast(&self.code),
+                c.MD_BLOCK_TABLE => @ptrCast(&self.table),
+                else => @ptrCast(self),
+            };
+        }
     };
-    var det: DetUnion = std.mem.zeroes(DetUnion);
+    var det: DetSet = .{};
     var info_build: MD_ATTRIBUTE_BUILD = .{};
     var lang_build: MD_ATTRIBUTE_BUILD = .{};
     var filename_build: MD_ATTRIBUTE_BUILD = .{};
@@ -597,15 +623,14 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
         c.MD_BLOCK_CODE => {
             // For fenced code block, we may need to set the info string.
             if (block.bits.data != 0) {
-                det.code = std.mem.zeroes(c.MD_BLOCK_CODE_DETAIL);
+                det.code = .{};
                 clean_fence_code_detail = true;
                 ret = md_setup_fenced_code_detail(ctx, block, &det.code, &info_build, &lang_build, &filename_build);
                 if (ret < 0) {
                     md_free_attribute(ctx, &info_build);
                     md_free_attribute(ctx, &lang_build);
                     md_free_attribute(ctx, &filename_build);
-                    util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
-                    util.free_array_a(c_uint, ctx.alloc, @constCast(det.code.highlights), @intCast(det.code.highlight_count));
+                    md_free_code_detail(ctx, &det.code);
                     return ret;
                 }
             }
@@ -619,14 +644,13 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
     }
 
     if (!is_in_tight_list or btype != c.MD_BLOCK_P) {
-        ret = mdEnterBlock(ctx, btype, &det);
+        ret = mdEnterBlock(ctx, btype, det.detailPtr(btype));
         if (ret != 0) {
             if (clean_fence_code_detail) {
                 md_free_attribute(ctx, &info_build);
                 md_free_attribute(ctx, &lang_build);
                 md_free_attribute(ctx, &filename_build);
-                util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
-                util.free_array_a(c_uint, ctx.alloc, @constCast(det.code.highlights), @intCast(det.code.highlight_count));
+                md_free_code_detail(ctx, &det.code);
             }
             return ret;
         }
@@ -650,21 +674,19 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
             md_free_attribute(ctx, &info_build);
             md_free_attribute(ctx, &lang_build);
             md_free_attribute(ctx, &filename_build);
-            util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
-            util.free_array_a(c_uint, ctx.alloc, @constCast(det.code.highlights), @intCast(det.code.highlight_count));
+            md_free_code_detail(ctx, &det.code);
         }
         return ret;
     }
 
     if (!is_in_tight_list or btype != c.MD_BLOCK_P) {
-        ret = mdLeaveBlock(ctx, btype, &det);
+        ret = mdLeaveBlock(ctx, btype, det.detailPtr(btype));
         if (ret != 0) {
             if (clean_fence_code_detail) {
                 md_free_attribute(ctx, &info_build);
                 md_free_attribute(ctx, &lang_build);
                 md_free_attribute(ctx, &filename_build);
-                util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
-                util.free_array_a(c_uint, ctx.alloc, @constCast(det.code.highlights), @intCast(det.code.highlight_count));
+                md_free_code_detail(ctx, &det.code);
             }
             return ret;
         }
@@ -674,8 +696,7 @@ pub fn md_process_leaf_block(ctx: *MD_CTX, block: *const MD_BLOCK) c_int {
         md_free_attribute(ctx, &info_build);
         md_free_attribute(ctx, &lang_build);
         md_free_attribute(ctx, &filename_build);
-        util.free_array_a(CHAR, ctx.alloc, @constCast(det.code.meta), @as(usize, det.code.meta_size) + 1);
-        util.free_array_a(c_uint, ctx.alloc, @constCast(det.code.highlights), @intCast(det.code.highlight_count));
+        md_free_code_detail(ctx, &det.code);
     }
     return ret;
 }
@@ -692,29 +713,43 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
 
     while (byte_off < ctx.n_block_bytes) {
         const block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + @as(usize, @intCast(byte_off))));
-        const DetUnion = extern union {
-            ul: c.MD_BLOCK_UL_DETAIL,
-            ol: c.MD_BLOCK_OL_DETAIL,
-            li: c.MD_BLOCK_LI_DETAIL,
-            component: c.MD_BLOCK_COMPONENT_DETAIL,
-            tmpl: c.MD_BLOCK_TEMPLATE_DETAIL,
-            alert: c.MD_BLOCK_ALERT_DETAIL,
+        // Formerly an `extern union` (see md_process_leaf_block for why this is
+        // a struct + selector now).
+        const DetSet = struct {
+            ul: c.MD_BLOCK_UL_DETAIL = .{},
+            ol: c.MD_BLOCK_OL_DETAIL = .{},
+            li: c.MD_BLOCK_LI_DETAIL = .{},
+            component: c.MD_BLOCK_COMPONENT_DETAIL = .{},
+            tmpl: c.MD_BLOCK_TEMPLATE_DETAIL = .{},
+            alert: c.MD_BLOCK_ALERT_DETAIL = .{},
+
+            fn detailPtr(self: *@This(), ty: c.MD_BLOCKTYPE) ?*anyopaque {
+                return switch (ty) {
+                    c.MD_BLOCK_UL => @ptrCast(&self.ul),
+                    c.MD_BLOCK_OL => @ptrCast(&self.ol),
+                    c.MD_BLOCK_LI => @ptrCast(&self.li),
+                    c.MD_BLOCK_COMPONENT => @ptrCast(&self.component),
+                    c.MD_BLOCK_TEMPLATE => @ptrCast(&self.tmpl),
+                    c.MD_BLOCK_ALERT => @ptrCast(&self.alert),
+                    else => @ptrCast(self),
+                };
+            }
         };
-        var det: DetUnion = std.mem.zeroes(DetUnion);
+        var det: DetSet = .{};
 
         const btype = block.getType();
         switch (btype) {
             c.MD_BLOCK_UL => {
-                det.ul.is_tight = if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_LOOSE_LIST))) != 0) FALSE else TRUE;
+                det.ul.is_tight = (block.bits.flags & @as(u8, @truncate(MD_BLOCK_LOOSE_LIST))) == 0;
                 det.ul.mark = @intCast(block.bits.data);
             },
             c.MD_BLOCK_OL => {
                 det.ol.start = block.n_lines;
-                det.ol.is_tight = if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_LOOSE_LIST))) != 0) FALSE else TRUE;
+                det.ol.is_tight = (block.bits.flags & @as(u8, @truncate(MD_BLOCK_LOOSE_LIST))) == 0;
                 det.ol.mark_delimiter = @intCast(block.bits.data);
             },
             c.MD_BLOCK_LI => {
-                det.li.is_task = @intFromBool(block.bits.data != 0);
+                det.li.is_task = block.bits.data != 0;
                 det.li.task_mark = @intCast(block.bits.data);
                 det.li.task_mark_offset = @intCast(block.n_lines);
             },
@@ -737,12 +772,10 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
                     clean_component_detail = true;
 
                     if (props_beg > 0 and props_end > props_beg) {
-                        det.component.raw_props = ctx.str(props_beg);
-                        det.component.raw_props_size = props_end - props_beg;
+                        det.component.raw_props = ctx.str(props_beg)[0 .. props_end - props_beg];
                     }
                     if (t_beg > 0 and t_end > t_beg) {
-                        det.component.title = ctx.str(t_beg);
-                        det.component.title_size = t_end - t_beg;
+                        det.component.title = ctx.str(t_beg)[0 .. t_end - t_beg];
                     }
                 }
             },
@@ -781,7 +814,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
 
         if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER))) != 0) {
             if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER_CLOSER))) != 0) {
-                ret = mdLeaveBlock(ctx, btype, &det);
+                ret = mdLeaveBlock(ctx, btype, det.detailPtr(btype));
                 if (ret != 0) {
                     if (clean_component_detail) md_free_attribute(ctx, &comp_name_build);
                     return ret;
@@ -792,7 +825,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
             }
 
             if ((block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER_OPENER))) != 0) {
-                ret = mdEnterBlock(ctx, btype, &det);
+                ret = mdEnterBlock(ctx, btype, det.detailPtr(btype));
                 if (ret != 0) {
                     if (clean_component_detail) md_free_attribute(ctx, &comp_name_build);
                     return ret;

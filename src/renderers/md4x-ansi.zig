@@ -279,12 +279,13 @@ fn render_entity(r: *MD_ANSI, text: [*]const u8, size: c.MD_SIZE, fn_append: App
 }
 
 fn render_attribute(r: *MD_ANSI, attr: *const c.MD_ATTRIBUTE, fn_append: AppendFn) void {
+    const total = attr.size();
     var i: usize = 0;
-    while (attr.substr_offsets[i] < attr.size) : (i += 1) {
+    while (i < attr.substr_types.len and attr.substr_offsets[i] < total) : (i += 1) {
         const ttype = attr.substr_types[i];
         const off = attr.substr_offsets[i];
         const size = attr.substr_offsets[i + 1] - off;
-        const text: [*]const u8 = @ptrCast(attr.text + off);
+        const text: [*]const u8 = attr.text.ptr + off;
 
         switch (ttype) {
             c.MD_TEXT_NULLCHAR => render_utf8_codepoint(r, 0x0000, render_verbatim),
@@ -486,7 +487,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
         c.MD_BLOCK_LI => {
             const li: *const c.MD_BLOCK_LI_DETAIL = @ptrCast(@alignCast(detail.?));
             render_indent(r);
-            if (li.is_task != 0) {
+            if (li.is_task) {
                 if (li.task_mark == 'x' or li.task_mark == 'X') {
                     render_ansi(r, ANSI_COLOR_GREEN);
                     render_verbatim_lit(r, "[x] ");
@@ -547,22 +548,24 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
                 if (meta_opt) |meta| {
                     const det: *const c.MD_BLOCK_CODE_DETAIL = @ptrCast(@alignCast(detail.?));
                     meta.start = r.output_offset;
-                    if (det.lang.text != null and det.lang.size > 0) {
-                        const sz: c.MD_SIZE = if (det.lang.size < meta.lang.len) det.lang.size else meta.lang.len - 1;
-                        @memcpy(meta.lang[0..sz], @as([*]const u8, @ptrCast(det.lang.text))[0..sz]);
+                    if (det.lang.text.len > 0) {
+                        const lang_size = det.lang.size();
+                        const sz: c.MD_SIZE = if (lang_size < meta.lang.len) lang_size else meta.lang.len - 1;
+                        @memcpy(meta.lang[0..sz], det.lang.text[0..sz]);
                         meta.lang_size = sz;
                     }
-                    if (det.filename.text != null and det.filename.size > 0) {
-                        const sz: c.MD_SIZE = if (det.filename.size < meta.filename.len) det.filename.size else meta.filename.len - 1;
-                        @memcpy(meta.filename[0..sz], @as([*]const u8, @ptrCast(det.filename.text))[0..sz]);
+                    if (det.filename.text.len > 0) {
+                        const fn_size = det.filename.size();
+                        const sz: c.MD_SIZE = if (fn_size < meta.filename.len) fn_size else meta.filename.len - 1;
+                        @memcpy(meta.filename[0..sz], det.filename.text[0..sz]);
                         meta.filename_size = sz;
                     }
-                    if (det.highlights != null and det.highlight_count > 0) {
-                        const h = c_allocator.alloc(c_uint, det.highlight_count) catch null;
+                    if (det.highlights.len > 0) {
+                        const h = c_allocator.alloc(c_uint, det.highlights.len) catch null;
                         if (h) |hl| {
-                            @memcpy(hl, det.highlights[0..det.highlight_count]);
+                            @memcpy(hl, det.highlights);
                             meta.highlights = hl.ptr;
-                            meta.highlight_count = det.highlight_count;
+                            meta.highlight_count = @intCast(det.highlights.len);
                         }
                     }
                     // Capture the indent prefix by temporarily redirecting output.
@@ -632,28 +635,25 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
 
         c.MD_BLOCK_COMPONENT => {
             const comp: *const c.MD_BLOCK_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
-            var color = alert_type_color(comp.tag_name.text, comp.tag_name.size);
-            var title = comp.tag_name.text;
-            var title_size = comp.tag_name.size;
+            var color = alert_type_color(comp.tag_name.text.ptr, comp.tag_name.size());
+            var title: []const u8 = comp.tag_name.text;
 
             // Use explicit title if provided (e.g. :::danger STOP).
-            if (comp.title != null and comp.title_size > 0) {
+            if (comp.title.len > 0) {
                 title = comp.title;
-                title_size = comp.title_size;
             }
 
             // For ::alert{type="..."}, resolve color from the type prop.
-            if (color == null and ci_eq(comp.tag_name.text, comp.tag_name.size, "alert")) {
+            if (color == null and ci_eq(comp.tag_name.text.ptr, comp.tag_name.size(), "alert")) {
                 var parsed: MD_PARSED_PROPS = undefined;
-                md_parse_props(comp.raw_props, comp.raw_props_size, &parsed);
+                md_parse_props(comp.raw_props.ptr, @intCast(comp.raw_props.len), &parsed);
                 var pi: c_int = 0;
                 while (pi < parsed.n_props) : (pi += 1) {
                     const prop = &parsed.props[@intCast(pi)];
                     if (prop.type == .string and ci_eq(prop.key, prop.key_size, "type")) {
                         color = alert_type_color(prop.value, prop.value_size);
-                        if (comp.title == null or comp.title_size == 0) {
-                            title = prop.value;
-                            title_size = prop.value_size;
+                        if (comp.title.len == 0) {
+                            title = if (prop.value) |v| v[0..prop.value_size] else &.{};
                         }
                         break;
                     }
@@ -673,7 +673,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
                 render_ansi_ptr(r, color.?);
                 render_verbatim_lit(r, ALERT_BAR ++ " ");
                 render_ansi(r, ANSI_BOLD);
-                render_verbatim(r, @ptrCast(title), title_size);
+                render_verbatim(r, title.ptr, @intCast(title.len));
                 render_ansi(r, ANSI_BOLD_OFF);
                 render_ansi(r, ANSI_COLOR_DEFAULT);
                 render_newline(r);
@@ -685,7 +685,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
 
         c.MD_BLOCK_ALERT => {
             const det: *const c.MD_BLOCK_ALERT_DETAIL = @ptrCast(@alignCast(detail.?));
-            var color = alert_type_color(det.type_name.text, det.type_name.size);
+            var color = alert_type_color(det.type_name.text.ptr, det.type_name.size());
             if (color == null) color = ANSI_COLOR_YELLOW;
             if (r.need_newline != 0) {
                 render_separator(r);
@@ -697,8 +697,8 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             render_ansi_ptr(r, color.?);
             render_verbatim_lit(r, ALERT_BAR ++ " ");
             render_ansi(r, ANSI_BOLD);
-            if (det.type_name.text != null and det.type_name.size > 0)
-                render_verbatim(r, @ptrCast(det.type_name.text), det.type_name.size);
+            if (det.type_name.text.len > 0)
+                render_verbatim(r, det.type_name.text.ptr, det.type_name.size());
             render_ansi(r, ANSI_BOLD_OFF);
             render_ansi(r, ANSI_COLOR_DEFAULT);
             render_newline(r);
@@ -849,7 +849,7 @@ fn enter_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: 
         c.MD_SPAN_A => {
             const a: *const c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(detail.?));
             // OSC 8 hyperlink: makes text clickable in supported terminals
-            if (r.flags & MD_ANSI_FLAG_NO_COLOR == 0 and a.href.size > 0) {
+            if (r.flags & MD_ANSI_FLAG_NO_COLOR == 0 and a.href.text.len > 0) {
                 render_verbatim_lit(r, ANSI_HYPERLINK_OPEN);
                 render_attribute(r, &a.href, render_verbatim);
                 render_verbatim_lit(r, ANSI_HYPERLINK_SEP);
@@ -889,10 +889,10 @@ fn leave_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: 
             const a: *const c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(detail.?));
             render_ansi(r, ANSI_RESET);
             // Close OSC 8 hyperlink
-            if (r.flags & MD_ANSI_FLAG_NO_COLOR == 0 and a.href.size > 0)
+            if (r.flags & MD_ANSI_FLAG_NO_COLOR == 0 and a.href.text.len > 0)
                 render_verbatim_lit(r, ANSI_HYPERLINK_CLOSE);
             // Show URL as dim fallback for terminals without OSC 8
-            if (r.flags & MD_ANSI_FLAG_SHOW_URLS != 0 and a.href.size > 0 and a.is_autolink == 0) {
+            if (r.flags & MD_ANSI_FLAG_SHOW_URLS != 0 and a.href.text.len > 0 and !a.is_autolink) {
                 render_ansi(r, ANSI_LINK_URL);
                 render_verbatim_lit(r, " (");
                 render_attribute(r, &a.href, render_verbatim);

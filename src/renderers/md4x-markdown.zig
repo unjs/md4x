@@ -178,12 +178,13 @@ fn render_entity(r: *MD_MARKDOWN, text: [*]const u8, size: c.MD_SIZE, fn_append:
 }
 
 fn render_attribute(r: *MD_MARKDOWN, attr: *const c.MD_ATTRIBUTE, fn_append: AppendFn) void {
+    const total = attr.size();
     var i: usize = 0;
-    while (attr.substr_offsets[i] < attr.size) : (i += 1) {
+    while (i < attr.substr_types.len and attr.substr_offsets[i] < total) : (i += 1) {
         const ttype = attr.substr_types[i];
         const off = attr.substr_offsets[i];
         const size = attr.substr_offsets[i + 1] - off;
-        const text: [*]const u8 = @ptrCast(attr.text + off);
+        const text: [*]const u8 = attr.text.ptr + off;
 
         switch (ttype) {
             c.MD_TEXT_NULLCHAR => render_utf8_codepoint(r, 0x0000, render_verbatim),
@@ -246,7 +247,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
         c.MD_BLOCK_LI => {
             const li: *const c.MD_BLOCK_LI_DETAIL = @ptrCast(@alignCast(detail.?));
             render_indent(r);
-            if (li.is_task != 0) {
+            if (li.is_task) {
                 if (li.task_mark == 'x' or li.task_mark == 'X') {
                     render_verbatim_lit(r, "- [x] ");
                 } else {
@@ -306,7 +307,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
                 render_verbatim_lit(r, "```");
                 r.fence_len = 3;
             }
-            if (code.info.text != null and code.info.size > 0) {
+            if (code.info.text.len > 0) {
                 render_attribute(r, &code.info, render_verbatim);
             }
             render_newline(r);
@@ -377,11 +378,11 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             }
             render_indent(r);
             render_verbatim_lit(r, "<");
-            if (comp.tag_name.text != null and comp.tag_name.size > 0)
+            if (comp.tag_name.text.len > 0)
                 render_attribute(r, &comp.tag_name, render_verbatim);
-            if (comp.title != null and comp.title_size > 0) {
+            if (comp.title.len > 0) {
                 render_verbatim_lit(r, " title=\"");
-                render_verbatim(r, @ptrCast(comp.title), comp.title_size);
+                render_verbatim(r, comp.title.ptr, @intCast(comp.title.len));
                 render_verbatim_lit(r, "\"");
             }
             render_verbatim_lit(r, ">");
@@ -398,7 +399,7 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             r.quote_depth += 1;
             render_indent(r);
             render_verbatim_lit(r, "[!");
-            if (det.type_name.text != null and det.type_name.size > 0)
+            if (det.type_name.text.len > 0)
                 render_attribute(r, &det.type_name, render_verbatim);
             render_verbatim_lit(r, "]");
             render_newline(r);
@@ -502,7 +503,7 @@ fn leave_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
             const comp: *const c.MD_BLOCK_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
             render_indent(r);
             render_verbatim_lit(r, "</");
-            if (comp.tag_name.text != null and comp.tag_name.size > 0)
+            if (comp.tag_name.text.len > 0)
                 render_attribute(r, &comp.tag_name, render_verbatim);
             render_verbatim_lit(r, ">");
             render_newline(r);
@@ -573,7 +574,7 @@ fn enter_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: 
         c.MD_SPAN_COMPONENT => {
             const comp: *const c.MD_SPAN_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
             render_verbatim_lit(r, "<");
-            if (comp.tag_name.text != null and comp.tag_name.size > 0)
+            if (comp.tag_name.text.len > 0)
                 render_attribute(r, &comp.tag_name, render_verbatim);
             render_verbatim_lit(r, ">");
         },
@@ -604,7 +605,7 @@ fn leave_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: 
             const a: *const c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(detail.?));
             render_verbatim_lit(r, "](");
             render_attribute(r, &a.href, render_verbatim);
-            if (a.title.text != null and a.title.size > 0) {
+            if (a.title.text.len > 0) {
                 render_verbatim_lit(r, " \"");
                 render_attribute(r, &a.title, render_verbatim);
                 render_verbatim_lit(r, "\"");
@@ -616,7 +617,7 @@ fn leave_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: 
             const img: *const c.MD_SPAN_IMG_DETAIL = @ptrCast(@alignCast(detail.?));
             render_verbatim_lit(r, "](");
             render_attribute(r, &img.src, render_verbatim);
-            if (img.title.text != null and img.title.size > 0) {
+            if (img.title.text.len > 0) {
                 render_verbatim_lit(r, " \"");
                 render_attribute(r, &img.title, render_verbatim);
                 render_verbatim_lit(r, "\"");
@@ -656,7 +657,7 @@ fn leave_span_callback(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: 
         c.MD_SPAN_COMPONENT => {
             const comp: *const c.MD_SPAN_COMPONENT_DETAIL = @ptrCast(@alignCast(detail.?));
             render_verbatim_lit(r, "</");
-            if (comp.tag_name.text != null and comp.tag_name.size > 0)
+            if (comp.tag_name.text.len > 0)
                 render_attribute(r, &comp.tag_name, render_verbatim);
             render_verbatim_lit(r, ">");
         },

@@ -650,10 +650,15 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
         build.substr_offsets[@intCast(build.substr_count)] = off;
     }
 
-    attr.text = build.text;
-    attr.size = off;
-    attr.substr_offsets = build.substr_offsets;
-    attr.substr_types = build.substr_types;
+    // Hand the build buffers over as exact-length slices. The buffers stay owned
+    // by `build` (freed by md_free_attribute with the tracked element counts);
+    // only the *view* handed to the callback is a slice. `substr_count` is >= 1
+    // on every path through this function, so the two tables are non-empty and
+    // keep the `offsets.len == types.len + 1` invariant.
+    const n: usize = @intCast(build.substr_count);
+    attr.text = if (build.text != null) build.text[0..off] else &.{};
+    attr.substr_types = build.substr_types[0..n];
+    attr.substr_offsets = build.substr_offsets[0 .. n + 1];
 }
 
 // ============================================================================

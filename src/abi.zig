@@ -6,9 +6,28 @@
 //! import it as `c` so that the pre-existing `c.MD_*` references keep resolving
 //! unchanged.
 //!
-//! The type/struct/flag declarations below are a verbatim transcription of
-//! `zig translate-c md4x.h`, so they are byte-for-byte layout-identical to what
-//! `@cImport("md4x.h")` produced. Phase 4c of `PLAN.md` idiomatizes them.
+//! The type/enum/flag declarations started life as a verbatim transcription of
+//! `zig translate-c md4x.h`. Phase 4c of `PLAN.md` is idiomatizing them, one
+//! step at a time, so they are no longer layout-identical to what
+//! `@cImport("md4x.h")` produced:
+//!
+//! - **Step 2 (done):** the SAX **detail** types (`MD_ATTRIBUTE`,
+//!   `MD_BLOCK_*_DETAIL`, `MD_SPAN_*_DETAIL`) are ordinary Zig structs with
+//!   compiler-chosen layout. Their string/array members are **slices** with
+//!   exact lengths (`text`, `meta`, `highlights`, `raw_attrs`, `raw_props`,
+//!   `title`, `substr_types`, `substr_offsets`) instead of `[*c]` pointer +
+//!   separate `*_size`/`*_count` field, and their genuinely two-state
+//!   `c_int` members (`is_tight`, `is_task`, `is_autolink`) are `bool`.
+//!   An absent value is the **empty** slice — the parser never distinguished a
+//!   null pointer from a zero length, and no consumer does either.
+//! - **Still C-shaped, pending step 3:** `MD_PARSER` remains an `extern struct`
+//!   whose five callbacks are `callconv(.c)` and receive their detail as
+//!   `?*anyopaque`; `MD_BLOCKTYPE` / `MD_SPANTYPE` / `MD_TEXTTYPE` / `MD_ALIGN`
+//!   remain `c_uint` with free `pub const` members rather than real Zig enums.
+//!
+//! `MD_CHAR` / `MD_SIZE` / `MD_OFFSET` keep their C spellings: they describe the
+//! input buffer and offsets into it, which the parser indexes with `c_uint`
+//! arithmetic throughout.
 //!
 //! **This module is a pure leaf: types only, no imports, no function
 //! declarations.** It used to also declare `md_parse` / `md_heal` /
@@ -21,7 +40,7 @@
 const __helpers = @import("std").zig.c_translation.helpers;
 
 // ---------------------------------------------------------------------------
-// From md4x.h (verbatim translate-c output)
+// Scalars, enums and MD_PARSER (still the translate-c shapes — Phase 4c step 3)
 // ---------------------------------------------------------------------------
 pub const MD_CHAR = u8;
 pub const MD_SIZE = c_uint;
@@ -78,106 +97,142 @@ pub const MD_ALIGN_CENTER: c_int = 2;
 pub const MD_ALIGN_RIGHT: c_int = 3;
 pub const enum_MD_ALIGN = c_uint;
 pub const MD_ALIGN = enum_MD_ALIGN;
-pub const struct_MD_ATTRIBUTE = extern struct {
-    text: [*c]const MD_CHAR = null,
-    size: MD_SIZE = 0,
-    substr_types: [*c]const MD_TEXTTYPE = null,
-    substr_offsets: [*c]const MD_OFFSET = null,
+// ---------------------------------------------------------------------------
+// SAX detail types (Phase 4c step 2: idiomatic Zig structs, slices, bools)
+// ---------------------------------------------------------------------------
+
+/// String attribute for non-text-flow content (URLs, titles, info strings, …).
+/// Such content may still mix normal text with entities and NUL characters, so
+/// it is described as a run of substrings rather than one flat string.
+///
+/// Invariants, all guaranteed by `md_build_attribute`:
+///
+/// - `substr_types.len == substr_offsets.len - 1` (the offsets array carries a
+///   final terminator entry), except for the fully-empty attribute where both
+///   are empty.
+/// - `substr_offsets[0] == 0` and `substr_offsets[substr_types.len] == size()`.
+/// - only `MD_TEXT_NORMAL`, `MD_TEXT_ENTITY` and `MD_TEXT_NULLCHAR` appear in
+///   `substr_types`.
+///
+/// An unset attribute is the default value: an empty `text` with empty tables.
+pub const MD_ATTRIBUTE = struct {
+    text: []const MD_CHAR = &.{},
+    substr_types: []const MD_TEXTTYPE = &.{},
+    substr_offsets: []const MD_OFFSET = &.{},
+
+    /// Byte length of `text`, as the `MD_SIZE` the offset tables are expressed in.
+    pub fn size(self: MD_ATTRIBUTE) MD_SIZE {
+        return @intCast(self.text.len);
+    }
 };
-pub const MD_ATTRIBUTE = struct_MD_ATTRIBUTE;
-pub const struct_MD_BLOCK_UL_DETAIL = extern struct {
-    is_tight: c_int = 0,
+
+pub const MD_BLOCK_UL_DETAIL = struct {
+    /// True for a tight list, false for a loose one.
+    is_tight: bool = false,
+    /// Bullet character: '-', '+' or '*'.
     mark: MD_CHAR = 0,
 };
-pub const MD_BLOCK_UL_DETAIL = struct_MD_BLOCK_UL_DETAIL;
-pub const struct_MD_BLOCK_OL_DETAIL = extern struct {
+
+pub const MD_BLOCK_OL_DETAIL = struct {
     start: c_uint = 0,
-    is_tight: c_int = 0,
+    /// True for a tight list, false for a loose one.
+    is_tight: bool = false,
+    /// '.' or ')'.
     mark_delimiter: MD_CHAR = 0,
 };
-pub const MD_BLOCK_OL_DETAIL = struct_MD_BLOCK_OL_DETAIL;
-pub const struct_MD_BLOCK_LI_DETAIL = extern struct {
-    is_task: c_int = 0,
+
+pub const MD_BLOCK_LI_DETAIL = struct {
+    /// Can be true only with MD_FLAG_TASKLISTS.
+    is_task: bool = false,
+    /// 'x', 'X' or ' ' when `is_task`.
     task_mark: MD_CHAR = 0,
+    /// Offset of the character between '[' and ']'.
     task_mark_offset: MD_OFFSET = 0,
 };
-pub const MD_BLOCK_LI_DETAIL = struct_MD_BLOCK_LI_DETAIL;
-pub const struct_MD_BLOCK_H_DETAIL = extern struct {
+
+pub const MD_BLOCK_H_DETAIL = struct {
     level: c_uint = 0,
 };
-pub const MD_BLOCK_H_DETAIL = struct_MD_BLOCK_H_DETAIL;
-pub const struct_MD_BLOCK_CODE_DETAIL = extern struct {
-    info: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
-    lang: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
+
+pub const MD_BLOCK_CODE_DETAIL = struct {
+    info: MD_ATTRIBUTE = .{},
+    lang: MD_ATTRIBUTE = .{},
+    /// Fence character, or zero for an indented code block.
     fence_char: MD_CHAR = 0,
-    filename: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
-    meta: [*c]const MD_CHAR = null,
-    meta_size: MD_SIZE = 0,
-    highlights: [*c]const c_uint = null,
-    highlight_count: c_uint = 0,
+    /// `[filename]` from the info string.
+    filename: MD_ATTRIBUTE = .{},
+    /// Raw metadata remainder of the info string. Empty when absent. The
+    /// backing allocation carries a trailing NUL one byte past `meta.len`.
+    meta: []const MD_CHAR = &.{},
+    /// Expanded line numbers from `{1-3,5}`. Empty when absent.
+    highlights: []const c_uint = &.{},
 };
-pub const MD_BLOCK_CODE_DETAIL = struct_MD_BLOCK_CODE_DETAIL;
-pub const struct_MD_BLOCK_TABLE_DETAIL = extern struct {
+
+pub const MD_BLOCK_TABLE_DETAIL = struct {
     col_count: c_uint = 0,
     head_row_count: c_uint = 0,
     body_row_count: c_uint = 0,
 };
-pub const MD_BLOCK_TABLE_DETAIL = struct_MD_BLOCK_TABLE_DETAIL;
-pub const struct_MD_BLOCK_TD_DETAIL = extern struct {
-    @"align": MD_ALIGN = @import("std").mem.zeroes(MD_ALIGN),
+
+pub const MD_BLOCK_TD_DETAIL = struct {
+    @"align": MD_ALIGN = @intCast(MD_ALIGN_DEFAULT),
 };
-pub const MD_BLOCK_TD_DETAIL = struct_MD_BLOCK_TD_DETAIL;
-pub const struct_MD_SPAN_A_DETAIL = extern struct {
-    href: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
-    title: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
-    raw_attrs: [*c]const MD_CHAR = null,
-    raw_attrs_size: MD_SIZE = 0,
-    is_autolink: c_int = 0,
+
+pub const MD_SPAN_A_DETAIL = struct {
+    href: MD_ATTRIBUTE = .{},
+    title: MD_ATTRIBUTE = .{},
+    /// Raw attrs from a trailing `{...}`. Empty when absent.
+    raw_attrs: []const MD_CHAR = &.{},
+    is_autolink: bool = false,
 };
-pub const MD_SPAN_A_DETAIL = struct_MD_SPAN_A_DETAIL;
-pub const struct_MD_SPAN_IMG_DETAIL = extern struct {
-    src: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
-    title: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
-    raw_attrs: [*c]const MD_CHAR = null,
-    raw_attrs_size: MD_SIZE = 0,
+
+pub const MD_SPAN_IMG_DETAIL = struct {
+    src: MD_ATTRIBUTE = .{},
+    title: MD_ATTRIBUTE = .{},
+    /// Raw attrs from a trailing `{...}`. Empty when absent.
+    raw_attrs: []const MD_CHAR = &.{},
 };
-pub const MD_SPAN_IMG_DETAIL = struct_MD_SPAN_IMG_DETAIL;
-pub const struct_MD_SPAN_WIKILINK = extern struct {
-    target: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
+
+pub const MD_SPAN_WIKILINK_DETAIL = struct {
+    target: MD_ATTRIBUTE = .{},
 };
-pub const MD_SPAN_WIKILINK_DETAIL = struct_MD_SPAN_WIKILINK;
-pub const struct_MD_SPAN_COMPONENT_DETAIL = extern struct {
-    tag_name: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
-    raw_props: [*c]const MD_CHAR = null,
-    raw_props_size: MD_SIZE = 0,
+
+pub const MD_SPAN_COMPONENT_DETAIL = struct {
+    /// Component name (e.g. "badge", "icon-star").
+    tag_name: MD_ATTRIBUTE = .{},
+    /// Raw props from `{...}`. Empty when absent.
+    raw_props: []const MD_CHAR = &.{},
 };
-pub const MD_SPAN_COMPONENT_DETAIL = struct_MD_SPAN_COMPONENT_DETAIL;
-pub const struct_MD_BLOCK_COMPONENT_DETAIL = extern struct {
-    tag_name: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
-    raw_props: [*c]const MD_CHAR = null,
-    raw_props_size: MD_SIZE = 0,
-    title: [*c]const MD_CHAR = null,
-    title_size: MD_SIZE = 0,
+
+pub const MD_BLOCK_COMPONENT_DETAIL = struct {
+    /// Component name (e.g. "alert", "card").
+    tag_name: MD_ATTRIBUTE = .{},
+    /// Raw props from `{...}`. Empty when absent.
+    raw_props: []const MD_CHAR = &.{},
+    /// Title after the name (e.g. "STOP" in `:::danger STOP`). Empty when absent.
+    title: []const MD_CHAR = &.{},
 };
-pub const MD_BLOCK_COMPONENT_DETAIL = struct_MD_BLOCK_COMPONENT_DETAIL;
-pub const struct_MD_BLOCK_TEMPLATE_DETAIL = extern struct {
-    name: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
+
+pub const MD_BLOCK_TEMPLATE_DETAIL = struct {
+    /// Slot name (e.g. "header", "footer").
+    name: MD_ATTRIBUTE = .{},
 };
-pub const MD_BLOCK_TEMPLATE_DETAIL = struct_MD_BLOCK_TEMPLATE_DETAIL;
-pub const struct_MD_BLOCK_ALERT_DETAIL = extern struct {
-    type_name: MD_ATTRIBUTE = @import("std").mem.zeroes(MD_ATTRIBUTE),
+
+pub const MD_BLOCK_ALERT_DETAIL = struct {
+    /// Alert type (e.g. "NOTE", "WARNING").
+    type_name: MD_ATTRIBUTE = .{},
 };
-pub const MD_BLOCK_ALERT_DETAIL = struct_MD_BLOCK_ALERT_DETAIL;
-pub const struct_MD_SPAN_ATTRS_DETAIL = extern struct {
-    raw_attrs: [*c]const MD_CHAR = null,
-    raw_attrs_size: MD_SIZE = 0,
+
+pub const MD_SPAN_ATTRS_DETAIL = struct {
+    /// Raw attrs from a trailing `{...}`. Empty for `{}`.
+    raw_attrs: []const MD_CHAR = &.{},
 };
-pub const MD_SPAN_ATTRS_DETAIL = struct_MD_SPAN_ATTRS_DETAIL;
-pub const struct_MD_SPAN_SPAN_DETAIL = extern struct {
-    raw_attrs: [*c]const MD_CHAR = null,
-    raw_attrs_size: MD_SIZE = 0,
+
+pub const MD_SPAN_SPAN_DETAIL = struct {
+    /// Raw attrs from `{...}`. Empty for `{}`.
+    raw_attrs: []const MD_CHAR = &.{},
 };
-pub const MD_SPAN_SPAN_DETAIL = struct_MD_SPAN_SPAN_DETAIL;
+
 pub const struct_MD_PARSER = extern struct {
     abi_version: c_uint = 0,
     flags: c_uint = 0,

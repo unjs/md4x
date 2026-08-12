@@ -1818,7 +1818,7 @@ pub inline fn mdText(ctx: *MD_CTX, ty: c.MD_TEXTTYPE, str: [*c]const CHAR, size:
 pub fn md_enter_leave_span_a(ctx: *MD_CTX, enter: c_int, ty: c.MD_SPANTYPE, dest: [*c]const CHAR, dest_size: SZ, is_autolink: c_int, title: [*c]const CHAR, title_size: SZ) c_int {
     var href_build: MD_ATTRIBUTE_BUILD = .{};
     var title_build: MD_ATTRIBUTE_BUILD = .{};
-    var det: c.MD_SPAN_A_DETAIL = std.mem.zeroes(c.MD_SPAN_A_DETAIL);
+    var det: c.MD_SPAN_A_DETAIL = .{};
     var ret: c_int = 0;
 
     md_build_attribute(ctx, dest, dest_size, if (is_autolink != 0) MD_BUILD_ATTR_NO_ESCAPES else 0, &det.href, &href_build) catch {
@@ -1830,7 +1830,7 @@ pub fn md_enter_leave_span_a(ctx: *MD_CTX, enter: c_int, ty: c.MD_SPANTYPE, dest
         };
     }
     if (ret == 0) {
-        det.is_autolink = is_autolink;
+        det.is_autolink = is_autolink != 0;
         ret = if (enter != 0) mdEnterSpan(ctx, ty, &det) else mdLeaveSpan(ctx, ty, &det);
     }
 
@@ -1842,7 +1842,7 @@ pub fn md_enter_leave_span_a(ctx: *MD_CTX, enter: c_int, ty: c.MD_SPANTYPE, dest
 // md4x.c ~4623.
 pub fn md_enter_leave_span_wikilink(ctx: *MD_CTX, enter: c_int, target: [*c]const CHAR, target_size: SZ) c_int {
     var target_build: MD_ATTRIBUTE_BUILD = .{};
-    var det: c.MD_SPAN_WIKILINK_DETAIL = std.mem.zeroes(c.MD_SPAN_WIKILINK_DETAIL);
+    var det: c.MD_SPAN_WIKILINK_DETAIL = .{};
     var ret: c_int = 0;
 
     md_build_attribute(ctx, target, target_size, 0, &det.target, &target_build) catch {
@@ -1859,15 +1859,14 @@ pub fn md_enter_leave_span_wikilink(ctx: *MD_CTX, enter: c_int, target: [*c]cons
 // md4x.c ~4643.
 pub fn md_enter_leave_span_component(ctx: *MD_CTX, enter: c_int, tag: [*c]const CHAR, tag_size: SZ, raw_props: [*c]const CHAR, raw_props_size: SZ) c_int {
     var tag_build: MD_ATTRIBUTE_BUILD = .{};
-    var det: c.MD_SPAN_COMPONENT_DETAIL = std.mem.zeroes(c.MD_SPAN_COMPONENT_DETAIL);
+    var det: c.MD_SPAN_COMPONENT_DETAIL = .{};
     var ret: c_int = 0;
 
     md_build_attribute(ctx, tag, tag_size, 0, &det.tag_name, &tag_build) catch {
         ret = -1;
     };
     if (ret == 0) {
-        det.raw_props = raw_props;
-        det.raw_props_size = raw_props_size;
+        if (raw_props != null) det.raw_props = raw_props[0..raw_props_size];
         ret = if (enter != 0) mdEnterSpan(ctx, c.MD_SPAN_COMPONENT, &det) else mdLeaveSpan(ctx, c.MD_SPAN_COMPONENT, &det);
     }
 
@@ -1879,7 +1878,7 @@ pub fn md_enter_leave_span_component(ctx: *MD_CTX, enter: c_int, tag: [*c]const 
 pub fn md_enter_leave_span_a_with_attrs(ctx: *MD_CTX, enter: c_int, ty: c.MD_SPANTYPE, dest: [*c]const CHAR, dest_size: SZ, is_autolink: c_int, title: [*c]const CHAR, title_size: SZ, raw_attrs: [*c]const CHAR, raw_attrs_size: SZ) c_int {
     var href_build: MD_ATTRIBUTE_BUILD = .{};
     var title_build: MD_ATTRIBUTE_BUILD = .{};
-    var det: c.MD_SPAN_A_DETAIL = std.mem.zeroes(c.MD_SPAN_A_DETAIL);
+    var det: c.MD_SPAN_A_DETAIL = .{};
     var ret: c_int = 0;
 
     md_build_attribute(ctx, dest, dest_size, if (is_autolink != 0) MD_BUILD_ATTR_NO_ESCAPES else 0, &det.href, &href_build) catch {
@@ -1891,9 +1890,8 @@ pub fn md_enter_leave_span_a_with_attrs(ctx: *MD_CTX, enter: c_int, ty: c.MD_SPA
         };
     }
     if (ret == 0) {
-        det.is_autolink = is_autolink;
-        det.raw_attrs = raw_attrs;
-        det.raw_attrs_size = raw_attrs_size;
+        det.is_autolink = is_autolink != 0;
+        if (raw_attrs != null) det.raw_attrs = raw_attrs[0..raw_attrs_size];
         ret = if (enter != 0) mdEnterSpan(ctx, ty, &det) else mdLeaveSpan(ctx, ty, &det);
     }
 
@@ -1904,9 +1902,8 @@ pub fn md_enter_leave_span_a_with_attrs(ctx: *MD_CTX, enter: c_int, ty: c.MD_SPA
 
 // md4x.c ~4700.
 pub fn md_enter_leave_span_span(ctx: *MD_CTX, enter: c_int, raw_attrs: [*c]const CHAR, raw_attrs_size: SZ) c_int {
-    var det: c.MD_SPAN_SPAN_DETAIL = std.mem.zeroes(c.MD_SPAN_SPAN_DETAIL);
-    det.raw_attrs = raw_attrs;
-    det.raw_attrs_size = raw_attrs_size;
+    var det: c.MD_SPAN_SPAN_DETAIL = .{};
+    if (raw_attrs != null) det.raw_attrs = raw_attrs[0..raw_attrs_size];
     return if (enter != 0) mdEnterSpan(ctx, c.MD_SPAN_SPAN, &det) else mdLeaveSpan(ctx, c.MD_SPAN_SPAN, &det);
 }
 
@@ -1961,7 +1958,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
 
                     if (mark.*.flags & MD_MARK_OPENER != 0) {
                         if (raw_a != null) {
-                            var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a, .raw_attrs_size = raw_a_sz };
+                            var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a[0..raw_a_sz] };
                             ret = mdEnterSpan(ctx, c.MD_SPAN_CODE, &det);
                         } else {
                             ret = mdEnterSpan(ctx, c.MD_SPAN_CODE, null);
@@ -1970,7 +1967,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                         text_type = c.MD_TEXT_CODE;
                     } else {
                         if (raw_a != null) {
-                            var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a, .raw_attrs_size = raw_a_sz };
+                            var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a[0..raw_a_sz] };
                             ret = mdLeaveSpan(ctx, c.MD_SPAN_CODE, &det);
                         } else {
                             ret = mdLeaveSpan(ctx, c.MD_SPAN_CODE, null);
@@ -1993,7 +1990,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                             var first: c_int = 1;
                             while (off < mark.*.end) {
                                 if (first != 0 and raw_a != null) {
-                                    var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a, .raw_attrs_size = raw_a_sz };
+                                    var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a[0..raw_a_sz] };
                                     ret = mdEnterSpan(ctx, c.MD_SPAN_U, &det);
                                 } else {
                                     ret = mdEnterSpan(ctx, c.MD_SPAN_U, null);
@@ -2007,7 +2004,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                             var idx: c_int = 0;
                             while (off < mark.*.end) {
                                 if (idx == count - 1 and raw_a != null) {
-                                    var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a, .raw_attrs_size = raw_a_sz };
+                                    var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a[0..raw_a_sz] };
                                     ret = mdLeaveSpan(ctx, c.MD_SPAN_U, &det);
                                 } else {
                                     ret = mdLeaveSpan(ctx, c.MD_SPAN_U, null);
@@ -2039,14 +2036,14 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
 
                     if (mark.*.flags & MD_MARK_OPENER != 0) {
                         if (raw_a != null) {
-                            var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a, .raw_attrs_size = raw_a_sz };
+                            var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a[0..raw_a_sz] };
                             ret = mdEnterSpan(ctx, c.MD_SPAN_DEL, &det);
                         } else {
                             ret = mdEnterSpan(ctx, c.MD_SPAN_DEL, null);
                         }
                     } else {
                         if (raw_a != null) {
-                            var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a, .raw_attrs_size = raw_a_sz };
+                            var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a[0..raw_a_sz] };
                             ret = mdLeaveSpan(ctx, c.MD_SPAN_DEL, &det);
                         } else {
                             ret = mdLeaveSpan(ctx, c.MD_SPAN_DEL, null);
@@ -2256,7 +2253,7 @@ pub fn emitEmphasis(ctx: *MD_CTX, mark: [*c]MD_MARK, off_p: *OFF, attr_skip_to: 
         var first: c_int = 1;
         if ((mark.*.end - off) % 2 != 0) {
             if (first != 0 and raw_a != null) {
-                var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a, .raw_attrs_size = raw_a_sz };
+                var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a[0..raw_a_sz] };
                 ret = mdEnterSpan(ctx, c.MD_SPAN_EM, &det);
             } else {
                 ret = mdEnterSpan(ctx, c.MD_SPAN_EM, null);
@@ -2270,7 +2267,7 @@ pub fn emitEmphasis(ctx: *MD_CTX, mark: [*c]MD_MARK, off_p: *OFF, attr_skip_to: 
         }
         while (off + 1 < mark.*.end) {
             if (first != 0 and raw_a != null) {
-                var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a, .raw_attrs_size = raw_a_sz };
+                var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a[0..raw_a_sz] };
                 ret = mdEnterSpan(ctx, c.MD_SPAN_STRONG, &det);
             } else {
                 ret = mdEnterSpan(ctx, c.MD_SPAN_STRONG, null);
@@ -2290,7 +2287,7 @@ pub fn emitEmphasis(ctx: *MD_CTX, mark: [*c]MD_MARK, off_p: *OFF, attr_skip_to: 
         while (off + 1 < mark.*.end) {
             si += 1;
             if (has_em == 0 and si == n_strong and raw_a != null) {
-                var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a, .raw_attrs_size = raw_a_sz };
+                var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a[0..raw_a_sz] };
                 ret = mdLeaveSpan(ctx, c.MD_SPAN_STRONG, &det);
             } else {
                 ret = mdLeaveSpan(ctx, c.MD_SPAN_STRONG, null);
@@ -2303,7 +2300,7 @@ pub fn emitEmphasis(ctx: *MD_CTX, mark: [*c]MD_MARK, off_p: *OFF, attr_skip_to: 
         }
         if (has_em != 0) {
             if (raw_a != null) {
-                var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a, .raw_attrs_size = raw_a_sz };
+                var det: c.MD_SPAN_ATTRS_DETAIL = .{ .raw_attrs = raw_a[0..raw_a_sz] };
                 ret = mdLeaveSpan(ctx, c.MD_SPAN_EM, &det);
             } else {
                 ret = mdLeaveSpan(ctx, c.MD_SPAN_EM, null);

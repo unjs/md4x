@@ -403,12 +403,13 @@ fn render_entity(r: *MD_HTML, text: [*]const u8, size: c.MD_SIZE, fn_append: App
 }
 
 fn render_attribute(r: *MD_HTML, attr: *const c.MD_ATTRIBUTE, fn_append: AppendFn) void {
+    const total = attr.size();
     var i: usize = 0;
-    while (attr.substr_offsets[i] < attr.size) : (i += 1) {
+    while (i < attr.substr_types.len and attr.substr_offsets[i] < total) : (i += 1) {
         const ttype = attr.substr_types[i];
         const off = attr.substr_offsets[i];
         const size = attr.substr_offsets[i + 1] - off;
-        const text: [*]const u8 = @ptrCast(attr.text + off);
+        const text: [*]const u8 = attr.text.ptr + off;
 
         switch (ttype) {
             c.MD_TEXT_NULLCHAR => render_utf8_codepoint(r, 0x0000, render_verbatim),
@@ -430,7 +431,7 @@ fn render_open_ol_block(r: *MD_HTML, det: *const c.MD_BLOCK_OL_DETAIL) void {
 }
 
 fn render_open_li_block(r: *MD_HTML, det: *const c.MD_BLOCK_LI_DETAIL) void {
-    if (det.is_task != 0) {
+    if (det.is_task) {
         render_verbatim_lit(r, "<li class=\"task-list-item\">" ++
             "<input type=\"checkbox\" class=\"task-list-item-checkbox\" disabled");
         if (det.task_mark == 'x' or det.task_mark == 'X')
@@ -445,7 +446,7 @@ fn render_open_code_block(r: *MD_HTML, det: *const c.MD_BLOCK_CODE_DETAIL) void 
     render_verbatim_lit(r, "<pre><code");
 
     // If known, output the HTML 5 attribute class="language-LANGNAME".
-    if (det.lang.text != null) {
+    if (det.lang.text.len > 0) {
         render_verbatim_lit(r, " class=\"language-");
         render_attribute(r, &det.lang, render_html_escaped);
         render_verbatim_lit(r, "\"");
@@ -470,14 +471,14 @@ fn render_open_a_span(r: *MD_HTML, det: *const c.MD_SPAN_A_DETAIL) void {
     render_verbatim_lit(r, "<a href=\"");
     render_attribute(r, &det.href, render_url_escaped);
 
-    if (det.title.text != null) {
+    if (det.title.text.len > 0) {
         render_verbatim_lit(r, "\" title=\"");
         render_attribute(r, &det.title, render_html_escaped);
     }
 
     render_verbatim_lit(r, "\"");
-    if (det.raw_attrs != null and det.raw_attrs_size > 0)
-        render_html_component_props(r, @ptrCast(det.raw_attrs), det.raw_attrs_size);
+    if (det.raw_attrs.len > 0)
+        render_html_component_props(r, det.raw_attrs.ptr, @intCast(det.raw_attrs.len));
     render_verbatim_lit(r, ">");
 }
 
@@ -489,14 +490,14 @@ fn render_open_img_span(r: *MD_HTML, det: *const c.MD_SPAN_IMG_DETAIL) void {
 }
 
 fn render_close_img_span(r: *MD_HTML, det: *const c.MD_SPAN_IMG_DETAIL) void {
-    if (det.title.text != null) {
+    if (det.title.text.len > 0) {
         render_verbatim_lit(r, "\" title=\"");
         render_attribute(r, &det.title, render_html_escaped);
     }
 
     render_verbatim_lit(r, "\"");
-    if (det.raw_attrs != null and det.raw_attrs_size > 0)
-        render_html_component_props(r, @ptrCast(det.raw_attrs), det.raw_attrs_size);
+    if (det.raw_attrs.len > 0)
+        render_html_component_props(r, det.raw_attrs.ptr, @intCast(det.raw_attrs.len));
     render_verbatim_lit(r, ">");
 }
 
@@ -552,24 +553,24 @@ fn render_html_component_props(r: *MD_HTML, raw: [*]const u8, size: c.MD_SIZE) v
 fn render_open_tag_with_attrs(r: *MD_HTML, comptime tag: []const u8, det: ?*const c.MD_SPAN_ATTRS_DETAIL) void {
     render_verbatim_lit(r, "<");
     render_verbatim_lit(r, tag);
-    if (det != null and det.?.raw_attrs != null and det.?.raw_attrs_size > 0)
-        render_html_component_props(r, @ptrCast(det.?.raw_attrs), det.?.raw_attrs_size);
+    if (det != null and det.?.raw_attrs.len > 0)
+        render_html_component_props(r, det.?.raw_attrs.ptr, @intCast(det.?.raw_attrs.len));
     render_verbatim_lit(r, ">");
 }
 
 // Render opening tag for [text]{attrs} span.
 fn render_open_span_span(r: *MD_HTML, det: ?*const c.MD_SPAN_SPAN_DETAIL) void {
     render_verbatim_lit(r, "<span");
-    if (det != null and det.?.raw_attrs != null and det.?.raw_attrs_size > 0)
-        render_html_component_props(r, @ptrCast(det.?.raw_attrs), det.?.raw_attrs_size);
+    if (det != null and det.?.raw_attrs.len > 0)
+        render_html_component_props(r, det.?.raw_attrs.ptr, @intCast(det.?.raw_attrs.len));
     render_verbatim_lit(r, ">");
 }
 
 fn render_open_component_span(r: *MD_HTML, det: *const c.MD_SPAN_COMPONENT_DETAIL) void {
     render_verbatim_lit(r, "<");
     render_attribute(r, &det.tag_name, render_html_escaped);
-    if (det.raw_props != null and det.raw_props_size > 0)
-        render_html_component_props(r, @ptrCast(det.raw_props), det.raw_props_size);
+    if (det.raw_props.len > 0)
+        render_html_component_props(r, det.raw_props.ptr, @intCast(det.raw_props.len));
     render_verbatim_lit(r, ">");
 }
 
@@ -708,24 +709,25 @@ fn render_open_block_component(r: *MD_HTML, det: *const c.MD_BLOCK_COMPONENT_DET
     // Append tag name.
     {
         const attr = &det.tag_name;
+        const total = attr.size();
         var i: usize = 0;
-        while (attr.substr_offsets != null and attr.substr_offsets[i] < attr.size) : (i += 1) {
+        while (i < attr.substr_types.len and attr.substr_offsets[i] < total) : (i += 1) {
             const off = attr.substr_offsets[i];
-            const next = if (attr.substr_offsets[i + 1] < attr.size) attr.substr_offsets[i + 1] else attr.size;
+            const next = if (attr.substr_offsets[i + 1] < total) attr.substr_offsets[i + 1] else total;
             const len = next - off;
-            _ = comp_fm_tag_append(r, @ptrCast(attr.text + off), len);
+            _ = comp_fm_tag_append(r, attr.text.ptr + off, len);
         }
     }
 
     // Append title as attribute if present.
-    if (det.title != null and det.title_size > 0) {
+    if (det.title.len > 0) {
         _ = comp_fm_tag_append(r, " title=\"", 8);
         {
             const saved_output = r.process_output;
             const saved_ud = r.userdata;
             r.process_output = comp_fm_tag_capture;
             r.userdata = r;
-            render_html_escaped(r, @ptrCast(det.title), det.title_size);
+            render_html_escaped(r, det.title.ptr, @intCast(det.title.len));
             r.process_output = saved_output;
             r.userdata = saved_ud;
         }
@@ -733,13 +735,13 @@ fn render_open_block_component(r: *MD_HTML, det: *const c.MD_BLOCK_COMPONENT_DET
     }
 
     // Append {props} if present.
-    if (det.raw_props != null and det.raw_props_size > 0) {
+    if (det.raw_props.len > 0) {
         // Render props to a temp buffer by capturing output.
         const saved_output = r.process_output;
         const saved_ud = r.userdata;
         r.process_output = comp_fm_tag_capture;
         r.userdata = r;
-        render_html_component_props(r, @ptrCast(det.raw_props), det.raw_props_size);
+        render_html_component_props(r, det.raw_props.ptr, @intCast(det.raw_props.len));
         r.process_output = saved_output;
         r.userdata = saved_ud;
     }
@@ -868,9 +870,9 @@ fn render_code_meta_json(r: *MD_HTML) void {
 fn render_open_alert_block(r: *MD_HTML, det: *const c.MD_BLOCK_ALERT_DETAIL) void {
     render_verbatim_lit(r, "<blockquote class=\"alert alert-");
     // Lowercase the type name for the CSS class.
-    if (det.type_name.text != null) {
+    if (det.type_name.text.len > 0) {
         var i: c.MD_SIZE = 0;
-        while (i < det.type_name.size) : (i += 1) {
+        while (i < det.type_name.size()) : (i += 1) {
             var ch: u8 = @bitCast(det.type_name.text[i]);
             if (ch >= 'A' and ch <= 'Z')
                 ch += 32;
@@ -1103,22 +1105,24 @@ fn enter_block_callback(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdat
                 if (meta != null) {
                     const m = meta.?;
                     m.start = r.output_offset;
-                    if (det.lang.text != null and det.lang.size > 0) {
-                        const sz: c.MD_SIZE = if (det.lang.size < m.lang.len) det.lang.size else @intCast(m.lang.len - 1);
-                        @memcpy(m.lang[0..sz], @as([*]const u8, @ptrCast(det.lang.text))[0..sz]);
+                    if (det.lang.text.len > 0) {
+                        const lang_size = det.lang.size();
+                        const sz: c.MD_SIZE = if (lang_size < m.lang.len) lang_size else @intCast(m.lang.len - 1);
+                        @memcpy(m.lang[0..sz], det.lang.text[0..sz]);
                         m.lang_size = sz;
                     }
-                    if (det.filename.text != null and det.filename.size > 0) {
-                        const sz: c.MD_SIZE = if (det.filename.size < m.filename.len) det.filename.size else @intCast(m.filename.len - 1);
-                        @memcpy(m.filename[0..sz], @as([*]const u8, @ptrCast(det.filename.text))[0..sz]);
+                    if (det.filename.text.len > 0) {
+                        const fn_size = det.filename.size();
+                        const sz: c.MD_SIZE = if (fn_size < m.filename.len) fn_size else @intCast(m.filename.len - 1);
+                        @memcpy(m.filename[0..sz], det.filename.text[0..sz]);
                         m.filename_size = sz;
                     }
-                    if (det.highlights != null and det.highlight_count > 0) {
-                        const h = c_allocator.alloc(c_uint, det.highlight_count) catch null;
+                    if (det.highlights.len > 0) {
+                        const h = c_allocator.alloc(c_uint, det.highlights.len) catch null;
                         if (h) |hp| {
-                            @memcpy(hp[0..det.highlight_count], det.highlights[0..det.highlight_count]);
+                            @memcpy(hp, det.highlights);
                             m.highlights = hp.ptr;
-                            m.highlight_count = det.highlight_count;
+                            m.highlight_count = @intCast(det.highlights.len);
                         }
                     }
                     r.in_code_block = 1;

@@ -117,13 +117,13 @@ const TagKind = enum {
 // exclusively.
 const Detail = struct {
     // ol
-    ol_is_tight: c_int = 0,
+    ol_is_tight: bool = false,
     ol_start: c_uint = 0,
     ol_delimiter: u8 = 0,
     // ul
-    ul_is_tight: c_int = 0,
+    ul_is_tight: bool = false,
     // li
-    li_is_task: c_int = 0,
+    li_is_task: bool = false,
     li_task_mark: u8 = 0,
     // code
     code_info: ?[*:0]u8 = null,
@@ -234,15 +234,17 @@ fn jsonNodeFree(node_opt: ?*JsonNode) void {
 }
 
 // Convert an MD_ATTRIBUTE to an arena-allocated, NUL-terminated string. Returns
-// null if attr.text is null OR on allocation failure (matching the C version).
+// null for an unset (empty) attribute OR on allocation failure — matching the C
+// version, whose `text == NULL` test was equivalent: md_build_attribute only
+// ever leaves `text` empty when the attribute is unset or was built from zero
+// bytes, and never produces a non-empty pointer with a zero size.
 fn jsonAttrToStr(attr: *const c.MD_ATTRIBUTE) ?[*:0]u8 {
-    if (attr.text == null)
+    if (attr.text.len == 0)
         return null;
 
-    const size = attr.size;
-    const buf = allocBytes(@as(usize, size) + 1) orelse return null;
-    if (size > 0)
-        @memcpy(buf[0..size], @as([*]const u8, @ptrCast(attr.text))[0..size]);
+    const size = attr.text.len;
+    const buf = allocBytes(size + 1) orelse return null;
+    @memcpy(buf[0..size], attr.text);
     buf[size] = 0;
     return @ptrCast(buf);
 }
@@ -413,24 +415,24 @@ fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
             return -1;
         }
         node.?.tag_is_dynamic = 1;
-        if (d.raw_props != null and d.raw_props_size > 0) {
-            const dup = dupNts(@ptrCast(d.raw_props), d.raw_props_size);
+        if (d.raw_props.len > 0) {
+            const dup = dupNts(d.raw_props.ptr, d.raw_props.len);
             if (dup == null) {
                 ctx.err = 1;
                 return -1;
             }
             node.?.detail.component_raw_props = dup;
-            node.?.detail.component_raw_props_size = d.raw_props_size;
+            node.?.detail.component_raw_props_size = @intCast(d.raw_props.len);
         }
-        if (d.title != null and d.title_size > 0) {
-            const dup = dupNts(@ptrCast(d.title), d.title_size);
+        if (d.title.len > 0) {
+            const dup = dupNts(d.title.ptr, d.title.len);
             if (dup == null) {
                 jsonNodeFree(node);
                 ctx.err = 1;
                 return -1;
             }
             node.?.detail.component_title = dup;
-            node.?.detail.component_title_size = d.title_size;
+            node.?.detail.component_title_size = @intCast(d.title.len);
         }
     } else if (block_type == c.MD_BLOCK_TEMPLATE) {
         const d: *const c.MD_BLOCK_TEMPLATE_DETAIL = @ptrCast(@alignCast(detail.?));
@@ -491,17 +493,17 @@ fn jsonEnterBlock(block_type: c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*a
             n.detail.code_lang = jsonAttrToStr(&d.lang);
             n.detail.code_fence_char = @bitCast(d.fence_char);
             n.detail.code_filename = jsonAttrToStr(&d.filename);
-            if (d.meta != null and d.meta_size > 0) {
+            if (d.meta.len > 0) {
                 // Note: C ignores OOM here (best-effort) — match that.
-                if (dupNts(@ptrCast(d.meta), d.meta_size)) |dup|
+                if (dupNts(d.meta.ptr, d.meta.len)) |dup|
                     n.detail.code_meta = dup;
             }
-            if (d.highlights != null and d.highlight_count > 0) {
-                const m = g_alloc.alloc(c_uint, d.highlight_count) catch null;
+            if (d.highlights.len > 0) {
+                const m = g_alloc.alloc(c_uint, d.highlights.len) catch null;
                 if (m) |arr| {
-                    @memcpy(arr, @as([*]const c_uint, @ptrCast(d.highlights))[0..d.highlight_count]);
+                    @memcpy(arr, d.highlights);
                     n.detail.code_highlights = arr.ptr;
-                    n.detail.code_highlight_count = d.highlight_count;
+                    n.detail.code_highlight_count = @intCast(d.highlights.len);
                 }
             }
         },
@@ -583,14 +585,14 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
         }
         node.?.tag_is_dynamic = 1;
         node.?.tag_kind = .dynamic;
-        if (d.raw_props != null and d.raw_props_size > 0) {
-            const dup = dupNts(@ptrCast(d.raw_props), d.raw_props_size);
+        if (d.raw_props.len > 0) {
+            const dup = dupNts(d.raw_props.ptr, d.raw_props.len);
             if (dup == null) {
                 ctx.err = 1;
                 return -1;
             }
             node.?.detail.component_raw_props = dup;
-            node.?.detail.component_raw_props_size = d.raw_props_size;
+            node.?.detail.component_raw_props_size = @intCast(d.raw_props.len);
         }
     } else {
         switch (span_type) {
@@ -630,10 +632,10 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
                 const d: *const c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(detail.?));
                 n.detail.a_href = jsonAttrToStr(&d.href);
                 n.detail.a_title = jsonAttrToStr(&d.title);
-                if (d.raw_attrs != null and d.raw_attrs_size > 0) {
-                    if (dupNts(@ptrCast(d.raw_attrs), d.raw_attrs_size)) |dup| {
+                if (d.raw_attrs.len > 0) {
+                    if (dupNts(d.raw_attrs.ptr, d.raw_attrs.len)) |dup| {
                         n.raw_attrs = dup;
-                        n.raw_attrs_size = d.raw_attrs_size;
+                        n.raw_attrs_size = @intCast(d.raw_attrs.len);
                     }
                 }
             },
@@ -641,10 +643,10 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
                 const d: *const c.MD_SPAN_IMG_DETAIL = @ptrCast(@alignCast(detail.?));
                 n.detail.img_src = jsonAttrToStr(&d.src);
                 n.detail.img_title = jsonAttrToStr(&d.title);
-                if (d.raw_attrs != null and d.raw_attrs_size > 0) {
-                    if (dupNts(@ptrCast(d.raw_attrs), d.raw_attrs_size)) |dup| {
+                if (d.raw_attrs.len > 0) {
+                    if (dupNts(d.raw_attrs.ptr, d.raw_attrs.len)) |dup| {
                         n.raw_attrs = dup;
-                        n.raw_attrs_size = d.raw_attrs_size;
+                        n.raw_attrs_size = @intCast(d.raw_attrs.len);
                     }
                 }
                 ctx.image_nesting = 1;
@@ -656,10 +658,10 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
             c.MD_SPAN_SPAN => {
                 const d_opt: ?*const c.MD_SPAN_SPAN_DETAIL = @ptrCast(@alignCast(detail));
                 if (d_opt) |d| {
-                    if (d.raw_attrs != null and d.raw_attrs_size > 0) {
-                        if (dupNts(@ptrCast(d.raw_attrs), d.raw_attrs_size)) |dup| {
+                    if (d.raw_attrs.len > 0) {
+                        if (dupNts(d.raw_attrs.ptr, d.raw_attrs.len)) |dup| {
                             n.raw_attrs = dup;
-                            n.raw_attrs_size = d.raw_attrs_size;
+                            n.raw_attrs_size = @intCast(d.raw_attrs.len);
                         }
                     }
                 }
@@ -668,10 +670,10 @@ fn jsonEnterSpan(span_type: c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyo
                 // These spans may have trailing {attrs} via MD_SPAN_ATTRS_DETAIL.
                 if (detail != null) {
                     const d: *const c.MD_SPAN_ATTRS_DETAIL = @ptrCast(@alignCast(detail.?));
-                    if (d.raw_attrs != null and d.raw_attrs_size > 0) {
-                        if (dupNts(@ptrCast(d.raw_attrs), d.raw_attrs_size)) |dup| {
+                    if (d.raw_attrs.len > 0) {
+                        if (dupNts(d.raw_attrs.ptr, d.raw_attrs.len)) |dup| {
                             n.raw_attrs = dup;
-                            n.raw_attrs_size = d.raw_attrs_size;
+                            n.raw_attrs_size = @intCast(d.raw_attrs.len);
                         }
                     }
                 }
@@ -998,7 +1000,7 @@ fn jsonWriteProps(w: *JsonWriter, node: *const JsonNode) void {
             }
         },
         .li => {
-            if (node.detail.li_is_task != 0) {
+            if (node.detail.li_is_task) {
                 jsonWriteStr(w, "\"task\":true,\"checked\":");
                 jsonWriteStr(w, if (node.detail.li_task_mark == 'x' or node.detail.li_task_mark == 'X') "true" else "false");
                 has_prop = 1;

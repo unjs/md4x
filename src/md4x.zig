@@ -1026,24 +1026,27 @@ const TraceProbe = struct {
     /// Phase 4c converts from [*c] arrays to slices.
     fn attr(self: *TraceProbe, name: []const u8, a: c.MD_ATTRIBUTE) void {
         self.raw(" {s}=", .{name});
-        if (a.text == null) {
+        if (a.text.len == 0) {
+            // An unset attribute; md_build_attribute never yields a non-empty
+            // pointer with a zero size, so this is the old `text == NULL` test.
             self.raw("<null>", .{});
             return;
         }
-        self.quoted(a.text, a.size);
-        // substr_offsets is terminated by an entry equal to .size; substr_types
-        // has one fewer entry than substr_offsets.
-        if (a.substr_offsets == null or a.substr_types == null) {
+        const total = a.size();
+        self.quoted(a.text.ptr, total);
+        // substr_offsets is terminated by an entry equal to .size(); substr_types
+        // has exactly one fewer entry than substr_offsets.
+        if (a.substr_offsets.len != a.substr_types.len + 1) {
             self.raw("[<no-substr>]", .{});
             return;
         }
         self.raw("[", .{});
         var i: usize = 0;
-        while (a.substr_offsets[i] != a.size) : (i += 1) {
+        while (i < a.substr_types.len and a.substr_offsets[i] != total) : (i += 1) {
             if (i > 0) self.raw(",", .{});
             self.raw("{s}@{d}", .{ textTypeName(a.substr_types[i]), a.substr_offsets[i] });
         }
-        self.raw("|end@{d}]", .{a.size});
+        self.raw("|end@{d}]", .{total});
     }
 
     fn blockTypeName(t: c.MD_BLOCKTYPE) []const u8 {
@@ -1104,9 +1107,9 @@ const TraceProbe = struct {
         };
     }
 
-    fn rawStr(self: *TraceProbe, name: []const u8, p: [*c]const c.MD_CHAR, size: SZ) void {
+    fn rawStr(self: *TraceProbe, name: []const u8, s: []const c.MD_CHAR) void {
         self.raw(" {s}=", .{name});
-        if (p == null) self.raw("<null>", .{}) else self.quoted(p, size);
+        if (s.len == 0) self.raw("<null>", .{}) else self.quoted(s.ptr, @intCast(s.len));
     }
 
     fn blockDetail(self: *TraceProbe, ty: c.MD_BLOCKTYPE, detail: ?*anyopaque) void {
@@ -1117,15 +1120,15 @@ const TraceProbe = struct {
         switch (ty) {
             c.MD_BLOCK_UL => {
                 const x: *c.MD_BLOCK_UL_DETAIL = @ptrCast(@alignCast(d));
-                self.raw(" is_tight={d} mark='{c}'", .{ x.is_tight, x.mark });
+                self.raw(" is_tight={d} mark='{c}'", .{ @intFromBool(x.is_tight), x.mark });
             },
             c.MD_BLOCK_OL => {
                 const x: *c.MD_BLOCK_OL_DETAIL = @ptrCast(@alignCast(d));
-                self.raw(" start={d} is_tight={d} delim='{c}'", .{ x.start, x.is_tight, x.mark_delimiter });
+                self.raw(" start={d} is_tight={d} delim='{c}'", .{ x.start, @intFromBool(x.is_tight), x.mark_delimiter });
             },
             c.MD_BLOCK_LI => {
                 const x: *c.MD_BLOCK_LI_DETAIL = @ptrCast(@alignCast(d));
-                self.raw(" is_task={d} task_mark='{c}' off={d}", .{ x.is_task, if (x.task_mark == 0) @as(u8, '-') else x.task_mark, x.task_mark_offset });
+                self.raw(" is_task={d} task_mark='{c}' off={d}", .{ @intFromBool(x.is_task), if (x.task_mark == 0) @as(u8, '-') else x.task_mark, x.task_mark_offset });
             },
             c.MD_BLOCK_H => {
                 const x: *c.MD_BLOCK_H_DETAIL = @ptrCast(@alignCast(d));
@@ -1137,12 +1140,11 @@ const TraceProbe = struct {
                 self.attr("lang", x.lang);
                 self.raw(" fence='{c}'", .{if (x.fence_char == 0) @as(u8, '-') else x.fence_char});
                 self.attr("filename", x.filename);
-                self.rawStr("meta", x.meta, x.meta_size);
+                self.rawStr("meta", x.meta);
                 self.raw(" highlights=[", .{});
-                var i: c_uint = 0;
-                while (i < x.highlight_count) : (i += 1) {
+                for (x.highlights, 0..) |h, i| {
                     if (i > 0) self.raw(",", .{});
-                    self.raw("{d}", .{x.highlights[i]});
+                    self.raw("{d}", .{h});
                 }
                 self.raw("]", .{});
             },
@@ -1157,8 +1159,8 @@ const TraceProbe = struct {
             c.MD_BLOCK_COMPONENT => {
                 const x: *c.MD_BLOCK_COMPONENT_DETAIL = @ptrCast(@alignCast(d));
                 self.attr("tag", x.tag_name);
-                self.rawStr("props", x.raw_props, x.raw_props_size);
-                self.rawStr("title", x.title, x.title_size);
+                self.rawStr("props", x.raw_props);
+                self.rawStr("title", x.title);
             },
             c.MD_BLOCK_TEMPLATE => {
                 const x: *c.MD_BLOCK_TEMPLATE_DETAIL = @ptrCast(@alignCast(d));
@@ -1182,14 +1184,14 @@ const TraceProbe = struct {
                 const x: *c.MD_SPAN_A_DETAIL = @ptrCast(@alignCast(d));
                 self.attr("href", x.href);
                 self.attr("title", x.title);
-                self.rawStr("attrs", x.raw_attrs, x.raw_attrs_size);
-                self.raw(" autolink={d}", .{x.is_autolink});
+                self.rawStr("attrs", x.raw_attrs);
+                self.raw(" autolink={d}", .{@intFromBool(x.is_autolink)});
             },
             c.MD_SPAN_IMG => {
                 const x: *c.MD_SPAN_IMG_DETAIL = @ptrCast(@alignCast(d));
                 self.attr("src", x.src);
                 self.attr("title", x.title);
-                self.rawStr("attrs", x.raw_attrs, x.raw_attrs_size);
+                self.rawStr("attrs", x.raw_attrs);
             },
             c.MD_SPAN_WIKILINK => {
                 const x: *c.MD_SPAN_WIKILINK_DETAIL = @ptrCast(@alignCast(d));
@@ -1198,16 +1200,16 @@ const TraceProbe = struct {
             c.MD_SPAN_COMPONENT => {
                 const x: *c.MD_SPAN_COMPONENT_DETAIL = @ptrCast(@alignCast(d));
                 self.attr("tag", x.tag_name);
-                self.rawStr("props", x.raw_props, x.raw_props_size);
+                self.rawStr("props", x.raw_props);
             },
             c.MD_SPAN_SPAN => {
                 const x: *c.MD_SPAN_SPAN_DETAIL = @ptrCast(@alignCast(d));
-                self.rawStr("attrs", x.raw_attrs, x.raw_attrs_size);
+                self.rawStr("attrs", x.raw_attrs);
             },
             // em/strong/code/del/u carry MD_SPAN_ATTRS_DETAIL (or null).
             else => {
                 const x: *c.MD_SPAN_ATTRS_DETAIL = @ptrCast(@alignCast(d));
-                self.rawStr("attrs", x.raw_attrs, x.raw_attrs_size);
+                self.rawStr("attrs", x.raw_attrs);
             },
         }
     }

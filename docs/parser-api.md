@@ -2,9 +2,17 @@
 
 > **There is no public C ABI.** MD4X is a Zig library; `src/abi.zig` is the single
 > source of truth for the shared `MD_*` types, enums, flags, and `MD_PARSER`.
-> The declarations below are a verbatim transcription of the former `md4x.h`
-> (via `zig translate-c`), so field names, order, and layout are unchanged from
-> the original C implementation — Phase 4c of `PLAN.md` idiomatizes them.
+> These declarations started as a verbatim `zig translate-c` transcription of the
+> former `md4x.h`; Phase 4c of `PLAN.md` is idiomatizing them step by step:
+>
+> - **Detail types (`MD_ATTRIBUTE`, `MD_BLOCK_*_DETAIL`, `MD_SPAN_*_DETAIL`) are
+>   now ordinary Zig structs** with compiler-chosen layout — slices instead of
+>   pointer + `*_size`/`*_count` pairs, and `bool` instead of `c_int` for the
+>   two-state members. An absent value is the **empty slice**; the parser never
+>   distinguished null from empty.
+> - **`MD_PARSER` and the type enums are still C-shaped** (`extern struct`,
+>   `callconv(.c)` callbacks taking `?*anyopaque` details; `c_uint` enums) —
+>   Phase 4c step 3 changes that.
 
 Core function:
 
@@ -137,118 +145,135 @@ MD4X assumes UTF-8. Unicode matters for: word boundary classification (emphasis)
 
 ## Detail Structs
 
-All are `extern struct` in `src/abi.zig` (field defaults omitted here for brevity).
+All are plain Zig `struct`s in `src/abi.zig` — compiler-chosen layout, every
+field defaulted, so an unset detail is just `.{}`. Absent strings/arrays are the
+**empty slice**, never a null pointer (field defaults omitted below for brevity).
 
 ```zig
-pub const MD_BLOCK_UL_DETAIL = extern struct {
-    is_tight: c_int,        // Non-zero if tight list, zero if loose
+pub const MD_BLOCK_UL_DETAIL = struct {
+    is_tight: bool,         // True for a tight list, false for a loose one
     mark: MD_CHAR,          // Bullet character: '-', '+', '*'
 };
 
-pub const MD_BLOCK_OL_DETAIL = extern struct {
+pub const MD_BLOCK_OL_DETAIL = struct {
     start: c_uint,          // Start index of ordered list
-    is_tight: c_int,        // Non-zero if tight list, zero if loose
+    is_tight: bool,         // True for a tight list, false for a loose one
     mark_delimiter: MD_CHAR, // '.' or ')'
 };
 
-pub const MD_BLOCK_LI_DETAIL = extern struct {
-    is_task: c_int,             // Non-zero only with MD_FLAG_TASKLISTS
+pub const MD_BLOCK_LI_DETAIL = struct {
+    is_task: bool,              // Can be true only with MD_FLAG_TASKLISTS
     task_mark: MD_CHAR,         // 'x', 'X', or ' ' (if is_task)
     task_mark_offset: MD_OFFSET, // Offset of char between '[' and ']'
 };
 
-pub const MD_BLOCK_H_DETAIL = extern struct {
+pub const MD_BLOCK_H_DETAIL = struct {
     level: c_uint,          // Header level (1-6)
 };
 
-pub const MD_BLOCK_CODE_DETAIL = extern struct {
+pub const MD_BLOCK_CODE_DETAIL = struct {
     info: MD_ATTRIBUTE,     // Full info string
     lang: MD_ATTRIBUTE,     // First word of info string (language)
     fence_char: MD_CHAR,    // Fence character, or zero for indented code
     filename: MD_ATTRIBUTE, // `[filename]` from the info string
-    meta: [*c]const MD_CHAR,   // Raw metadata remainder, or null
-    meta_size: MD_SIZE,
-    highlights: [*c]const c_uint, // Line numbers from `{1-3,5}`, or null
-    highlight_count: c_uint,      // Length of `highlights` (no capacity field)
+    meta: []const MD_CHAR,  // Raw metadata remainder; empty when absent.
+                            // The backing buffer carries a NUL at meta.len
+    highlights: []const c_uint, // Line numbers from `{1-3,5}`; empty when absent
 };
 
-pub const MD_BLOCK_TABLE_DETAIL = extern struct {
+pub const MD_BLOCK_TABLE_DETAIL = struct {
     col_count: c_uint,      // Number of columns
     head_row_count: c_uint, // Header rows (currently always 1)
     body_row_count: c_uint, // Body rows
 };
 
-pub const MD_BLOCK_TD_DETAIL = extern struct {
+pub const MD_BLOCK_TD_DETAIL = struct {
     @"align": MD_ALIGN,     // MD_ALIGN_DEFAULT, _LEFT, _CENTER, or _RIGHT
 };
 
-pub const MD_SPAN_ATTRS_DETAIL = extern struct {
-    raw_attrs: [*c]const MD_CHAR, // Raw attrs from trailing {...}, or null. Not NUL-terminated
-    raw_attrs_size: MD_SIZE,
+pub const MD_SPAN_ATTRS_DETAIL = struct {
+    raw_attrs: []const MD_CHAR, // Raw attrs from trailing {...}. Not NUL-terminated
 };
 
-// Fields up to raw_attrs_size are layout-compatible with MD_SPAN_IMG_DETAIL.
-pub const MD_SPAN_A_DETAIL = extern struct {
+pub const MD_SPAN_A_DETAIL = struct {
     href: MD_ATTRIBUTE,
     title: MD_ATTRIBUTE,
-    raw_attrs: [*c]const MD_CHAR,
-    raw_attrs_size: MD_SIZE,
-    is_autolink: c_int,     // Non-zero if autolink
+    raw_attrs: []const MD_CHAR,
+    is_autolink: bool,
 };
 
-pub const MD_SPAN_IMG_DETAIL = extern struct {
+pub const MD_SPAN_IMG_DETAIL = struct {
     src: MD_ATTRIBUTE,
     title: MD_ATTRIBUTE,
-    raw_attrs: [*c]const MD_CHAR,
-    raw_attrs_size: MD_SIZE,
+    raw_attrs: []const MD_CHAR,
 };
 
-pub const MD_SPAN_SPAN_DETAIL = extern struct {
-    raw_attrs: [*c]const MD_CHAR, // Raw attrs from {...}. Not NUL-terminated
-    raw_attrs_size: MD_SIZE,
+pub const MD_SPAN_SPAN_DETAIL = struct {
+    raw_attrs: []const MD_CHAR, // Raw attrs from {...}. Not NUL-terminated
 };
 
-pub const MD_SPAN_WIKILINK_DETAIL = extern struct {
+pub const MD_SPAN_WIKILINK_DETAIL = struct {
     target: MD_ATTRIBUTE,
 };
 
-pub const MD_SPAN_COMPONENT_DETAIL = extern struct {
-    tag_name: MD_ATTRIBUTE,      // Component name (e.g. "badge", "icon-star")
-    raw_props: [*c]const MD_CHAR, // Raw props from {...}, or null. Not NUL-terminated
-    raw_props_size: MD_SIZE,
+pub const MD_SPAN_COMPONENT_DETAIL = struct {
+    tag_name: MD_ATTRIBUTE,     // Component name (e.g. "badge", "icon-star")
+    raw_props: []const MD_CHAR, // Raw props from {...}. Not NUL-terminated
 };
 
-pub const MD_BLOCK_COMPONENT_DETAIL = extern struct {
-    tag_name: MD_ATTRIBUTE,      // Component name (e.g. "alert", "card")
-    raw_props: [*c]const MD_CHAR, // Raw props from {...}, or null
-    raw_props_size: MD_SIZE,
-    title: [*c]const MD_CHAR,    // Title after name (e.g. "STOP" in :::danger STOP), or null
-    title_size: MD_SIZE,
+pub const MD_BLOCK_COMPONENT_DETAIL = struct {
+    tag_name: MD_ATTRIBUTE,     // Component name (e.g. "alert", "card")
+    raw_props: []const MD_CHAR, // Raw props from {...}
+    title: []const MD_CHAR,     // Title after name (e.g. "STOP" in :::danger STOP)
 };
 
-pub const MD_BLOCK_TEMPLATE_DETAIL = extern struct {
+pub const MD_BLOCK_TEMPLATE_DETAIL = struct {
     name: MD_ATTRIBUTE,     // Slot name (e.g. "header", "footer")
 };
 
-pub const MD_BLOCK_ALERT_DETAIL = extern struct {
+pub const MD_BLOCK_ALERT_DETAIL = struct {
     type_name: MD_ATTRIBUTE, // Alert type (e.g. "NOTE", "WARNING")
 };
 ```
+
+`MD_SPAN_A_DETAIL` and `MD_SPAN_IMG_DETAIL` are **no longer layout-compatible**
+(they are auto-layout structs now); nothing relied on that, and each `@ptrCast`
+site already dispatches on the span type.
 
 ## `MD_ATTRIBUTE`
 
 String attribute for non-text-flow content (titles, URLs, etc.) that may contain mixed substrings (normal text + entities):
 
 ```zig
-pub const MD_ATTRIBUTE = extern struct {
-    text: [*c]const MD_CHAR,
-    size: MD_SIZE,
-    substr_types: [*c]const MD_TEXTTYPE,   // Array of substring types
-    substr_offsets: [*c]const MD_OFFSET,   // Array of substring offsets
+pub const MD_ATTRIBUTE = struct {
+    text: []const MD_CHAR = &.{},
+    substr_types: []const MD_TEXTTYPE = &.{},   // One entry per substring
+    substr_offsets: []const MD_OFFSET = &.{},   // substr_types.len + 1 entries
+
+    /// text.len as the MD_SIZE the offset tables are expressed in.
+    pub fn size(self: MD_ATTRIBUTE) MD_SIZE { ... }
 };
 ```
 
-Invariants: `substr_offsets[0] == 0`, `substr_offsets[LAST+1] == size`. Only `MD_TEXT_NORMAL`, `MD_TEXT_ENTITY`, and `MD_TEXT_NULLCHAR` substrings appear.
+Invariants: `substr_offsets.len == substr_types.len + 1`, `substr_offsets[0] == 0`,
+`substr_offsets[substr_types.len] == size()`. Only `MD_TEXT_NORMAL`,
+`MD_TEXT_ENTITY`, and `MD_TEXT_NULLCHAR` substrings appear.
+
+An **unset** attribute is the default value — empty `text` with both tables empty
+(the only case where the `len + 1` invariant does not hold, since there is no
+substring table at all). It replaces the old `text == NULL` test: the builder
+never produces a non-empty `text` with a zero size, so "empty" and "absent" were
+already the same thing. Walk the substrings with a bounded loop:
+
+```zig
+const total = attr.size();
+var i: usize = 0;
+while (i < attr.substr_types.len and attr.substr_offsets[i] < total) : (i += 1) {
+    const ttype = attr.substr_types[i];
+    const part  = attr.text[attr.substr_offsets[i]..attr.substr_offsets[i + 1]];
+    // ...
+}
+```
 
 ## Parser Flags
 
