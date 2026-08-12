@@ -94,3 +94,6 @@ stamp-*
 *.stamp-*
 .Tpo
 
+
+# Core dumps (e.g. ZLS crashes in the editor)
+core.*
