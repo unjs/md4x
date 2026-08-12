@@ -14,8 +14,6 @@ const CHAR = types.CHAR;
 const SZ = types.SZ;
 const OFF = types.OFF;
 const MD_SIZE = types.MD_SIZE;
-const TRUE = types.TRUE;
-const FALSE = types.FALSE;
 const MD_CTX = types.MD_CTX;
 const MD_LINE = types.MD_LINE;
 const MD_REF_DEF = types.MD_REF_DEF;
@@ -407,7 +405,7 @@ pub const MD_LINK_ATTR = struct {
     dest_end: OFF = 0,
     title: [*c]CHAR = null,
     title_size: SZ = 0,
-    title_needs_free: c_int = 0,
+    title_needs_free: bool = false,
 };
 
 // Faithful port of md_is_link_label (md4x.c ~1986).
@@ -420,7 +418,7 @@ pub fn md_is_link_label(
     p_end_line_index: *MD_SIZE,
     p_contents_beg: *OFF,
     p_contents_end: *OFF,
-) c_int {
+) bool {
     var off = beg;
     var contents_beg: OFF = 0;
     var contents_end: OFF = 0;
@@ -430,7 +428,7 @@ pub fn md_is_link_label(
     p_beg_line_index.* = 0;
 
     if (ctx.ch(off) != '[')
-        return FALSE;
+        return false;
     off += 1;
 
     while (true) {
@@ -445,7 +443,7 @@ pub fn md_is_link_label(
                 contents_end = off + 2;
                 off += 2;
             } else if (ctx.ch(off) == '[') {
-                return FALSE;
+                return false;
             } else if (ctx.ch(off) == ']') {
                 if (contents_beg < contents_end) {
                     // Success.
@@ -453,10 +451,10 @@ pub fn md_is_link_label(
                     p_contents_end.* = contents_end;
                     p_end.* = off + 1;
                     p_end_line_index.* = line_index;
-                    return TRUE;
+                    return true;
                 } else {
                     // Link label must have some non-whitespace contents.
-                    return FALSE;
+                    return false;
                 }
             } else {
                 var char_size: SZ = undefined;
@@ -474,7 +472,7 @@ pub fn md_is_link_label(
 
             len += 1;
             if (len > 999)
-                return FALSE;
+                return false;
         }
 
         line_index += 1;
@@ -485,15 +483,15 @@ pub fn md_is_link_label(
             break;
     }
 
-    return FALSE;
+    return false;
 }
 
 // Faithful port of md_is_link_destination_A (md4x.c ~2060).
-pub fn md_is_link_destination_A(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF, p_contents_beg: *OFF, p_contents_end: *OFF) c_int {
+pub fn md_is_link_destination_A(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF, p_contents_beg: *OFF, p_contents_end: *OFF) bool {
     var off = beg;
 
     if (off >= max_end or ctx.ch(off) != '<')
-        return FALSE;
+        return false;
     off += 1;
 
     while (off < max_end) {
@@ -503,24 +501,24 @@ pub fn md_is_link_destination_A(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OF
         }
 
         if (ctx.isNewline(off) or ctx.ch(off) == '<')
-            return FALSE;
+            return false;
 
         if (ctx.ch(off) == '>') {
             // Success.
             p_contents_beg.* = beg + 1;
             p_contents_end.* = off;
             p_end.* = off + 1;
-            return TRUE;
+            return true;
         }
 
         off += 1;
     }
 
-    return FALSE;
+    return false;
 }
 
 // Faithful port of md_is_link_destination_B (md4x.c ~2093).
-pub fn md_is_link_destination_B(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF, p_contents_beg: *OFF, p_contents_end: *OFF) c_int {
+pub fn md_is_link_destination_B(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF, p_contents_beg: *OFF, p_contents_end: *OFF) bool {
     var off = beg;
     var parenthesis_level: c_int = 0;
 
@@ -537,7 +535,7 @@ pub fn md_is_link_destination_B(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OF
         if (ctx.ch(off) == '(') {
             parenthesis_level += 1;
             if (parenthesis_level > 32)
-                return FALSE;
+                return false;
         } else if (ctx.ch(off) == ')') {
             if (parenthesis_level == 0)
                 break;
@@ -548,17 +546,17 @@ pub fn md_is_link_destination_B(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OF
     }
 
     if (parenthesis_level != 0 or off == beg)
-        return FALSE;
+        return false;
 
     // Success.
     p_contents_beg.* = beg;
     p_contents_end.* = off;
     p_end.* = off;
-    return TRUE;
+    return true;
 }
 
 // Faithful port of md_is_link_destination (md4x.c ~2134).
-pub inline fn md_is_link_destination(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF, p_contents_beg: *OFF, p_contents_end: *OFF) c_int {
+pub inline fn md_is_link_destination(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF, p_contents_beg: *OFF, p_contents_end: *OFF) bool {
     if (ctx.ch(beg) == '<')
         return md_is_link_destination_A(ctx, beg, max_end, p_end, p_contents_beg, p_contents_end)
     else
@@ -575,7 +573,7 @@ pub fn md_is_link_title(
     p_end_line_index: *MD_SIZE,
     p_contents_beg: *OFF,
     p_contents_end: *OFF,
-) c_int {
+) bool {
     var off = beg;
     var closer_char: CHAR = undefined;
     var line_index: MD_SIZE = 0;
@@ -586,11 +584,11 @@ pub fn md_is_link_title(
     if (off >= lines[line_index].end) {
         line_index += 1;
         if (line_index >= lines.len)
-            return FALSE;
+            return false;
         off = lines[line_index].beg;
     }
     if (off == beg)
-        return FALSE;
+        return false;
 
     p_beg_line_index.* = line_index;
 
@@ -599,7 +597,7 @@ pub fn md_is_link_title(
         '"' => closer_char = '"',
         '\'' => closer_char = '\'',
         '(' => closer_char = ')',
-        else => return FALSE,
+        else => return false,
     }
     off += 1;
 
@@ -616,10 +614,10 @@ pub fn md_is_link_title(
                 p_contents_end.* = off;
                 p_end.* = off + 1;
                 p_end_line_index.* = line_index;
-                return TRUE;
+                return true;
             } else if (closer_char == ')' and ctx.ch(off) == '(') {
                 // ()-style title cannot contain an unescaped '('.
-                return FALSE;
+                return false;
             }
 
             off += 1;
@@ -628,7 +626,7 @@ pub fn md_is_link_title(
         line_index += 1;
     }
 
-    return FALSE;
+    return false;
 }
 
 // Faithful port of md_is_link_reference_definition (md4x.c ~2212). Returns 0 if
@@ -651,13 +649,13 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
     var ret: c_int = 0;
 
     // Link label.
-    if (md_is_link_label(ctx, lines, lines[0].beg, &off, &label_contents_line_index, &line_index, &label_contents_beg, &label_contents_end) == 0)
-        return FALSE;
+    if (!md_is_link_label(ctx, lines, lines[0].beg, &off, &label_contents_line_index, &line_index, &label_contents_beg, &label_contents_end))
+        return 0;
     label_is_multiline = (label_contents_line_index != line_index);
 
     // Colon.
     if (off >= lines[line_index].end or ctx.ch(off) != ':')
-        return FALSE;
+        return 0;
     off += 1;
 
     // Optional white space with up to one line break.
@@ -666,16 +664,16 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
     if (off >= lines[line_index].end) {
         line_index += 1;
         if (line_index >= lines.len)
-            return FALSE;
+            return 0;
         off = lines[line_index].beg;
     }
 
     // Link destination.
-    if (md_is_link_destination(ctx, off, lines[line_index].end, &off, &dest_contents_beg, &dest_contents_end) == 0)
-        return FALSE;
+    if (!md_is_link_destination(ctx, off, lines[line_index].end, &off, &dest_contents_beg, &dest_contents_end))
+        return 0;
 
     // (Optional) title. Only a title if nothing more follows on its last line.
-    if (md_is_link_title(ctx, lines[line_index..], off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) != 0 and
+    if (md_is_link_title(ctx, lines[line_index..], off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) and
         off >= lines[line_index + tmp_line_index].end)
     {
         title_is_multiline = (tmp_line_index != title_contents_line_index);
@@ -691,7 +689,7 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
 
     // Nothing more can follow on the last line.
     if (off < lines[line_index].end)
-        return FALSE;
+        return 0;
 
     // So, it _is_ a reference definition. Remember it.
     // Reserve (but do not yet commit) one slot: the abort paths below must not
@@ -746,11 +744,11 @@ pub fn md_is_link_reference(ctx: *MD_CTX, lines: []const MD_LINE, beg_in: OFF, e
     var end = end_in;
     var label: [*c]CHAR = undefined;
     var label_size: SZ = undefined;
-    var ret: c_int = FALSE;
+    var ret: c_int = 0;
 
     // MD_ASSERT(CH(beg) == '[' || CH(beg) == '!');  MD_ASSERT(CH(end-1) == ']');
     if (ctx.max_ref_def_output == 0)
-        return FALSE;
+        return 0;
 
     beg += if (ctx.ch(beg) == '!') @as(OFF, 2) else 1;
     end -= 1;
@@ -763,7 +761,7 @@ pub fn md_is_link_reference(ctx: *MD_CTX, lines: []const MD_LINE, beg_in: OFF, e
         const beg_line_idx: usize = (@intFromPtr(beg_line) - @intFromPtr(lines.ptr)) / @sizeOf(MD_LINE);
         ret = md_merge_lines_alloc(ctx, beg, end, lines[beg_line_idx..], ' ', &label, &label_size);
         if (ret < 0) return ret;
-        ret = FALSE;
+        ret = 0;
     } else {
         label = @constCast(ctx.str(beg));
         label_size = end - beg;
@@ -775,7 +773,7 @@ pub fn md_is_link_reference(ctx: *MD_CTX, lines: []const MD_LINE, beg_in: OFF, e
         attr.dest_end = d.dest_end;
         attr.title = d.title;
         attr.title_size = d.title_size;
-        attr.title_needs_free = FALSE;
+        attr.title_needs_free = false;
     }
 
     if (is_multiline)
@@ -786,7 +784,7 @@ pub fn md_is_link_reference(ctx: *MD_CTX, lines: []const MD_LINE, beg_in: OFF, e
         const output_size_estimation: MD_SIZE = d.label_size + d.title_size + d.dest_end - d.dest_beg;
         if (output_size_estimation < ctx.max_ref_def_output) {
             ctx.max_ref_def_output -= output_size_estimation;
-            ret = TRUE;
+            ret = 1;
         } else {
             ctx.log("Too many link reference definition instantiations.");
             ctx.max_ref_def_output = 0;
@@ -805,7 +803,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, p_
     var title_contents_line_index: MD_SIZE = undefined;
     var title_is_multiline: bool = undefined;
     var off = beg;
-    var ret: c_int = FALSE;
+    var ret: c_int = 0;
 
     _ = md_lookup_line(off, lines, &line_index);
 
@@ -818,7 +816,7 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, p_
     if (off >= lines[line_index].end and (off >= ctx.size or ctx.isNewline(off))) {
         line_index += 1;
         if (line_index >= lines.len)
-            return FALSE;
+            return 0;
         off = lines[line_index].beg;
     }
 
@@ -828,18 +826,18 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, p_
         attr.dest_end = off;
         attr.title = null;
         attr.title_size = 0;
-        attr.title_needs_free = FALSE;
+        attr.title_needs_free = false;
         off += 1;
         p_end.* = off;
-        return TRUE;
+        return 1;
     }
 
     // Link destination.
-    if (md_is_link_destination(ctx, off, lines[line_index].end, &off, &attr.dest_beg, &attr.dest_end) == 0)
-        return FALSE;
+    if (!md_is_link_destination(ctx, off, lines[line_index].end, &off, &attr.dest_beg, &attr.dest_end))
+        return 0;
 
     // (Optional) title.
-    if (md_is_link_title(ctx, lines[line_index..], off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end) != 0) {
+    if (md_is_link_title(ctx, lines[line_index..], off, &off, &title_contents_line_index, &tmp_line_index, &title_contents_beg, &title_contents_end)) {
         title_is_multiline = (tmp_line_index != title_contents_line_index);
         title_contents_line_index += line_index;
         line_index += tmp_line_index;
@@ -857,29 +855,29 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, p_
     if (off >= lines[line_index].end) {
         line_index += 1;
         if (line_index >= lines.len)
-            return FALSE;
+            return 0;
         off = lines[line_index].beg;
     }
     if (ctx.ch(off) != ')')
-        return ret; // goto abort (ret == FALSE here)
+        return ret; // goto abort (ret == 0 here)
     off += 1;
 
     if (title_contents_beg >= title_contents_end) {
         attr.title = null;
         attr.title_size = 0;
-        attr.title_needs_free = FALSE;
+        attr.title_needs_free = false;
     } else if (!title_is_multiline) {
         attr.title = @constCast(ctx.str(title_contents_beg));
         attr.title_size = title_contents_end - title_contents_beg;
-        attr.title_needs_free = FALSE;
+        attr.title_needs_free = false;
     } else {
         ret = md_merge_lines_alloc(ctx, title_contents_beg, title_contents_end, lines[title_contents_line_index..], '\n', &attr.title, &attr.title_size);
         if (ret < 0) return ret;
-        attr.title_needs_free = TRUE;
+        attr.title_needs_free = true;
     }
 
     p_end.* = off;
-    ret = TRUE;
+    ret = 1;
     return ret;
 }
 
@@ -889,44 +887,44 @@ pub fn md_is_inline_link_spec(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, p_
 // ============================================================================
 
 // Faithful port of md_is_autolink_uri (md4x.c ~2951).
-pub fn md_is_autolink_uri(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_autolink_uri(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) bool {
     var off = beg + 1;
 
     // MD_ASSERT(CH(beg) == '<');
 
     // Scheme.
     if (off >= max_end or !ctx.isAscii(off))
-        return FALSE;
+        return false;
     off += 1;
     while (true) {
         if (off >= max_end)
-            return FALSE;
+            return false;
         if (off - beg > 32)
-            return FALSE;
+            return false;
         if (ctx.ch(off) == ':' and off - beg >= 3)
             break;
         if (!ctx.isAlnum(off) and ctx.ch(off) != '+' and ctx.ch(off) != '-' and ctx.ch(off) != '.')
-            return FALSE;
+            return false;
         off += 1;
     }
 
     // Path after the scheme.
     while (off < max_end and ctx.ch(off) != '>') {
         if (ctx.isWhitespace(off) or ctx.isCntrl(off) or ctx.ch(off) == '<')
-            return FALSE;
+            return false;
         off += 1;
     }
 
     if (off >= max_end)
-        return FALSE;
+        return false;
 
     // MD_ASSERT(CH(off) == '>');
     p_end.* = off + 1;
-    return TRUE;
+    return true;
 }
 
 // Faithful port of md_is_autolink_email (md4x.c ~2989).
-pub fn md_is_autolink_email(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) c_int {
+pub fn md_is_autolink_email(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) bool {
     var off = beg + 1;
     var label_len: c_int = undefined;
 
@@ -936,11 +934,11 @@ pub fn md_is_autolink_email(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) c
     while (off < max_end and (ctx.isAlnum(off) or ctx.isAnyOf(off, ".!#$%&'*+/=?^_`{|}~-")))
         off += 1;
     if (off <= beg + 1)
-        return FALSE;
+        return false;
 
     // '@'
     if (off >= max_end or ctx.ch(off) != '@')
-        return FALSE;
+        return false;
     off += 1;
 
     // '.'-delimited labels: each 1-63 alnum or '-', '-' not first/last.
@@ -956,29 +954,29 @@ pub fn md_is_autolink_email(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF) c
             break;
 
         if (label_len > 63)
-            return FALSE;
+            return false;
 
         off += 1;
     }
 
     if (label_len <= 0 or off >= max_end or ctx.ch(off) != '>' or ctx.ch(off - 1) == '-')
-        return FALSE;
+        return false;
 
     p_end.* = off + 1;
-    return TRUE;
+    return true;
 }
 
 // Faithful port of md_is_autolink (md4x.c ~3040).
-pub fn md_is_autolink(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF, p_missing_mailto: *c_int) c_int {
-    if (md_is_autolink_uri(ctx, beg, max_end, p_end) != 0) {
-        p_missing_mailto.* = FALSE;
-        return TRUE;
+pub fn md_is_autolink(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OFF, p_missing_mailto: *bool) bool {
+    if (md_is_autolink_uri(ctx, beg, max_end, p_end)) {
+        p_missing_mailto.* = false;
+        return true;
     }
 
-    if (md_is_autolink_email(ctx, beg, max_end, p_end) != 0) {
-        p_missing_mailto.* = TRUE;
-        return TRUE;
+    if (md_is_autolink_email(ctx, beg, max_end, p_end)) {
+        p_missing_mailto.* = true;
+        return true;
     }
 
-    return FALSE;
+    return false;
 }

@@ -161,7 +161,7 @@ pub fn md_scan_for_html_closer(ctx: *MD_CTX, str: [*c]const CHAR, len: MD_SIZE, 
 
     while (true) {
         while (off + len <= lines[line_index].end and off + len <= max_end) {
-            if (md_ascii_eq(ctx.str(off), str, len) != 0) {
+            if (md_ascii_eq(ctx.str(off), str, len)) {
                 p_end.* = off + len;
                 return TRUE;
             }
@@ -687,11 +687,11 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
                 }
 
                 var autolink_end: OFF = undefined;
-                var missing_mailto: c_int = undefined;
+                var missing_mailto: bool = undefined;
                 const is_autolink = md_is_autolink(ctx, off, lines[lines.len - 1].end, &autolink_end, &missing_mailto);
-                if (is_autolink != 0) {
+                if (is_autolink) {
                     var flags: u8 = MD_MARK_RESOLVED | MD_MARK_AUTOLINK;
-                    if (missing_mailto != 0) flags |= MD_MARK_AUTOLINK_MISSING_MAILTO;
+                    if (missing_mailto) flags |= MD_MARK_AUTOLINK_MISSING_MAILTO;
 
                     if (addMark(ctx, '<', off, off + 1, MD_MARK_OPENER | flags) == null) {
                         ret = -1;
@@ -883,8 +883,8 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
                         const suffix = scheme_map[scheme_index].suffix;
                         const suffix_size = scheme_map[scheme_index].suffix_size;
 
-                        if (line.*.beg + scheme_size <= off and md_ascii_eq(ctx.str(off - scheme_size), scheme, scheme_size) != 0 and
-                            off + 1 + suffix_size < line.*.end and md_ascii_eq(ctx.str(off + 1), suffix, suffix_size) != 0)
+                        if (line.*.beg + scheme_size <= off and md_ascii_eq(ctx.str(off - scheme_size), scheme, scheme_size) and
+                            off + 1 + suffix_size < line.*.end and md_ascii_eq(ctx.str(off + 1), suffix, suffix_size))
                         {
                             if (addMark(ctx, ch, off - scheme_size, off + 1 + suffix_size, MD_MARK_POTENTIAL_OPENER) == null) {
                                 ret = -1;
@@ -906,7 +906,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: c_int)
 
             // Potential permissive WWW autolink.
             if (ch == '.') {
-                if (line.*.beg + 3 <= off and md_ascii_eq(ctx.str(off - 3), "www", 3) != 0 and
+                if (line.*.beg + 3 <= off and md_ascii_eq(ctx.str(off - 3), "www", 3) and
                     (off - 3 == line.*.beg or ctx.isUnicodeWhitespaceBefore(off - 3) or ctx.isUnicodePunctBefore(off - 3)))
                 {
                     if (addMark(ctx, ch, off - 3, off + 1, MD_MARK_POTENTIAL_OPENER) == null) {
@@ -1226,7 +1226,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                         if (m.beg >= inline_link_end) break;
                         if ((m.flags & (MD_MARK_OPENER | MD_MARK_RESOLVED)) == (MD_MARK_OPENER | MD_MARK_RESOLVED)) {
                             if (ctx.marks.items[@intCast(m.next)].beg >= inline_link_end) {
-                                if (attr.title_needs_free != 0) std.c.free(attr.title);
+                                if (attr.title_needs_free) std.c.free(attr.title);
                                 is_link = FALSE;
                                 break;
                             }
@@ -1280,7 +1280,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 ctx.marks.items[@intCast(opener_index + 1)].end = attr.dest_end;
 
                 md_mark_store_ptr(ctx, opener_index + 2, attr.title);
-                if (attr.title_needs_free != 0)
+                if (attr.title_needs_free)
                     md_mark_stack_push(ctx, &ctx.ptr_stack, opener_index + 2);
                 ctx.marks.items[@intCast(opener_index + 2)].prev = @bitCast(attr.title_size);
 

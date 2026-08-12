@@ -507,7 +507,7 @@ pub fn md_is_html_block_start_condition(ctx: *MD_CTX, beg: OFF) c_int {
     // Check for type 1: <script, <pre, or <style
     for (t1) |tag| {
         if (off + tag.len <= ctx.size) {
-            if (md_ascii_case_eq(ctx.str(off), tag.name, tag.len) != 0)
+            if (md_ascii_case_eq(ctx.str(off), tag.name, tag.len))
                 return 1;
         }
     }
@@ -528,7 +528,7 @@ pub fn md_is_html_block_start_condition(ctx: *MD_CTX, beg: OFF) c_int {
 
         // Type 5: <![CDATA[
         if (off + 8 < ctx.size) {
-            if (md_ascii_eq(ctx.str(off), "![CDATA[", 8) != 0)
+            if (md_ascii_eq(ctx.str(off), "![CDATA[", 8))
                 return 5;
         }
     }
@@ -543,7 +543,7 @@ pub fn md_is_html_block_start_condition(ctx: *MD_CTX, beg: OFF) c_int {
 
         for (tags) |tag| {
             if (off + tag.len <= ctx.size) {
-                if (md_ascii_case_eq(ctx.str(off), tag.name, tag.len) != 0) {
+                if (md_ascii_case_eq(ctx.str(off), tag.name, tag.len)) {
                     const tmp: OFF = off + tag.len;
                     if (tmp >= ctx.size)
                         return 6;
@@ -598,7 +598,7 @@ pub fn md_is_html_block_end_condition(ctx: *MD_CTX, beg: OFF, p_end: *OFF) c_int
                 if (ctx.ch(off) == '<' and ctx.ch(off + 1) == '/') {
                     for (t1) |tag| {
                         if (off + 2 + tag.len < ctx.size) {
-                            if (md_ascii_case_eq(ctx.str(off + 2), tag.name, tag.len) != 0 and
+                            if (md_ascii_case_eq(ctx.str(off + 2), tag.name, tag.len) and
                                 ctx.ch(off + 2 + tag.len) == '>')
                             {
                                 p_end.* = off + 2 + tag.len + 1;

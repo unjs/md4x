@@ -14,8 +14,6 @@ const CHAR = types.CHAR;
 const SZ = types.SZ;
 const OFF = types.OFF;
 const MD_SIZE = types.MD_SIZE;
-const TRUE = types.TRUE;
-const FALSE = types.FALSE;
 const MD_CTX = types.MD_CTX;
 const MD_LINE = types.MD_LINE;
 const c_allocator = types.c_allocator;
@@ -112,7 +110,7 @@ pub fn md_strchr(palette: [*:0]const u8, ch: CHAR) ?[*:0]const u8 {
 }
 
 // Case insensitive check of string equality (ASCII). Mirrors md_ascii_case_eq.
-pub inline fn md_ascii_case_eq(s1: [*c]const CHAR, s2: [*c]const CHAR, n: SZ) c_int {
+pub inline fn md_ascii_case_eq(s1: [*c]const CHAR, s2: [*c]const CHAR, n: SZ) bool {
     var i: OFF = 0;
     while (i < n) : (i += 1) {
         var ch1: CHAR = s1[i];
@@ -120,15 +118,15 @@ pub inline fn md_ascii_case_eq(s1: [*c]const CHAR, s2: [*c]const CHAR, n: SZ) c_
         // C: ch += ('A' - 'a') == ch - 32 on char; wrap in the byte domain.
         if (ISLOWER_(ch1)) ch1 -%= 32;
         if (ISLOWER_(ch2)) ch2 -%= 32;
-        if (ch1 != ch2) return FALSE;
+        if (ch1 != ch2) return false;
     }
-    return TRUE;
+    return true;
 }
 
-pub inline fn md_ascii_eq(s1: [*c]const CHAR, s2: [*c]const CHAR, n: SZ) c_int {
+pub inline fn md_ascii_eq(s1: [*c]const CHAR, s2: [*c]const CHAR, n: SZ) bool {
     const a = @as([*]const u8, @ptrCast(s1))[0..n];
     const b = @as([*]const u8, @ptrCast(s2))[0..n];
-    return if (std.mem.eql(u8, a, b)) TRUE else FALSE;
+    return std.mem.eql(u8, a, b);
 }
 
 // `md_text_with_null_replacement` — split a run at NUL bytes, emitting
