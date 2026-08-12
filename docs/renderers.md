@@ -48,12 +48,33 @@ When `MD_HTML_FLAG_FULL_HTML` is set, `md_html_ex()` generates a complete HTML d
 
 ### Renderer Flags (`MD_HTML_FLAG_*`)
 
-| Flag                             | Value    | Description                                         |
-| -------------------------------- | -------- | --------------------------------------------------- |
-| `MD_HTML_FLAG_DEBUG`             | `0x0001` | Send debug output from `md_parse()` to stderr       |
-| `MD_HTML_FLAG_VERBATIM_ENTITIES` | `0x0002` | Do not translate HTML entities                      |
-| `MD_HTML_FLAG_SKIP_UTF8_BOM`     | `0x0004` | Skip UTF-8 BOM at input start                       |
-| `MD_HTML_FLAG_FULL_HTML`         | `0x0008` | Generate full HTML document (requires `md_html_ex`) |
+| Flag                             | Value    | Description                                                |
+| -------------------------------- | -------- | ---------------------------------------------------------- |
+| `MD_HTML_FLAG_DEBUG`             | `0x0001` | Send debug output from `md_parse()` to stderr              |
+| `MD_HTML_FLAG_VERBATIM_ENTITIES` | `0x0002` | Do not translate HTML entities                             |
+| `MD_HTML_FLAG_SKIP_UTF8_BOM`     | `0x0004` | Skip UTF-8 BOM at input start                              |
+| `MD_HTML_FLAG_FULL_HTML`         | `0x0008` | Generate full HTML document (requires `md_html_ex`)        |
+| `MD_HTML_FLAG_CODE_META`         | `0x0010` | Append a code-block metadata JSON array after a NUL byte   |
+| `MD_HTML_FLAG_HEAL`              | `0x0100` | Run `md_heal()` on the input first, then render the result |
+
+`MD_HTML_FLAG_CODE_META` makes the renderer record, for every fenced/indented
+code block, the byte range its rendered output occupies plus the block's
+metadata. After a successful parse it flushes the body and appends a `NUL` byte
+followed by a JSON array — one object per code block, in document order:
+
+```json
+[{ "s": 0, "e": 42, "l": "js", "f": "app.js", "h": [1, 2] }]
+```
+
+`s`/`e` are the start/end byte offsets in the emitted HTML; `l` (language), `f`
+(filename) and `h` (highlight line numbers) are omitted when absent. The JS
+bindings use this to support the `highlighter` callback — `md4x_to_html` (wasm)
+and `renderToHtml` (napi) always pass this flag. `l` is capped at 64 bytes and
+`f` at 256 bytes (fixed-size capture buffers).
+
+`MD_HTML_FLAG_HEAL` is a pre-pass, not a rendering mode: `md_html_ex()` runs
+`md_heal()` over the input, then re-enters itself with the healed buffer and the
+flag cleared. It is what the CLI's `--heal` option sets for HTML output.
 
 ### Rendering Details
 
@@ -116,10 +137,11 @@ Produces `{"nodes":[...],"frontmatter":{...},"meta":{}}` where each node is eith
 
 ### AST Renderer Flags (`MD_AST_FLAG_*`)
 
-| Flag                        | Value    | Description                                   |
-| --------------------------- | -------- | --------------------------------------------- |
-| `MD_AST_FLAG_DEBUG`         | `0x0001` | Send debug output from `md_parse()` to stderr |
-| `MD_AST_FLAG_SKIP_UTF8_BOM` | `0x0002` | Skip UTF-8 BOM at input start                 |
+| Flag                        | Value    | Description                                                |
+| --------------------------- | -------- | ---------------------------------------------------------- |
+| `MD_AST_FLAG_DEBUG`         | `0x0001` | Send debug output from `md_parse()` to stderr              |
+| `MD_AST_FLAG_SKIP_UTF8_BOM` | `0x0002` | Skip UTF-8 BOM at input start                              |
+| `MD_AST_FLAG_HEAL`          | `0x0100` | Run `md_heal()` on the input first, then render the result |
 
 ## ANSI Renderer API (`src/renderers/md4x-ansi.zig`)
 
@@ -138,14 +160,15 @@ pub fn md_ansi(
 
 ### Renderer Flags (`MD_ANSI_FLAG_*`)
 
-| Flag                            | Value    | Description                                          |
-| ------------------------------- | -------- | ---------------------------------------------------- |
-| `MD_ANSI_FLAG_DEBUG`            | `0x0001` | Send debug output from `md_parse()` to stderr        |
-| `MD_ANSI_FLAG_SKIP_UTF8_BOM`    | `0x0002` | Skip UTF-8 BOM at input start                        |
-| `MD_ANSI_FLAG_NO_COLOR`         | `0x0004` | Suppress ANSI escape codes (plain text output)       |
-| `MD_ANSI_FLAG_CODE_META`        | `0x0008` | Append code block metadata after null byte           |
-| `MD_ANSI_FLAG_SHOW_URLS`        | `0x0010` | Show link URLs after link text (default: OSC 8 only) |
-| `MD_ANSI_FLAG_SHOW_FRONTMATTER` | `0x0020` | Show frontmatter as dim text (default: suppressed)   |
+| Flag                            | Value    | Description                                                |
+| ------------------------------- | -------- | ---------------------------------------------------------- |
+| `MD_ANSI_FLAG_DEBUG`            | `0x0001` | Send debug output from `md_parse()` to stderr              |
+| `MD_ANSI_FLAG_SKIP_UTF8_BOM`    | `0x0002` | Skip UTF-8 BOM at input start                              |
+| `MD_ANSI_FLAG_NO_COLOR`         | `0x0004` | Suppress ANSI escape codes (plain text output)             |
+| `MD_ANSI_FLAG_CODE_META`        | `0x0008` | Append code block metadata after null byte                 |
+| `MD_ANSI_FLAG_SHOW_URLS`        | `0x0010` | Show link URLs after link text (default: OSC 8 only)       |
+| `MD_ANSI_FLAG_SHOW_FRONTMATTER` | `0x0020` | Show frontmatter as dim text (default: suppressed)         |
+| `MD_ANSI_FLAG_HEAL`             | `0x0100` | Run `md_heal()` on the input first, then render the result |
 
 ### Rendering Details
 
@@ -217,10 +240,11 @@ Produces a flat JSON object with frontmatter properties spread at the top level 
 
 ### Renderer Flags (`MD_META_FLAG_*`)
 
-| Flag                         | Value    | Description                                   |
-| ---------------------------- | -------- | --------------------------------------------- |
-| `MD_META_FLAG_DEBUG`         | `0x0001` | Send debug output from `md_parse()` to stderr |
-| `MD_META_FLAG_SKIP_UTF8_BOM` | `0x0002` | Skip UTF-8 BOM at input start                 |
+| Flag                         | Value    | Description                                                |
+| ---------------------------- | -------- | ---------------------------------------------------------- |
+| `MD_META_FLAG_DEBUG`         | `0x0001` | Send debug output from `md_parse()` to stderr              |
+| `MD_META_FLAG_SKIP_UTF8_BOM` | `0x0002` | Skip UTF-8 BOM at input start                              |
+| `MD_META_FLAG_HEAL`          | `0x0100` | Run `md_heal()` on the input first, then render the result |
 
 ### Rendering Details
 
@@ -247,10 +271,11 @@ pub fn md_text(
 
 ### Renderer Flags (`MD_TEXT_FLAG_*`)
 
-| Flag                         | Value    | Description                                   |
-| ---------------------------- | -------- | --------------------------------------------- |
-| `MD_TEXT_FLAG_DEBUG`         | `0x0001` | Send debug output from `md_parse()` to stderr |
-| `MD_TEXT_FLAG_SKIP_UTF8_BOM` | `0x0002` | Skip UTF-8 BOM at input start                 |
+| Flag                         | Value    | Description                                                |
+| ---------------------------- | -------- | ---------------------------------------------------------- |
+| `MD_TEXT_FLAG_DEBUG`         | `0x0001` | Send debug output from `md_parse()` to stderr              |
+| `MD_TEXT_FLAG_SKIP_UTF8_BOM` | `0x0002` | Skip UTF-8 BOM at input start                              |
+| `MD_TEXT_FLAG_HEAL`          | `0x0100` | Run `md_heal()` on the input first, then render the result |
 
 ### Rendering Details
 
