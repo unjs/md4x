@@ -75,7 +75,7 @@ pub const MD_HTML_OPTS = extern struct {
     css_url: ?[*:0]const u8 = null,
 };
 
-const ProcessOutputFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) callconv(.c) void;
+const ProcessOutputFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) void;
 
 // AppendFn mirrors `void (*fn_append)(MD_HTML*, const MD_CHAR*, MD_SIZE)`.
 const AppendFn = *const fn (*MD_HTML, [*]const u8, c.MD_SIZE) void;
@@ -606,7 +606,7 @@ fn comp_fm_text_append(r: *MD_HTML, text: [*]const u8, size: c.MD_SIZE) c_int {
 }
 
 // process_output callback wrapper for capturing into comp_fm_tag buffer.
-fn comp_fm_tag_capture(text: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) void {
+fn comp_fm_tag_capture(text: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyopaque) void {
     _ = comp_fm_tag_append(@ptrCast(@alignCast(userdata.?)), @ptrCast(text), size);
 }
 
@@ -790,7 +790,7 @@ fn code_meta_cleanup(r: *MD_HTML) void {
     }
 }
 
-const RawOutFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) callconv(.c) void;
+const RawOutFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) void;
 
 fn emit_json_str(out: RawOutFn, ud: ?*anyopaque, str: [*]const u8, size: c.MD_SIZE) void {
     var i: c.MD_SIZE = 0;
@@ -1334,7 +1334,7 @@ const MD4X_HEAL_BUF = struct {
     err: c_int,
 };
 
-fn md4x_heal_buf_append(text: [*c]const u8, size: c_uint, userdata: ?*anyopaque) callconv(.c) void {
+fn md4x_heal_buf_append(text: [*c]const u8, size: c_uint, userdata: ?*anyopaque) void {
     const buf: *MD4X_HEAL_BUF = @ptrCast(@alignCast(userdata.?));
     if (buf.err != 0) return;
     if (buf.size + size > buf.cap) {
@@ -1378,7 +1378,7 @@ fn buf_realloc(old_ptr: ?[*]u8, old_cap: c_uint, new_cap: c_uint) ?[*]u8 {
     }
 }
 
-pub export fn md_html_ex(
+pub fn md_html_ex(
     input: [*c]const c.MD_CHAR,
     input_size: c.MD_SIZE,
     process_output: ProcessOutputFn,
@@ -1386,7 +1386,7 @@ pub export fn md_html_ex(
     parser_flags: c_uint,
     renderer_flags: c_uint,
     opts: ?*const MD_HTML_OPTS,
-) callconv(.c) c_int {
+) c_int {
     var input_ptr = input;
     var size = input_size;
 
@@ -1447,14 +1447,14 @@ pub export fn md_html_ex(
     return ret;
 }
 
-pub export fn md_html(
+pub fn md_html(
     input: [*c]const c.MD_CHAR,
     input_size: c.MD_SIZE,
     process_output: ProcessOutputFn,
     userdata: ?*anyopaque,
     parser_flags: c_uint,
     renderer_flags: c_uint,
-) callconv(.c) c_int {
+) c_int {
     return md_html_ex(input, input_size, process_output, userdata, parser_flags, renderer_flags, null);
 }
 

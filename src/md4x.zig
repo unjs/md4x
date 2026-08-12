@@ -243,7 +243,7 @@ const md_process_normal_block_contents = process.md_process_normal_block_content
 //  Public entry point — the only non-static (exported) symbol of the parser.
 // ============================================================================
 
-pub export fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PARSER, userdata: ?*anyopaque) callconv(.c) c_int {
+pub fn md_parse(text: [*c]const CHAR, size: SZ, parser: [*c]const c.MD_PARSER, userdata: ?*anyopaque) c_int {
     // Production always uses the libc-backed c_allocator. The allocator is split
     // out into md_parse_impl so native OOM tests can inject a
     // std.testing.FailingAllocator and sweep the full parse for crash/leak

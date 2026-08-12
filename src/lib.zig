@@ -17,9 +17,11 @@
 //! Consumers that need a specific unit may also import it directly — the
 //! renderers import the parser and entity table that way.
 //!
-//! The definitions still carry `export` + `callconv(.c)`; removing that is
-//! Phase 4b. Keeping it here is harmless (one artifact, one definition of each
-//! symbol) and keeps this step's diff to the build graph and the import wiring.
+//! The entry points below are plain `pub fn` — no `export`, no `callconv(.c)`
+//! (Phase 4b). `export` + `callconv(.c)` survives only where there is a real
+//! C/JS boundary: the wasm exports (`md4x_to_html`, `md4x_alloc`, …), the napi
+//! module registration, the `MD_PARSER` SAX callbacks (Phase 4c retires those),
+//! and the `qsort`/`bsearch` comparators the ref-def code hands to libc.
 
 const parser = @import("md4x.zig");
 const entity = @import("entity.zig");

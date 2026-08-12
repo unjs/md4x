@@ -42,7 +42,7 @@ const napi_buf = struct {
     err: c_int,
 };
 
-fn napi_buf_append(text: [*c]const abi.MD_CHAR, size: abi.MD_SIZE, userdata: ?*anyopaque) callconv(.c) void {
+fn napi_buf_append(text: [*c]const abi.MD_CHAR, size: abi.MD_SIZE, userdata: ?*anyopaque) void {
     const buf: *napi_buf = @ptrCast(@alignCast(userdata.?));
     if (buf.err != 0) return;
     if (buf.size + size > buf.cap) {
@@ -65,11 +65,11 @@ fn napi_buf_append(text: [*c]const abi.MD_CHAR, size: abi.MD_SIZE, userdata: ?*a
 const md4x_render_fn = *const fn (
     [*c]const abi.MD_CHAR,
     abi.MD_SIZE,
-    ?*const fn ([*c]const abi.MD_CHAR, abi.MD_SIZE, ?*anyopaque) callconv(.c) void,
+    ?*const fn ([*c]const abi.MD_CHAR, abi.MD_SIZE, ?*anyopaque) void,
     ?*anyopaque,
     c_uint,
     c_uint,
-) callconv(.c) c_int;
+) c_int;
 
 fn render_impl(env: c.napi_env, info: c.napi_callback_info, fn_ptr: md4x_render_fn) c.napi_value {
     var argc: usize = 2;

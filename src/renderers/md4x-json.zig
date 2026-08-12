@@ -23,7 +23,7 @@ const sys = @cImport({
     @cInclude("yaml.h");
 });
 
-pub const ProcessOutputFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) callconv(.c) void;
+pub const ProcessOutputFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) void;
 
 // Streaming JSON writer (mirrors the C JSON_WRITER struct).
 pub const JsonWriter = struct {

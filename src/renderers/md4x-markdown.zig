@@ -45,7 +45,7 @@ const MD_MARKDOWN_FLAG_DEBUG: c_uint = 0x0001;
 const MD_MARKDOWN_FLAG_SKIP_UTF8_BOM: c_uint = 0x0002;
 const MD_MARKDOWN_FLAG_HEAL: c_uint = 0x0100;
 
-const ProcessOutputFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) callconv(.c) void;
+const ProcessOutputFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) void;
 
 const MD_MARKDOWN = struct {
     process_output: ProcessOutputFn,
@@ -742,7 +742,7 @@ const MD4X_HEAL_BUF = struct {
     err: c_int,
 };
 
-fn md4x_heal_buf_append(text: [*c]const u8, size: c_uint, userdata: ?*anyopaque) callconv(.c) void {
+fn md4x_heal_buf_append(text: [*c]const u8, size: c_uint, userdata: ?*anyopaque) void {
     const buf: *MD4X_HEAL_BUF = @ptrCast(@alignCast(userdata.?));
     if (buf.err != 0) return;
     if (buf.size + size > buf.cap) {
@@ -786,14 +786,14 @@ fn heal_buf_free(buf: *MD4X_HEAL_BUF) void {
     }
 }
 
-pub export fn md_markdown(
+pub fn md_markdown(
     input: [*c]const c.MD_CHAR,
     input_size: c.MD_SIZE,
     process_output: ProcessOutputFn,
     userdata: ?*anyopaque,
     parser_flags: c_uint,
     renderer_flags: c_uint,
-) callconv(.c) c_int {
+) c_int {
     var input_ptr = input;
     var size = input_size;
 

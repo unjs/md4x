@@ -97,7 +97,7 @@ var output_path: ?[:0]const u8 = null;
 // ---------------------------------------------------------------------------
 const MemBuffer = std.ArrayListUnmanaged(u8);
 
-fn process_output(text: [*c]const MD_CHAR, size: MD_SIZE, userdata: ?*anyopaque) callconv(.c) void {
+fn process_output(text: [*c]const MD_CHAR, size: MD_SIZE, userdata: ?*anyopaque) void {
     const buf: *MemBuffer = @ptrCast(@alignCast(userdata.?));
     buf.appendSlice(gpa, text[0..size]) catch {
         eprint("membuf_append: out of memory.\n", .{});

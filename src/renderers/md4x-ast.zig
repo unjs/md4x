@@ -48,7 +48,7 @@ const MD_AST_FLAG_HEAL: c_uint = 0x0100;
 
 const JSON_MAX_DEPTH: usize = 256;
 
-const ProcessOutputFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) callconv(.c) void;
+const ProcessOutputFn = ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) void;
 
 // ============================================================================
 // Shared JSON writer + YAML-to-JSON helpers (md4x-json.zig) and component
@@ -1249,7 +1249,7 @@ const MD4X_HEAL_BUF = struct {
     err: c_int,
 };
 
-fn md4xHealBufAppend(text: [*c]const u8, size: c_uint, userdata: ?*anyopaque) callconv(.c) void {
+fn md4xHealBufAppend(text: [*c]const u8, size: c_uint, userdata: ?*anyopaque) void {
     const buf: *MD4X_HEAL_BUF = @ptrCast(@alignCast(userdata.?));
     if (buf.err != 0) return;
     if (buf.size + size > buf.cap) {
@@ -1293,14 +1293,14 @@ fn healBufFree(buf: *MD4X_HEAL_BUF) void {
 // ***  Public API                    ***
 // **************************************
 
-pub export fn md_ast(
+pub fn md_ast(
     input: [*c]const c.MD_CHAR,
     input_size: c.MD_SIZE,
     process_output: ProcessOutputFn,
     userdata: ?*anyopaque,
     parser_flags: c_uint,
     renderer_flags: c_uint,
-) callconv(.c) c_int {
+) c_int {
     var input_ptr = input;
     var size = input_size;
 

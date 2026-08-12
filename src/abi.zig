@@ -222,11 +222,11 @@ pub const MD_DIALECT_ALL = (((((((((MD_FLAG_PERMISSIVEAUTOLINKS | MD_FLAG_TABLES
 // points themselves are Zig functions re-exported by lib.zig.
 // ---------------------------------------------------------------------------
 /// Output sink handed to every renderer entry point.
-pub const ProcessOutput = ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void;
+pub const ProcessOutput = ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) void;
 
 /// Output sink for `md_heal` (heal predates the MD_CHAR typedef and uses
 /// `const char*` / `unsigned` directly).
-pub const HealProcessOutput = ?*const fn ([*c]const u8, c_uint, ?*anyopaque) callconv(.c) void;
+pub const HealProcessOutput = ?*const fn ([*c]const u8, c_uint, ?*anyopaque) void;
 
 pub const MD_HTML_FLAG_DEBUG: c_uint = 0x0001;
 pub const MD_HTML_FLAG_VERBATIM_ENTITIES: c_uint = 0x0002;

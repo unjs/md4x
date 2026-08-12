@@ -105,23 +105,34 @@ Gotchas found, worth remembering:
 (spec.txt 652), 30 pathological, `zig build test` in ReleaseFast **and** Debug,
 `fuzz-zig` smoke, and 616 JS binding tests against freshly built wasm + napi.
 
-### 4b — De-extern `md_parse` + renderer entry points
+### 4b — De-extern `md_parse` + renderer entry points — ✅ DONE
 
-**Steps:**
+Landed. `md_parse`, `md_html`/`md_html_ex`, `md_ast`, `md_ansi`, `md_text`,
+`md_markdown`, `md_meta`, `md_heal`, and `entity_lookup` are plain `pub fn` —
+no `export`, no `callconv(.c)`. Step 3's optional part was taken: the
+`process_output` sink type lost `callconv(.c)` as well, along with every
+implementation of it (the CLI / wasm / napi sinks, the renderers' heal and
+capture sinks, the fuzz harness sinks). Those pointers only cross Zig-to-Zig
+boundaries now.
 
-1. Drop `export` + `callconv(.c)` from `md_parse`, `md_html`/`md_html_ex`,
-   `md_ast`, `md_ansi`, `md_text`, `md_markdown`, `md_meta`, `md_heal`,
-   `entity_lookup` → plain `pub fn`. Update `abi.zig` re-exports accordingly.
-2. Keep `export` + `callconv(.c)` **only** at the true edges: the wasm exports
-   (`md4x_to_html`, `md4x_alloc`, …) and the napi exports
-   (`napi_register_module_v1`, the registered callbacks). These are real C/JS
-   ABI boundaries and must stay.
-3. The internal `process_output` sink: today
-   `?*const fn([*c]const u8, MD_SIZE, ?*anyopaque) callconv(.c) void`. It may
-   become a Zig fn pointer internally; the wasm/napi/CLI sinks are Zig fns that
-   can keep `callconv(.c)` only if still handed to an edge.
+`export` + `callconv(.c)` survives in exactly four places, all real boundaries:
+the wasm exports, the napi module registration + registered callbacks, the
+`MD_PARSER` SAX callbacks (4c retires those), and the `qsort`/`bsearch`
+comparators `refdefs.zig` hands to libc (constraint #5 — glibc tie-break
+parity).
 
-**Risk:** low; output unchanged. **Gate:** full.
+Notes:
+
+- `src/entity.zig` is a generated file (constraint #3), so `entity_lookup` was
+  changed in **lockstep with its generator**, `scripts/_gen-entity-zig.py`. That
+  generator's input (`src/entity.c`) was deleted with the C ABI, so it can no
+  longer be re-run; a note to that effect was added to its docstring.
+- `md4x.zig`'s test-only `TestOut` harness type keeps `callconv(.c)`; it is
+  neither an entry point nor a sink, so it was left alone.
+
+**Gate: green.** Corpus diff-clean, all 16 spec/extension suites, 30
+pathological, `zig build test` in ReleaseFast **and** Debug, `fuzz-zig` smoke,
+616 JS binding tests against freshly built wasm + napi.
 
 ### 4c — Idiomatize the SAX interface (deep, highest-risk)
 

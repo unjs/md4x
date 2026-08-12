@@ -939,12 +939,12 @@ fn heal_comparison_operators(buf: *HEAL_BUF) void {
 // ***  Main heal function ***
 // ***************************
 
-pub export fn md_heal(
+pub fn md_heal(
     input: [*]const u8,
     input_size: c_uint,
-    process_output: *const fn ([*]const u8, c_uint, ?*anyopaque) callconv(.c) void,
+    process_output: *const fn ([*]const u8, c_uint, ?*anyopaque) void,
     userdata: ?*anyopaque,
-) callconv(.c) c_int {
+) c_int {
     var buf: HEAL_BUF = undefined;
 
     if (input_size == 0) {

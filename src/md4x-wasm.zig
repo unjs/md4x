@@ -53,7 +53,7 @@ const md4x_buf = struct {
     err: c_int,
 };
 
-fn buf_append(text: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) void {
+fn buf_append(text: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*anyopaque) void {
     const buf: *md4x_buf = @ptrCast(@alignCast(userdata.?));
     if (buf.err != 0) return;
     if (buf.size + size > buf.cap) {
@@ -97,11 +97,11 @@ export fn md4x_result_size() callconv(.c) c_uint {
 const md4x_render_fn = *const fn (
     [*c]const c.MD_CHAR,
     c.MD_SIZE,
-    ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) callconv(.c) void,
+    ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) void,
     ?*anyopaque,
     c_uint,
     c_uint,
-) callconv(.c) c_int;
+) c_int;
 
 fn render(fn_ptr: md4x_render_fn, input: [*c]const u8, input_size: c_uint, renderer_flags: c_uint) c_int {
     var buf = md4x_buf{ .data = null, .size = 0, .cap = 0, .err = 0 };

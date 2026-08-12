@@ -47,10 +47,10 @@ const max_input = 1 << 16;
 /// No-op renderer output sink. Matches the C `void(const MD_CHAR*, MD_SIZE, void*)`
 /// callback the renderers invoke; we discard output and fuzz only for crashes /
 /// safety-check trips, exactly like the C harnesses' `process_output`.
-fn sink(_: [*c]const c.MD_CHAR, _: c.MD_SIZE, _: ?*anyopaque) callconv(.c) void {}
+fn sink(_: [*c]const c.MD_CHAR, _: c.MD_SIZE, _: ?*anyopaque) void {}
 
 /// No-op heal output sink (heal uses `const char*, unsigned, void*`).
-fn healSink(_: [*c]const u8, _: c_uint, _: ?*anyopaque) callconv(.c) void {}
+fn healSink(_: [*c]const u8, _: c_uint, _: ?*anyopaque) void {}
 
 /// Gate inputs to valid, NUL-free UTF-8 — matching the C harnesses' `is_valid_utf8`
 /// and the JS binding surface (where input is always a valid UTF-8 string). This
@@ -63,10 +63,10 @@ fn accept(input: []const u8) bool {
     return std.unicode.utf8ValidateSlice(input);
 }
 
-/// Shared driver for the renderer harnesses. `render` is one of the C-ABI
-/// `md_*` entry points; all share the same signature.
+/// Shared driver for the renderer harnesses. `render` is one of the `md_*`
+/// entry points; all share the same signature.
 fn fuzzRenderer(
-    comptime render: fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) callconv(.c) void, ?*anyopaque, c_uint, c_uint) callconv(.c) c_int,
+    comptime render: fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*const fn ([*c]const c.MD_CHAR, c.MD_SIZE, ?*anyopaque) void, ?*anyopaque, c_uint, c_uint) c_int,
     smith: *std.testing.Smith,
 ) !void {
     @disableInstrumentation();
