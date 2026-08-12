@@ -50,25 +50,43 @@
   vendored libyaml.** Remaining `@cImport`: `node_api.h`, `stdio.h`,
   `string.h`, `yaml.h` — all external.
 
-**Net state after Phase 3:** the external C ABI _commitment_ is gone (no headers,
-no stable-symbol promise, Zig CLI, Zig-only consumers) with **zero observable
-output change**. What remains is purely _internal_: the parser, renderers, and
-entity table are still compiled as **separate static libs that communicate via
-C-ABI symbols** (`md_parse`, `md_html`, `entity_lookup`, … as `export` /
-`callconv(.c)`), and `abi.zig` still declares those cross-lib functions
-`extern`. The SAX interface still passes details as `?*anyopaque` into
-`extern struct`s. Idiomatizing that is Phase 4.
+- **Doc sync** (`f63f692`). `AGENTS.md` / `docs/*.md` / `CHANGELOG.md` brought
+  off the frozen-C-ABI framing. Details under "Doc sync" below.
+- **Phase 4a — one Zig module per artifact** (`4e3c8ef`). Details under 4a below.
+- **Phase 4b — de-extern the entry points + sink** (`8a131e3`). Details under 4b.
+- **Phase 4c step 1 — golden SAX event trace** (`f2a4813`). Details under 4c.
+
+**Net state now:** the external C ABI commitment is gone (no headers, no
+stable-symbol promise, Zig CLI, Zig-only consumers) **and** the internal C-ABI
+seam is gone too: everything is one Zig module graph per artifact, the entry
+points and the `process_output` sink are plain `pub fn`, and `abi.zig` is a pure
+types-only leaf. All with **zero observable output change**.
+
+What remains is the SAX interface itself: `MD_PARSER`'s five callbacks are still
+`callconv(.c) c_int` and still receive details as `?*anyopaque` pointing at
+`extern struct`s, whose `MD_ATTRIBUTE` substring tables are still `[*c]` arrays.
+Idiomatizing that is **Phase 4c steps 2-5** — the only substantive work left.
 
 ---
 
-## Remaining work — Phase 4: de-extern the internals (idiomatic Zig)
+## Phase 4: de-extern the internals (idiomatic Zig) — 4a ✅, 4b ✅, 4c step 1 ✅
 
 > **This is the large, engine-adjacent phase.** It "spends" the freedom Phases
 > 1–3 bought. Do it **incrementally and test-first**, gating every step against
-> the full verification gate (output must stay byte-identical). 4a/4b are
-> moderate and low output-risk; **4c is the deep, highest-risk step** — it
-> touches the block-analysis emission path that constraint #5 fences off and
-> rewrites ~35 renderer callbacks.
+> the full verification gate (output must stay byte-identical).
+>
+> **4a and 4b are done** (they were the moderate, low-output-risk half, and both
+> landed diff-clean). **4c steps 2–5 are all that is left, and they are the deep,
+> highest-risk step** — they touch the block-analysis emission path that
+> constraint #5 fences off and rewrite ~35 renderer callbacks.
+>
+> **4c cannot be split into smaller landable commits.** The parser constructs
+> the details and all seven renderers read them back through
+> `@ptrCast(?*anyopaque)`, so the representation change has to land across the
+> parser and every renderer at once or nothing compiles. Budget a session that
+> can carry the whole thing; do not start it expecting to stop halfway. If a
+> staged landing is wanted, the only real option is a temporary shim that
+> exposes both representations — decide that up front, not mid-flight.
 
 ### 4a — Collapse the static-lib graph into one Zig module per artifact — ✅ DONE
 
@@ -227,7 +245,7 @@ zig build test                                      # ReleaseFast (default)
 zig build test -Doptimize=Debug                     # undefined-fill + allocator length checks
 bun scripts/run-tests.ts                            # spec suites (CLI-driven)
 python3 test/pathological-tests.py -p zig-out/bin/md4x
-bash scripts/diff-corpus.sh > /tmp/md4x-now.sha     # diff vs /tmp/md4x-baseline.sha — MUST be empty
+bash scripts/diff-corpus.sh > "$SCRATCH/md4x-now.sha"   # diff vs the baseline — MUST be empty
 # Memory-touching changes also:
 zig build fuzz-zig                                  # ReleaseSafe smoke (the C/libFuzzer harnesses are gone)
 zig build wasm && bun vitest run packages/md4x/test/wasm.test.mjs
@@ -235,9 +253,19 @@ zig build napi-linux-x64 -Dnapi-include=node_modules/node-api-headers/include \
   && bun vitest run packages/md4x/test/napi.test.mjs
 ```
 
-Capture the baseline from the Phase-3 commit (`83abae9`) before starting:
-`bash scripts/diff-corpus.sh > /tmp/md4x-baseline.sha`. Any non-empty diff is a
-**stop-the-line** regression — bisect, fix or revert.
+Capture the baseline **before** starting, into a directory that survives the
+session (not `/tmp`, which does not survive a reboot):
+`bash scripts/diff-corpus.sh > "$SCRATCH/md4x-baseline.sha"` — 168 hashes.
+
+Every commit from `83abae9` onward is output-identical, so the baseline can be
+re-captured from **any** of them (build that commit, run `diff-corpus.sh`) if it
+is ever lost. Any non-empty diff is a **stop-the-line** regression — bisect, fix,
+or revert.
+
+For 4c specifically, the corpus is **not sufficient on its own**: it compares
+only each renderer's final bytes, so a detail-packaging change two renderers
+paper over can pass it. The golden SAX event trace in `zig build test` is the
+authoritative check for that step — treat a trace diff as stop-the-line too.
 
 ---
 
