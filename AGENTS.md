@@ -327,7 +327,7 @@ When adding a new block or span type with its own detail struct:
 2. Handle it in `jsonEnterBlock`/`jsonEnterSpan` (build the node). Every renderer's `switch (detail.*)` is exhaustive, so the compiler will list the sites that need an arm
 3. Handle it in `jsonWriteProps` (serialize props) — place **after** the `tag_is_dynamic` check
 4. If needed, handle it in `jsonSerializeNode` (special child rendering)
-5. Update all three renderers (HTML, AST, ANSI) and the CLI
+5. Update all six renderers (HTML, AST, ANSI, meta, text, markdown) and the CLI
 6. Add a test suite in `test/spec-*.txt` and update `scripts/run-tests.ts`
 7. Add JS binding tests in `packages/md4x/test/_suite.mjs`
 8. Rebuild WASM with `zig build wasm` and run `bun vitest run packages/md4x/test/wasm.test.mjs`

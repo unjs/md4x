@@ -16,7 +16,7 @@ Convenience library that wraps `md_parse()` and produces HTML output:
 pub fn md_html(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
-    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) void,
     userdata: ?*anyopaque,
     parser_flags: c_uint,
     renderer_flags: c_uint,
@@ -29,18 +29,18 @@ Extended API with full-HTML document generation:
 
 ```zig
 pub const MD_HTML_OPTS = extern struct {
-    title: [*c]const u8 = null,   // Document title override (null = use frontmatter)
-    css_url: [*c]const u8 = null, // CSS stylesheet URL (null = omit)
+    title: ?[*:0]const u8 = null,   // Document title override (null = use frontmatter)
+    css_url: ?[*:0]const u8 = null, // CSS stylesheet URL (null = omit)
 };
 
 pub fn md_html_ex(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
-    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) void,
     userdata: ?*anyopaque,
     parser_flags: c_uint,
     renderer_flags: c_uint,
-    opts: [*c]const MD_HTML_OPTS,
+    opts: ?*const MD_HTML_OPTS,
 ) c_int;
 ```
 
@@ -103,7 +103,7 @@ Renders Markdown into a Comark AST (array-based JSON format):
 pub fn md_ast(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
-    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) void,
     userdata: ?*anyopaque,
     parser_flags: c_uint,
     renderer_flags: c_uint,
@@ -129,7 +129,7 @@ Renders Markdown into ANSI terminal output with escape codes for styling:
 pub fn md_ansi(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
-    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) void,
     userdata: ?*anyopaque,
     parser_flags: c_uint,
     renderer_flags: c_uint,
@@ -193,7 +193,7 @@ Lightweight metadata extractor that parses frontmatter and headings from Markdow
 pub fn md_meta(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
-    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) void,
     userdata: ?*anyopaque,
     parser_flags: c_uint,
     renderer_flags: c_uint,
@@ -238,7 +238,7 @@ Strips markdown formatting and produces plain text output:
 pub fn md_text(
     input: [*c]const MD_CHAR,
     input_size: MD_SIZE,
-    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) void,
     userdata: ?*anyopaque,
     parser_flags: c_uint,
     renderer_flags: c_uint,
@@ -272,6 +272,59 @@ pub fn md_text(
 - Raw HTML: stripped (no output)
 - Uses streaming renderer pattern (like HTML renderer), no AST construction
 
+## Markdown Renderer API (`src/renderers/md4x-markdown.zig`)
+
+Re-renders the parsed document back to Markdown (normalizing the source syntax):
+
+```zig
+pub fn md_markdown(
+    input: [*c]const MD_CHAR,
+    input_size: MD_SIZE,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) void,
+    userdata: ?*anyopaque,
+    parser_flags: c_uint,
+    renderer_flags: c_uint,
+) c_int;
+```
+
+Backs the CLI's `--format=markdown`. Because it renders from the SAX stream and not
+from the source bytes, the output is normalized rather than round-tripped: setext
+headings become ATX, indented code becomes fenced, autolinks and wiki links become
+explicit `[text](url)` links, and anything with no Markdown spelling (raw HTML,
+component props) is dropped or emitted as a tag.
+
+### Renderer Flags (`MD_MARKDOWN_FLAG_*`)
+
+| Flag                             | Value    | Description                                                |
+| -------------------------------- | -------- | ---------------------------------------------------------- |
+| `MD_MARKDOWN_FLAG_DEBUG`         | `0x0001` | Send debug output from `md_parse()` to stderr              |
+| `MD_MARKDOWN_FLAG_SKIP_UTF8_BOM` | `0x0002` | Skip UTF-8 BOM at input start                              |
+| `MD_MARKDOWN_FLAG_HEAL`          | `0x0100` | Run `md_heal()` on the input first, then render the result |
+
+### Rendering Details
+
+- Headings: ATX only — `#` repeated up to 6 times plus a space (setext input is normalized to ATX)
+- Paragraphs: separated by a blank line
+- Lists: `- ` (unordered) or `N. ` (ordered, numbered from the list's `start`), 2-space indent per nesting level
+- Task lists: `- [x] ` / `- [ ] ` — the task marker takes precedence over the ordered-list number
+- Blockquotes: `> ` prefix, repeated per nesting level; every emitted line carries the current quote + list prefix
+- Alerts: rendered as a blockquote whose first line is `[!TYPE]`
+- Horizontal rules: `---`
+- Code blocks: always fenced (indented code included) — ` ``` `, or `~~~` when the source fence char was `~`; the full info string is re-emitted, including `[filename]` / `{1-3}` metadata
+- Inline: `*em*`, `**strong**`, `` `code` ``, `~~del~~`; underline has no Markdown spelling, so it is emitted as `<u>…</u>`
+- Links: `[text](href "title")` — the title is emitted only when present; images: `![alt](src "title")`
+- Autolinks are expanded to the explicit form (`<https://a.b>` → `[https://a.b](https://a.b)`)
+- Wiki links become regular links: `[[target]]` → `[target](target)`
+- LaTeX math: `$…$` and `$$…$$`
+- Tables: pipe tables (`| cell |`), with a delimiter row emitted after the header row using the recorded per-column alignment (`:---`, `:---:`, `---:`, or `---` for default); alignment is tracked for at most 128 columns
+- Hard breaks: `\` + newline; soft breaks: newline — both followed by the current indent
+- Frontmatter: dropped entirely (delimiters and content)
+- Raw HTML: stripped — HTML blocks, inline HTML, and comments alike
+- Block components: `<name>` / `</name>` on their own lines with a blank line before the content; a component title is emitted as `title="…"`. Inline components: `<name>…</name>`. Props/attributes (`{...}`) are not re-emitted
+- Slots (`template`) and attribute spans (`[text]{...}`) are transparent — children render normally
+- Entities are resolved to UTF-8 characters; NUL characters become U+FFFD
+- Uses streaming renderer pattern (like the HTML renderer), no AST construction
+
 ## Heal Utility API (`src/renderers/md4x-heal.zig`)
 
 Fixes incomplete/streaming Markdown text so it renders correctly mid-stream. This is a **pre-parser text transform** — it does not use `md_parse()` and has no parser dependency.
@@ -280,9 +333,9 @@ Inspired by [remend](https://github.com/vercel/streamdown/tree/main/packages/rem
 
 ```zig
 pub fn md_heal(
-    input: [*c]const u8,
+    input: [*]const u8,
     input_size: c_uint,
-    process_output: ?*const fn ([*c]const u8, c_uint, ?*anyopaque) callconv(.c) void,
+    process_output: *const fn ([*]const u8, c_uint, ?*anyopaque) void,
     userdata: ?*anyopaque,
 ) c_int;
 ```
