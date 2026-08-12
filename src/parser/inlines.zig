@@ -23,20 +23,7 @@ const MD_MARKSTACK = types.MD_MARKSTACK;
 const MD_INLINE_ATTR_INFO = types.MD_INLINE_ATTR_INFO;
 const c_allocator = types.c_allocator;
 const CODESPAN_MARK_MAXLEN = types.CODESPAN_MARK_MAXLEN;
-const MD_MARK_POTENTIAL_OPENER = types.MD_MARK_POTENTIAL_OPENER;
-const MD_MARK_POTENTIAL_CLOSER = types.MD_MARK_POTENTIAL_CLOSER;
-const MD_MARK_OPENER = types.MD_MARK_OPENER;
-const MD_MARK_CLOSER = types.MD_MARK_CLOSER;
-const MD_MARK_RESOLVED = types.MD_MARK_RESOLVED;
-const MD_MARK_EMPH_OC = types.MD_MARK_EMPH_OC;
-const MD_MARK_EMPH_MOD3_0 = types.MD_MARK_EMPH_MOD3_0;
-const MD_MARK_EMPH_MOD3_1 = types.MD_MARK_EMPH_MOD3_1;
-const MD_MARK_EMPH_MOD3_2 = types.MD_MARK_EMPH_MOD3_2;
-const MD_MARK_EMPH_MOD3_MASK = types.MD_MARK_EMPH_MOD3_MASK;
-const MD_MARK_AUTOLINK = types.MD_MARK_AUTOLINK;
-const MD_MARK_AUTOLINK_MISSING_MAILTO = types.MD_MARK_AUTOLINK_MISSING_MAILTO;
-const MD_MARK_VALIDPERMISSIVEAUTOLINK = types.MD_MARK_VALIDPERMISSIVEAUTOLINK;
-const MD_MARK_HASNESTEDBRACKETS = types.MD_MARK_HASNESTEDBRACKETS;
+const MarkFlags = types.MarkFlags;
 
 const ISANYOF_ = util.ISANYOF_;
 const ISWHITESPACE_ = util.ISWHITESPACE_;
@@ -243,12 +230,12 @@ pub fn md_emph_stack_index(ch: CHAR, flags: u8) usize {
         else => unreachable,
     };
 
-    if (flags & MD_MARK_EMPH_OC != 0) idx += 3;
+    if (flags & MarkFlags.emph_oc != 0) idx += 3;
 
-    switch (flags & MD_MARK_EMPH_MOD3_MASK) {
-        MD_MARK_EMPH_MOD3_0 => idx += 0,
-        MD_MARK_EMPH_MOD3_1 => idx += 1,
-        MD_MARK_EMPH_MOD3_2 => idx += 2,
+    switch (flags & MarkFlags.emph_mod3_mask) {
+        MarkFlags.emph_mod3_0 => idx += 0,
+        MarkFlags.emph_mod3_1 => idx += 1,
+        MarkFlags.emph_mod3_2 => idx += 2,
         else => unreachable,
     }
     return idx;
@@ -329,8 +316,8 @@ pub inline fn md_resolve_range(ctx: *MD_CTX, opener_index: c_int, closer_index: 
     const closer = &ctx.marks.items[@intCast(closer_index)];
     opener.next = closer_index;
     closer.prev = opener_index;
-    opener.flags |= MD_MARK_OPENER | MD_MARK_RESOLVED;
-    closer.flags |= MD_MARK_CLOSER | MD_MARK_RESOLVED;
+    opener.flags |= MarkFlags.opener | MarkFlags.resolved;
+    closer.flags |= MarkFlags.closer | MarkFlags.resolved;
 }
 
 pub const MD_ROLLBACK_CROSSING: c_int = 0;
@@ -476,11 +463,11 @@ pub fn md_is_code_span(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, opener: *
     opener.ch = '`';
     opener.beg = opener_beg;
     opener.end = opener_end;
-    opener.flags = MD_MARK_POTENTIAL_OPENER;
+    opener.flags = MarkFlags.potential_opener;
     closer.ch = '`';
     closer.beg = closer_beg;
     closer.end = closer_end;
-    closer.flags = MD_MARK_POTENTIAL_CLOSER;
+    closer.flags = MarkFlags.potential_closer;
     return true;
 }
 
@@ -541,7 +528,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
             // Backslash escape.
             if (ch == '\\' and off + 1 < ctx.size and (ctx.isPunct(off + 1) or ctx.isNewline(off + 1))) {
                 if (!ctx.isNewline(off + 1) or line_index + 1 < lines.len) {
-                    if (addMark(ctx, ch, off, off + 2, MD_MARK_RESOLVED) == null) {
+                    if (addMark(ctx, ch, off, off + 2, MarkFlags.resolved) == null) {
                         ret = -1;
                         return ret;
                     }
@@ -580,14 +567,14 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                 if (left_level != 0 or right_level != 0) {
                     var flags: u8 = 0;
 
-                    if (left_level > 0 and left_level >= right_level) flags |= MD_MARK_POTENTIAL_CLOSER;
-                    if (right_level > 0 and right_level >= left_level) flags |= MD_MARK_POTENTIAL_OPENER;
-                    if (flags == (MD_MARK_POTENTIAL_OPENER | MD_MARK_POTENTIAL_CLOSER)) flags |= MD_MARK_EMPH_OC;
+                    if (left_level > 0 and left_level >= right_level) flags |= MarkFlags.potential_closer;
+                    if (right_level > 0 and right_level >= left_level) flags |= MarkFlags.potential_opener;
+                    if (flags == (MarkFlags.potential_opener | MarkFlags.potential_closer)) flags |= MarkFlags.emph_oc;
 
                     switch ((tmp - off) % 3) {
-                        0 => flags |= MD_MARK_EMPH_MOD3_0,
-                        1 => flags |= MD_MARK_EMPH_MOD3_1,
-                        2 => flags |= MD_MARK_EMPH_MOD3_2,
+                        0 => flags |= MarkFlags.emph_mod3_0,
+                        1 => flags |= MarkFlags.emph_mod3_1,
+                        2 => flags |= MarkFlags.emph_mod3_2,
                         else => {},
                     }
 
@@ -640,7 +627,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
 
             // Potential entity start.
             if (ch == '&') {
-                if (addMark(ctx, ch, off, off + 1, MD_MARK_POTENTIAL_OPENER) == null) {
+                if (addMark(ctx, ch, off, off + 1, MarkFlags.potential_opener) == null) {
                     ret = -1;
                     return ret;
                 }
@@ -651,7 +638,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
             // Potential entity end.
             if (ch == ';') {
                 if (ctx.nMarks() > 0 and ctx.marks.items[@intCast(ctx.nMarks() - 1)].ch == '&') {
-                    if (addMark(ctx, ch, off, off + 1, MD_MARK_POTENTIAL_CLOSER) == null) {
+                    if (addMark(ctx, ch, off, off + 1, MarkFlags.potential_closer) == null) {
                         ret = -1;
                         return ret;
                     }
@@ -666,11 +653,11 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                     var html_end: OFF = undefined;
                     const is_html = md_is_html_any(ctx, line[0 .. lines.len - line_index], off, lines[lines.len - 1].end, &html_end);
                     if (is_html) {
-                        if (addMark(ctx, '<', off, off, MD_MARK_OPENER | MD_MARK_RESOLVED) == null) {
+                        if (addMark(ctx, '<', off, off, MarkFlags.opener | MarkFlags.resolved) == null) {
                             ret = -1;
                             return ret;
                         }
-                        if (addMark(ctx, '>', html_end, html_end, MD_MARK_CLOSER | MD_MARK_RESOLVED) == null) {
+                        if (addMark(ctx, '>', html_end, html_end, MarkFlags.closer | MarkFlags.resolved) == null) {
                             ret = -1;
                             return ret;
                         }
@@ -688,14 +675,14 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                 var missing_mailto: bool = undefined;
                 const is_autolink = md_is_autolink(ctx, off, lines[lines.len - 1].end, &autolink_end, &missing_mailto);
                 if (is_autolink) {
-                    var flags: u8 = MD_MARK_RESOLVED | MD_MARK_AUTOLINK;
-                    if (missing_mailto) flags |= MD_MARK_AUTOLINK_MISSING_MAILTO;
+                    var flags: u8 = MarkFlags.resolved | MarkFlags.autolink;
+                    if (missing_mailto) flags |= MarkFlags.autolink_missing_mailto;
 
-                    if (addMark(ctx, '<', off, off + 1, MD_MARK_OPENER | flags) == null) {
+                    if (addMark(ctx, '<', off, off + 1, MarkFlags.opener | flags) == null) {
                         ret = -1;
                         return ret;
                     }
-                    if (addMark(ctx, '>', autolink_end - 1, autolink_end, MD_MARK_CLOSER | flags) == null) {
+                    if (addMark(ctx, '>', autolink_end - 1, autolink_end, MarkFlags.closer | flags) == null) {
                         ret = -1;
                         return ret;
                     }
@@ -712,7 +699,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
             // Potential link or its part.
             if (ch == '[' or (ch == '!' and off + 1 < line.*.end and ctx.ch(off + 1) == '[')) {
                 const tmp: OFF = if (ch == '[') off + 1 else off + 2;
-                if (addMark(ctx, ch, off, tmp, MD_MARK_POTENTIAL_OPENER) == null) {
+                if (addMark(ctx, ch, off, tmp, MarkFlags.potential_opener) == null) {
                     ret = -1;
                     return ret;
                 }
@@ -728,7 +715,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                 continue :scan;
             }
             if (ch == ']') {
-                if (addMark(ctx, ch, off, off + 1, MD_MARK_POTENTIAL_CLOSER) == null) {
+                if (addMark(ctx, ch, off, off + 1, MarkFlags.potential_closer) == null) {
                     ret = -1;
                     return ret;
                 }
@@ -739,7 +726,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
             // Potential permissive e-mail autolink.
             if (ch == '@') {
                 if (line.*.beg + 1 <= off and ctx.isAlnum(off - 1) and off + 3 < line.*.end and ctx.isAlnum(off + 1)) {
-                    if (addMark(ctx, ch, off, off + 1, MD_MARK_POTENTIAL_OPENER) == null) {
+                    if (addMark(ctx, ch, off, off + 1, MarkFlags.potential_opener) == null) {
                         ret = -1;
                         return ret;
                     }
@@ -822,7 +809,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                             }
 
                             if (has_content != 0 and n_deferred_comp_closers < 16) {
-                                if (addMark(ctx, 'C', off, opener_end, MD_MARK_OPENER | MD_MARK_RESOLVED) == null) {
+                                if (addMark(ctx, 'C', off, opener_end, MarkFlags.opener | MarkFlags.resolved) == null) {
                                     ret = -1;
                                     return ret;
                                 }
@@ -844,7 +831,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                                 off = opener_end;
                                 continue :scan;
                             } else {
-                                if (addMark(ctx, 'C', off, opener_end, MD_MARK_OPENER | MD_MARK_RESOLVED) == null) {
+                                if (addMark(ctx, 'C', off, opener_end, MarkFlags.opener | MarkFlags.resolved) == null) {
                                     ret = -1;
                                     return ret;
                                 }
@@ -852,7 +839,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                                     ret = -1;
                                     return ret;
                                 }
-                                if (addMark(ctx, 'C', closer_beg, closer_end, MD_MARK_CLOSER | MD_MARK_RESOLVED) == null) {
+                                if (addMark(ctx, 'C', closer_beg, closer_end, MarkFlags.closer | MarkFlags.resolved) == null) {
                                     ret = -1;
                                     return ret;
                                 }
@@ -884,7 +871,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                         if (line.*.beg + scheme_size <= off and md_ascii_eq(ctx.str(off - scheme_size), scheme, scheme_size) and
                             off + 1 + suffix_size < line.*.end and md_ascii_eq(ctx.str(off + 1), suffix, suffix_size))
                         {
-                            if (addMark(ctx, ch, off - scheme_size, off + 1 + suffix_size, MD_MARK_POTENTIAL_OPENER) == null) {
+                            if (addMark(ctx, ch, off - scheme_size, off + 1 + suffix_size, MarkFlags.potential_opener) == null) {
                                 ret = -1;
                                 return ret;
                             }
@@ -907,7 +894,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                 if (line.*.beg + 3 <= off and md_ascii_eq(ctx.str(off - 3), "www", 3) and
                     (off - 3 == line.*.beg or ctx.isUnicodeWhitespaceBefore(off - 3) or ctx.isUnicodePunctBefore(off - 3)))
                 {
-                    if (addMark(ctx, ch, off - 3, off + 1, MD_MARK_POTENTIAL_OPENER) == null) {
+                    if (addMark(ctx, ch, off - 3, off + 1, MarkFlags.potential_opener) == null) {
                         ret = -1;
                         return ret;
                     }
@@ -938,11 +925,11 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                 while (tmp < line.*.end and ctx.ch(tmp) == ch) tmp += 1;
 
                 if (tmp - off <= 2) {
-                    var flags: u8 = MD_MARK_POTENTIAL_OPENER | MD_MARK_POTENTIAL_CLOSER;
+                    var flags: u8 = MarkFlags.potential_opener | MarkFlags.potential_closer;
                     if (off > line.*.beg and !ctx.isUnicodeWhitespaceBefore(off) and !ctx.isUnicodePunctBefore(off))
-                        flags &= ~MD_MARK_POTENTIAL_OPENER;
+                        flags &= ~MarkFlags.potential_opener;
                     if (tmp < line.*.end and !ctx.isUnicodeWhitespace(tmp) and !ctx.isUnicodePunct(tmp))
-                        flags &= ~MD_MARK_POTENTIAL_CLOSER;
+                        flags &= ~MarkFlags.potential_closer;
                     if (flags != 0) {
                         if (addMark(ctx, ch, off, tmp, flags) == null) {
                             ret = -1;
@@ -959,7 +946,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                 var tmp: OFF = off + 1;
                 while (tmp < line.*.end and ctx.isWhitespace(tmp)) tmp += 1;
                 if (tmp - off > 1 or ch != ' ') {
-                    if (addMark(ctx, ch, off, tmp, MD_MARK_RESOLVED) == null) {
+                    if (addMark(ctx, ch, off, tmp, MarkFlags.resolved) == null) {
                         ret = -1;
                         return ret;
                     }
@@ -970,7 +957,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
 
             // NULL character.
             if (ch == 0) {
-                if (addMark(ctx, ch, off, off + 1, MD_MARK_RESOLVED) == null) {
+                if (addMark(ctx, ch, off, off + 1, MarkFlags.resolved) == null) {
                     ret = -1;
                     return ret;
                 }
@@ -1024,7 +1011,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
             ctx.marks.items[@intCast(insert_pos)].beg = cbeg;
             ctx.marks.items[@intCast(insert_pos)].end = cend;
             ctx.marks.items[@intCast(insert_pos)].ch = 'C';
-            ctx.marks.items[@intCast(insert_pos)].flags = MD_MARK_CLOSER | MD_MARK_RESOLVED;
+            ctx.marks.items[@intCast(insert_pos)].flags = MarkFlags.closer | MarkFlags.resolved;
             ctx.marks.items[@intCast(insert_pos)].prev = -1;
             ctx.marks.items[@intCast(insert_pos)].next = -1;
 
@@ -1048,7 +1035,7 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
     }
 
     // Add a dummy mark at the end to simplify process_inlines().
-    if (addMark(ctx, 127, ctx.size, ctx.size, MD_MARK_RESOLVED) == null) {
+    if (addMark(ctx, 127, ctx.size, ctx.size, MarkFlags.resolved) == null) {
         ret = -1;
         return ret;
     }
@@ -1060,9 +1047,9 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
 pub fn md_analyze_bracket(ctx: *MD_CTX, mark_index: c_int) void {
     const mark = &ctx.marks.items[@intCast(mark_index)];
 
-    if (mark.flags & MD_MARK_POTENTIAL_OPENER != 0) {
+    if (mark.flags & MarkFlags.potential_opener != 0) {
         if (ctx.opener_stacks[BRACKET_OPENERS].top >= 0)
-            ctx.marks.items[@intCast(ctx.opener_stacks[BRACKET_OPENERS].top)].flags |= MD_MARK_HASNESTEDBRACKETS;
+            ctx.marks.items[@intCast(ctx.opener_stacks[BRACKET_OPENERS].top)].flags |= MarkFlags.has_nested_brackets;
         md_mark_stack_push(ctx, &ctx.opener_stacks[BRACKET_OPENERS], mark_index);
         return;
     }
@@ -1141,7 +1128,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 }
                 if (m.ch != 'D') {
                     if (m.beg - opener.end > 100) break;
-                    if (m.ch != 'D' and (m.flags & MD_MARK_OPENER != 0)) delim_index = m.next;
+                    if (m.ch != 'D' and (m.flags & MarkFlags.opener != 0)) delim_index = m.next;
                 }
                 delim_index += 1;
             }
@@ -1165,7 +1152,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                     if (delim.?.end < closer.beg) {
                         md_rollback(ctx, opener_index, delim_index, MD_ROLLBACK_ALL);
                         md_rollback(ctx, delim_index, closer_index, MD_ROLLBACK_CROSSING);
-                        delim.?.flags |= MD_MARK_RESOLVED;
+                        delim.?.flags |= MarkFlags.resolved;
                         opener.end = delim.?.beg;
                     } else {
                         md_rollback(ctx, opener_index, closer_index, MD_ROLLBACK_ALL);
@@ -1176,11 +1163,11 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
 
                 opener.beg = next_opener.?.beg;
                 opener.next = closer_index;
-                opener.flags |= MD_MARK_OPENER | MD_MARK_RESOLVED;
+                opener.flags |= MarkFlags.opener | MarkFlags.resolved;
 
                 closer.end = next_closer.?.end;
                 closer.prev = opener_index;
-                closer.flags |= MD_MARK_CLOSER | MD_MARK_RESOLVED;
+                closer.flags |= MarkFlags.closer | MarkFlags.resolved;
 
                 last_link_beg = opener.beg;
                 last_link_end = closer.end;
@@ -1196,11 +1183,11 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
         if (next_opener != null and next_opener.?.beg == closer.end) {
             if (next_closer.?.beg > closer.end + 1) {
                 // Might be full reference link.
-                if (next_opener.?.flags & MD_MARK_HASNESTEDBRACKETS == 0)
+                if (next_opener.?.flags & MarkFlags.has_nested_brackets == 0)
                     is_link = md_is_link_reference(ctx, lines, next_opener.?.beg, next_closer.?.end, &attr);
             } else {
                 // Might be shortcut reference link.
-                if (opener.flags & MD_MARK_HASNESTEDBRACKETS == 0)
+                if (opener.flags & MarkFlags.has_nested_brackets == 0)
                     is_link = md_is_link_reference(ctx, lines, opener.beg, closer.end, &attr);
             }
 
@@ -1222,7 +1209,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                     while (i < ctx.nMarks()) {
                         const m = &ctx.marks.items[@intCast(i)];
                         if (m.beg >= inline_link_end) break;
-                        if ((m.flags & (MD_MARK_OPENER | MD_MARK_RESOLVED)) == (MD_MARK_OPENER | MD_MARK_RESOLVED)) {
+                        if ((m.flags & (MarkFlags.opener | MarkFlags.resolved)) == (MarkFlags.opener | MarkFlags.resolved)) {
                             if (ctx.marks.items[@intCast(m.next)].beg >= inline_link_end) {
                                 if (attr.title_needs_free) std.c.free(attr.title);
                                 is_link = 0;
@@ -1242,7 +1229,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
 
             if (is_link == 0) {
                 // Might be collapsed reference link.
-                if (opener.flags & MD_MARK_HASNESTEDBRACKETS == 0)
+                if (opener.flags & MarkFlags.has_nested_brackets == 0)
                     is_link = md_is_link_reference(ctx, lines, opener.beg, closer.end, &attr);
                 if (is_link < 0) return -1;
             }
@@ -1268,8 +1255,8 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
         }
 
         if (is_link != 0) {
-            opener.flags |= MD_MARK_OPENER | MD_MARK_RESOLVED;
-            closer.flags |= MD_MARK_CLOSER | MD_MARK_RESOLVED;
+            opener.flags |= MarkFlags.opener | MarkFlags.resolved;
+            closer.flags |= MarkFlags.closer | MarkFlags.resolved;
 
             if (ctx.marks.items[@intCast(opener_index + 1)].ch == 'S') {
                 md_analyze_link_contents(ctx, lines, opener_index + 1, closer_index);
@@ -1303,16 +1290,16 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                     const first_nested = &ctx.marks.items[@intCast(first_nested_i)];
                     const last_nested = &ctx.marks.items[@intCast(last_nested_i)];
 
-                    if ((first_nested.flags & MD_MARK_RESOLVED != 0) and
+                    if ((first_nested.flags & MarkFlags.resolved != 0) and
                         first_nested.beg == opener.end and
                         ISANYOF_(first_nested.ch, "@:.") and
                         first_nested.next == last_nested_i and
                         last_nested.end == closer.beg)
                     {
                         first_nested.ch = 'D';
-                        first_nested.flags &= ~MD_MARK_RESOLVED;
+                        first_nested.flags &= ~MarkFlags.resolved;
                         last_nested.ch = 'D';
-                        last_nested.flags &= ~MD_MARK_RESOLVED;
+                        last_nested.flags &= ~MarkFlags.resolved;
                     }
                 }
             }
@@ -1342,7 +1329,7 @@ pub fn md_analyze_entity(ctx: *MD_CTX, mark_index: c_int) void {
 // md4x.c ~4005.
 pub fn md_analyze_table_cell_boundary(ctx: *MD_CTX, mark_index: c_int) void {
     const mark = &ctx.marks.items[@intCast(mark_index)];
-    mark.flags |= MD_MARK_RESOLVED;
+    mark.flags |= MarkFlags.resolved;
     mark.next = -1;
 
     if (ctx.table_cell_boundaries_head < 0)
@@ -1370,31 +1357,31 @@ pub fn md_split_emph_mark(ctx: *MD_CTX, mark_index: c_int, n: SZ) c_int {
 pub fn md_analyze_emph(ctx: *MD_CTX, mark_index: c_int) void {
     const mark = &ctx.marks.items[@intCast(mark_index)];
 
-    if (mark.flags & MD_MARK_POTENTIAL_CLOSER != 0) {
+    if (mark.flags & MarkFlags.potential_closer != 0) {
         var opener: ?*MD_MARK = null;
         var opener_index: c_int = 0;
         var opener_stacks: [6]*MD_MARKSTACK = undefined;
         var n_opener_stacks: usize = 0;
         const flags = mark.flags;
 
-        opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MD_MARK_EMPH_MOD3_0 | MD_MARK_EMPH_OC);
+        opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MarkFlags.emph_mod3_0 | MarkFlags.emph_oc);
         n_opener_stacks += 1;
-        if ((flags & MD_MARK_EMPH_MOD3_MASK) != MD_MARK_EMPH_MOD3_2) {
-            opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MD_MARK_EMPH_MOD3_1 | MD_MARK_EMPH_OC);
+        if ((flags & MarkFlags.emph_mod3_mask) != MarkFlags.emph_mod3_2) {
+            opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MarkFlags.emph_mod3_1 | MarkFlags.emph_oc);
             n_opener_stacks += 1;
         }
-        if ((flags & MD_MARK_EMPH_MOD3_MASK) != MD_MARK_EMPH_MOD3_1) {
-            opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MD_MARK_EMPH_MOD3_2 | MD_MARK_EMPH_OC);
+        if ((flags & MarkFlags.emph_mod3_mask) != MarkFlags.emph_mod3_1) {
+            opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MarkFlags.emph_mod3_2 | MarkFlags.emph_oc);
             n_opener_stacks += 1;
         }
-        opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MD_MARK_EMPH_MOD3_0);
+        opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MarkFlags.emph_mod3_0);
         n_opener_stacks += 1;
-        if ((flags & MD_MARK_EMPH_OC == 0) or (flags & MD_MARK_EMPH_MOD3_MASK) != MD_MARK_EMPH_MOD3_2) {
-            opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MD_MARK_EMPH_MOD3_1);
+        if ((flags & MarkFlags.emph_oc == 0) or (flags & MarkFlags.emph_mod3_mask) != MarkFlags.emph_mod3_2) {
+            opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MarkFlags.emph_mod3_1);
             n_opener_stacks += 1;
         }
-        if ((flags & MD_MARK_EMPH_OC == 0) or (flags & MD_MARK_EMPH_MOD3_MASK) != MD_MARK_EMPH_MOD3_1) {
-            opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MD_MARK_EMPH_MOD3_2);
+        if ((flags & MarkFlags.emph_oc == 0) or (flags & MarkFlags.emph_mod3_mask) != MarkFlags.emph_mod3_1) {
+            opener_stacks[n_opener_stacks] = md_emph_stack(ctx, mark.ch, MarkFlags.emph_mod3_2);
             n_opener_stacks += 1;
         }
 
@@ -1430,7 +1417,7 @@ pub fn md_analyze_emph(ctx: *MD_CTX, mark_index: c_int) void {
         }
     }
 
-    if (mark.flags & MD_MARK_POTENTIAL_OPENER != 0)
+    if (mark.flags & MarkFlags.potential_opener != 0)
         md_mark_stack_push(ctx, md_emph_stack(ctx, mark.ch, mark.flags), mark_index);
 }
 
@@ -1439,7 +1426,7 @@ pub fn md_analyze_tilde(ctx: *MD_CTX, mark_index: c_int) void {
     const mark = &ctx.marks.items[@intCast(mark_index)];
     const stack = md_opener_stack(ctx, mark_index);
 
-    if ((mark.flags & MD_MARK_POTENTIAL_CLOSER != 0) and stack.top >= 0) {
+    if ((mark.flags & MarkFlags.potential_closer != 0) and stack.top >= 0) {
         const opener_index = stack.top;
         _ = md_mark_stack_pop(ctx, stack);
         md_rollback(ctx, opener_index, mark_index, MD_ROLLBACK_CROSSING);
@@ -1447,7 +1434,7 @@ pub fn md_analyze_tilde(ctx: *MD_CTX, mark_index: c_int) void {
         return;
     }
 
-    if (mark.flags & MD_MARK_POTENTIAL_OPENER != 0)
+    if (mark.flags & MarkFlags.potential_opener != 0)
         md_mark_stack_push(ctx, stack, mark_index);
 }
 
@@ -1455,7 +1442,7 @@ pub fn md_analyze_tilde(ctx: *MD_CTX, mark_index: c_int) void {
 pub fn md_analyze_dollar(ctx: *MD_CTX, mark_index: c_int) void {
     const mark = &ctx.marks.items[@intCast(mark_index)];
 
-    if ((mark.flags & MD_MARK_POTENTIAL_CLOSER != 0) and ctx.opener_stacks[DOLLAR_OPENERS].top >= 0) {
+    if ((mark.flags & MarkFlags.potential_closer != 0) and ctx.opener_stacks[DOLLAR_OPENERS].top >= 0) {
         const opener = &ctx.marks.items[@intCast(ctx.opener_stacks[DOLLAR_OPENERS].top)];
         const opener_index = ctx.opener_stacks[DOLLAR_OPENERS].top;
         const closer = mark;
@@ -1470,7 +1457,7 @@ pub fn md_analyze_dollar(ctx: *MD_CTX, mark_index: c_int) void {
         }
     }
 
-    if (mark.flags & MD_MARK_POTENTIAL_OPENER != 0)
+    if (mark.flags & MarkFlags.potential_opener != 0)
         md_mark_stack_push(ctx, &ctx.opener_stacks[DOLLAR_OPENERS], mark_index);
 }
 
@@ -1479,7 +1466,7 @@ pub fn md_scan_left_for_resolved_mark(ctx: *MD_CTX, mark_from: [*c]MD_MARK, off:
     var mark = mark_from;
     while (@intFromPtr(mark) >= @intFromPtr(ctx.marks.items.ptr)) : (mark -= 1) {
         if (mark.*.ch == 'D' or mark.*.beg > off) continue;
-        if (mark.*.beg <= off and off < mark.*.end and (mark.*.flags & MD_MARK_RESOLVED != 0)) {
+        if (mark.*.beg <= off and off < mark.*.end and (mark.*.flags & MarkFlags.resolved != 0)) {
             if (p_cursor != null) p_cursor.?.* = mark;
             return mark;
         }
@@ -1495,7 +1482,7 @@ pub fn md_scan_right_for_resolved_mark(ctx: *MD_CTX, mark_from: [*c]MD_MARK, off
     const end_ptr = ctx.marks.items.ptr + @as(usize, @intCast(ctx.nMarks()));
     while (@intFromPtr(mark) < @intFromPtr(end_ptr)) : (mark += 1) {
         if (mark.*.ch == 'D' or mark.*.end <= off) continue;
-        if (mark.*.beg <= off and off < mark.*.end and (mark.*.flags & MD_MARK_RESOLVED != 0)) {
+        if (mark.*.beg <= off and off < mark.*.end and (mark.*.flags & MarkFlags.resolved != 0)) {
             if (p_cursor != null) p_cursor.?.* = mark;
             return mark;
         }
@@ -1553,7 +1540,7 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
         left_boundary_ok = true;
     } else if (ctx.isAnyOf(beg - 1, "*_~")) {
         const left_mark = md_scan_left_for_resolved_mark(ctx, left_cursor, beg - 1, &left_cursor);
-        if (left_mark != null and (left_mark.*.flags & MD_MARK_OPENER != 0)) left_boundary_ok = true;
+        if (left_mark != null and (left_mark.*.flags & MarkFlags.opener != 0)) left_boundary_ok = true;
     }
     if (!left_boundary_ok) return;
 
@@ -1604,7 +1591,7 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
         right_boundary_ok = true;
     } else {
         const right_mark = md_scan_right_for_resolved_mark(ctx, right_cursor, end, &right_cursor);
-        if (right_mark != null and (right_mark.*.flags & MD_MARK_CLOSER != 0)) right_boundary_ok = true;
+        if (right_mark != null and (right_mark.*.flags & MarkFlags.closer != 0)) right_boundary_ok = true;
     }
     if (!right_boundary_ok) return;
 
@@ -1626,8 +1613,8 @@ pub fn md_analyze_marks(ctx: *MD_CTX, lines: []const MD_LINE, mark_beg: c_int, m
     while (i < mark_end) {
         const mark = &ctx.marks.items[@intCast(i)];
 
-        if (mark.flags & MD_MARK_RESOLVED != 0) {
-            if ((mark.flags & MD_MARK_OPENER != 0) and mark.ch != 'C' and
+        if (mark.flags & MarkFlags.resolved != 0) {
+            if ((mark.flags & MarkFlags.opener != 0) and mark.ch != 'C' and
                 !((flags & MD_ANALYZE_NOSKIP_EMPH != 0) and ISANYOF_(mark.ch, "*_~")))
             {
                 i = mark.next + 1;
@@ -1658,8 +1645,8 @@ pub fn md_analyze_marks(ctx: *MD_CTX, lines: []const MD_LINE, mark_beg: c_int, m
             else => {},
         }
 
-        if (mark.flags & MD_MARK_RESOLVED != 0) {
-            if (mark.flags & MD_MARK_OPENER != 0)
+        if (mark.flags & MarkFlags.resolved != 0) {
+            if (mark.flags & MarkFlags.opener != 0)
                 last_end = ctx.marks.items[@intCast(mark.next)].end
             else
                 last_end = mark.end;
@@ -1706,8 +1693,8 @@ pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
     while (i < ctx.nMarks()) : (i += 1) {
         const mark = &ctx.marks.items[@intCast(i)];
 
-        if (mark.flags & MD_MARK_RESOLVED == 0) continue;
-        if (mark.flags & MD_MARK_CLOSER == 0) continue;
+        if (mark.flags & MarkFlags.resolved == 0) continue;
+        if (mark.flags & MarkFlags.closer == 0) continue;
         if (mark.ch == 'C') continue;
         if (mark.ch == 'D') continue;
         if (mark.ch != '*' and mark.ch != '_' and mark.ch != '`' and mark.ch != '~' and mark.ch != ']') continue;
@@ -1947,7 +1934,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
     var ret: c_int = 0;
 
     mark = ctx.marks.items.ptr;
-    while (mark.*.flags & MD_MARK_RESOLVED == 0) mark += 1;
+    while (mark.*.flags & MarkFlags.resolved == 0) mark += 1;
 
     text_type = c.TextType.normal;
 
@@ -1978,13 +1965,13 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 '`' => {
                     var raw_a: [*c]const CHAR = null;
                     var raw_a_sz: SZ = 0;
-                    if (mark.*.flags & MD_MARK_OPENER != 0)
+                    if (mark.*.flags & MarkFlags.opener != 0)
                         _ = md_find_inline_attr(ctx, mark.*.next, &raw_a, &raw_a_sz, null)
                     else
                         _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks.items.ptr)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, null);
 
                     const det: c.SpanDetail = .{ .code = attrsDetail(raw_a, raw_a_sz) };
-                    if (mark.*.flags & MD_MARK_OPENER != 0) {
+                    if (mark.*.flags & MarkFlags.opener != 0) {
                         ret = mdEnterSpan(ctx, &det);
                         if (ret != 0) return ret;
                         text_type = c.TextType.code;
@@ -1999,7 +1986,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                     if (ctx.parser.flags & c.MD_FLAG_UNDERLINE != 0) {
                         var raw_a: [*c]const CHAR = null;
                         var raw_a_sz: SZ = 0;
-                        if (mark.*.flags & MD_MARK_OPENER != 0)
+                        if (mark.*.flags & MarkFlags.opener != 0)
                             _ = md_find_inline_attr(ctx, mark.*.next, &raw_a, &raw_a_sz, null)
                         else
                             _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks.items.ptr)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, &attr_skip_to);
@@ -2008,7 +1995,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                         // trailing {attrs}; the rest get a bare detail.
                         const det_attrs: c.SpanDetail = .{ .u = attrsDetail(raw_a, raw_a_sz) };
                         const det_bare: c.SpanDetail = .{ .u = .{} };
-                        if (mark.*.flags & MD_MARK_OPENER != 0) {
+                        if (mark.*.flags & MarkFlags.opener != 0) {
                             var first: c_int = 1;
                             while (off < mark.*.end) {
                                 ret = mdEnterSpan(ctx, if (first != 0 and raw_a != null) &det_attrs else &det_bare);
@@ -2041,13 +2028,13 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 '~' => {
                     var raw_a: [*c]const CHAR = null;
                     var raw_a_sz: SZ = 0;
-                    if (mark.*.flags & MD_MARK_OPENER != 0)
+                    if (mark.*.flags & MarkFlags.opener != 0)
                         _ = md_find_inline_attr(ctx, mark.*.next, &raw_a, &raw_a_sz, null)
                     else
                         _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks.items.ptr)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, null);
 
                     const det: c.SpanDetail = .{ .del = attrsDetail(raw_a, raw_a_sz) };
-                    if (mark.*.flags & MD_MARK_OPENER != 0) {
+                    if (mark.*.flags & MarkFlags.opener != 0) {
                         ret = mdEnterSpan(ctx, &det);
                     } else {
                         ret = mdLeaveSpan(ctx, &det);
@@ -2058,7 +2045,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 '$' => {
                     const math_inline: c.SpanDetail = .{ .latexmath = {} };
                     const math_display: c.SpanDetail = .{ .latexmath_display = {} };
-                    if (mark.*.flags & MD_MARK_OPENER != 0) {
+                    if (mark.*.flags & MarkFlags.opener != 0) {
                         ret = mdEnterSpan(ctx, if ((mark.*.end - off) % 2 != 0) &math_inline else &math_display);
                         if (ret != 0) return ret;
                         text_type = c.TextType.latexmath;
@@ -2119,9 +2106,9 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 },
 
                 '<', '>' => {
-                    if (mark.*.flags & MD_MARK_AUTOLINK == 0) {
+                    if (mark.*.flags & MarkFlags.autolink == 0) {
                         // Raw HTML.
-                        if (mark.*.flags & MD_MARK_OPENER != 0)
+                        if (mark.*.flags & MarkFlags.opener != 0)
                             text_type = c.TextType.html
                         else
                             text_type = c.TextType.normal;
@@ -2142,7 +2129,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 },
 
                 'C' => {
-                    const opener: [*c]MD_MARK = if (mark.*.flags & MD_MARK_OPENER != 0) mark else &ctx.marks.items[@intCast(mark.*.prev)];
+                    const opener: [*c]MD_MARK = if (mark.*.flags & MarkFlags.opener != 0) mark else &ctx.marks.items[@intCast(mark.*.prev)];
                     const closer: [*c]MD_MARK = &ctx.marks.items[@intCast(opener.*.next)];
                     const props_mark: [*c]MD_MARK = opener + 1;
                     const tag_str = ctx.str(opener.*.beg + 1);
@@ -2158,7 +2145,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                         raw_props_size = props_mark.*.end - props_mark.*.beg;
                     }
 
-                    if (mark.*.flags & MD_MARK_OPENER != 0) {
+                    if (mark.*.flags & MarkFlags.opener != 0) {
                         ret = md_enter_leave_span_component(ctx, true, tag_str, tag_size, raw_props, raw_props_size);
                         if (ret != 0) return ret;
                         if (opener.*.end == closer.*.beg) {
@@ -2191,7 +2178,7 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
             }
 
             mark += 1;
-            while ((mark.*.flags & MD_MARK_RESOLVED == 0) or mark.*.beg < off) mark += 1;
+            while ((mark.*.flags & MarkFlags.resolved == 0) or mark.*.beg < off) mark += 1;
         }
 
         if (off >= line.*.end) {
@@ -2248,7 +2235,7 @@ pub fn emitEmphasis(ctx: *MD_CTX, mark: [*c]MD_MARK, off_p: *OFF, attr_skip_to: 
     var ret: c_int = 0;
     var raw_a: [*c]const CHAR = null;
     var raw_a_sz: SZ = 0;
-    if (mark.*.flags & MD_MARK_OPENER != 0)
+    if (mark.*.flags & MarkFlags.opener != 0)
         _ = md_find_inline_attr(ctx, mark.*.next, &raw_a, &raw_a_sz, null)
     else
         _ = md_find_inline_attr(ctx, @intCast((@intFromPtr(mark) - @intFromPtr(ctx.marks.items.ptr)) / @sizeOf(MD_MARK)), &raw_a, &raw_a_sz, attr_skip_to);
@@ -2262,7 +2249,7 @@ pub fn emitEmphasis(ctx: *MD_CTX, mark: [*c]MD_MARK, off_p: *OFF, attr_skip_to: 
     const strong_bare: c.SpanDetail = .{ .strong = .{} };
 
     var off = off_p.*;
-    if (mark.*.flags & MD_MARK_OPENER != 0) {
+    if (mark.*.flags & MarkFlags.opener != 0) {
         var first: c_int = 1;
         if ((mark.*.end - off) % 2 != 0) {
             ret = mdEnterSpan(ctx, if (first != 0 and raw_a != null) &em_attrs else &em_bare);
@@ -2313,17 +2300,17 @@ pub fn emitEmphasis(ctx: *MD_CTX, mark: [*c]MD_MARK, off_p: *OFF, attr_skip_to: 
 // fallthrough case). md4x.c ~5038.
 pub fn emitPermissiveAutolink(ctx: *MD_CTX, mark: [*c]MD_MARK, off: OFF) c_int {
     var ret: c_int = 0;
-    const opener: [*c]MD_MARK = if (mark.*.flags & MD_MARK_OPENER != 0) mark else &ctx.marks.items[@intCast(mark.*.prev)];
+    const opener: [*c]MD_MARK = if (mark.*.flags & MarkFlags.opener != 0) mark else &ctx.marks.items[@intCast(mark.*.prev)];
     const closer: [*c]MD_MARK = &ctx.marks.items[@intCast(opener.*.next)];
     var dest: [*c]const CHAR = ctx.str(opener.*.end);
     var dest_size: SZ = closer.*.beg - opener.*.end;
     _ = off;
 
-    if (mark.*.flags & MD_MARK_OPENER != 0)
-        closer.*.flags |= MD_MARK_VALIDPERMISSIVEAUTOLINK;
+    if (mark.*.flags & MarkFlags.opener != 0)
+        closer.*.flags |= MarkFlags.valid_permissive_autolink;
 
     if (opener.*.ch == '@' or opener.*.ch == '.' or
-        (opener.*.ch == '<' and (opener.*.flags & MD_MARK_AUTOLINK_MISSING_MAILTO != 0)))
+        (opener.*.ch == '<' and (opener.*.flags & MarkFlags.autolink_missing_mailto != 0)))
     {
         dest_size += 7;
         if (md_temp_buffer(ctx, dest_size * @sizeOf(CHAR)) != 0) return -1;
@@ -2333,7 +2320,7 @@ pub fn emitPermissiveAutolink(ctx: *MD_CTX, mark: [*c]MD_MARK, off: OFF) c_int {
         dest = ctx.buffer;
     }
 
-    if (closer.*.flags & MD_MARK_VALIDPERMISSIVEAUTOLINK != 0)
-        ret = md_enter_leave_span_a(ctx, mark.*.flags & MD_MARK_OPENER != 0, c.SpanType.a, dest, dest_size, true, null, 0);
+    if (closer.*.flags & MarkFlags.valid_permissive_autolink != 0)
+        ret = md_enter_leave_span_a(ctx, mark.*.flags & MarkFlags.opener != 0, c.SpanType.a, dest, dest_size, true, null, 0);
     return ret;
 }

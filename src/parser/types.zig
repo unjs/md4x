@@ -157,23 +157,35 @@ pub const MD_MARK = extern struct {
     flags: u8 = 0,
 };
 
-// Mark flags (apply to ALL mark types). Verbatim from md4x.c ~2591.
-pub const MD_MARK_POTENTIAL_OPENER: u8 = 0x01; // Maybe opener.
-pub const MD_MARK_POTENTIAL_CLOSER: u8 = 0x02; // Maybe closer.
-pub const MD_MARK_OPENER: u8 = 0x04; // Definitely opener.
-pub const MD_MARK_CLOSER: u8 = 0x08; // Definitely closer.
-pub const MD_MARK_RESOLVED: u8 = 0x10; // Resolved in any definite way.
+// Mark flag bits for `MD_MARK.flags`, namespaced the way `abi.BlockType` /
+// `abi.SpanType` group the type codes. Values are verbatim from md4x.c ~2591
+// and are frozen.
+//
+// This is a namespace of `u8` bit constants rather than a `packed struct(u8)`
+// on purpose: the upper bits are DELIBERATELY OVERLOADED per mark type — bit
+// 0x20 is `emph_oc` on an emphasis mark, `autolink` on '<'/'>',
+// `valid_permissive_autolink` on a permissive autolink and
+// `has_nested_brackets` on '[', and bit 0x40 is both `emph_mod3_0` and
+// `autolink_missing_mailto`. A packed struct cannot express that aliasing.
+pub const MarkFlags = struct {
+    // Flags that apply to ALL mark types.
+    pub const potential_opener: u8 = 0x01; // Maybe opener.
+    pub const potential_closer: u8 = 0x02; // Maybe closer.
+    pub const opener: u8 = 0x04; // Definitely opener.
+    pub const closer: u8 = 0x08; // Definitely closer.
+    pub const resolved: u8 = 0x10; // Resolved in any definite way.
 
-// Mark flags specific for various mark types (they share bits).
-pub const MD_MARK_EMPH_OC: u8 = 0x20; // Opener/closer mixed candidate ("rule of 3").
-pub const MD_MARK_EMPH_MOD3_0: u8 = 0x40;
-pub const MD_MARK_EMPH_MOD3_1: u8 = 0x80;
-pub const MD_MARK_EMPH_MOD3_2: u8 = (0x40 | 0x80);
-pub const MD_MARK_EMPH_MOD3_MASK: u8 = (0x40 | 0x80);
-pub const MD_MARK_AUTOLINK: u8 = 0x20; // Distinguisher for '<', '>'.
-pub const MD_MARK_AUTOLINK_MISSING_MAILTO: u8 = 0x40;
-pub const MD_MARK_VALIDPERMISSIVEAUTOLINK: u8 = 0x20; // For permissive autolinks.
-pub const MD_MARK_HASNESTEDBRACKETS: u8 = 0x20; // For '[' to rule out invalid labels early.
+    // Flags specific for various mark types (they share bits).
+    pub const emph_oc: u8 = 0x20; // Opener/closer mixed candidate ("rule of 3").
+    pub const emph_mod3_0: u8 = 0x40;
+    pub const emph_mod3_1: u8 = 0x80;
+    pub const emph_mod3_2: u8 = (0x40 | 0x80);
+    pub const emph_mod3_mask: u8 = (0x40 | 0x80);
+    pub const autolink: u8 = 0x20; // Distinguisher for '<', '>'.
+    pub const autolink_missing_mailto: u8 = 0x40;
+    pub const valid_permissive_autolink: u8 = 0x20; // For permissive autolinks.
+    pub const has_nested_brackets: u8 = 0x20; // For '[' to rule out invalid labels early.
+};
 
 pub const CODESPAN_MARK_MAXLEN: usize = 32;
 
