@@ -1,5 +1,16 @@
 # C → Zig Progressive Migration
 
+> **🗄️ HISTORICAL — this migration is COMPLETE and this document is an archived
+> log. Do not treat it as current guidance.** It describes the C→Zig port as it
+> happened, when the public `.h` headers and a frozen C ABI were still an
+> invariant (see the "Invariants" list below). Both were subsequently **dropped**
+> — MD4X is now a Zig library with no external C ABI. For the current
+> architecture see `AGENTS.md`; for the remaining work see `PLAN.md`.
+>
+> Step 8 ("shared utils props.h / json.h") was completed differently than
+> planned: the helpers became the Zig modules `md4x-props.zig` / `md4x-json.zig`
+> and the headers were deleted with the rest of the C ABI.
+
 Goal: progressively migrate MD4X source from C to Zig for safety (and where possible speed),
 without ever breaking the full original test suite. One unit at a time; each unit is verified
 for byte-parity, then independently validated for memory-safety/bugs by a background agent.

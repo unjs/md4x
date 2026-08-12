@@ -12,7 +12,7 @@
 > output of every renderer (`md_html`/`md_ast`/`md_ansi`/`md_meta`/`md_text`/
 > `md_markdown`/`md_heal`), the CLI's stdout for every format/flag, the
 > wasm/napi exported function set + the Comark AST JSON shape consumed by the JS
-> package. The *internal* calling convention is no longer frozen — idiomatizing
+> package. The _internal_ calling convention is no longer frozen — idiomatizing
 > it is the point.
 >
 > All work happens on **`feat/zig-port`**, committed per phase.
@@ -35,7 +35,7 @@
 - **Phase 2 — Zig CLI** (`c6a02e1`). `src/cli/md4x-cli.c` + `cmdline.c` replaced
   by `src/cli/md4x-cli.zig`: imports `abi`, declares the renderer entry points
   `extern`, faithfully reproduces the option parser (`-o/-t/-f/-s/-h/-v/--heal/
-  --html-title/--html-css/--replay-fuzz`, `--stat` timing, full-html opts, fuzz
+--html-title/--html-css/--replay-fuzz`, `--stat` timing, full-html opts, fuzz
   replay). File I/O via a thin libc binding; argv via `std.process.Init`;
   version injected from `build.zig.zon` via a build-options module.
 - **Phase 3 — drop the C scaffolding** (`83abae9`). Deleted **all** md4x-owned
@@ -50,9 +50,9 @@
   vendored libyaml.** Remaining `@cImport`: `node_api.h`, `stdio.h`,
   `string.h`, `yaml.h` — all external.
 
-**Net state after Phase 3:** the external C ABI *commitment* is gone (no headers,
+**Net state after Phase 3:** the external C ABI _commitment_ is gone (no headers,
 no stable-symbol promise, Zig CLI, Zig-only consumers) with **zero observable
-output change**. What remains is purely *internal*: the parser, renderers, and
+output change**. What remains is purely _internal_: the parser, renderers, and
 entity table are still compiled as **separate static libs that communicate via
 C-ABI symbols** (`md_parse`, `md_html`, `entity_lookup`, … as `export` /
 `callconv(.c)`), and `abi.zig` still declares those cross-lib functions
@@ -79,9 +79,10 @@ single-module pattern (it `@import`s the parser + every renderer + entity into
 one module and works).
 
 **Steps:**
+
 1. Decide the aggregation shape. Option A (recommended): an `md4x.zig`-level
    library root that `@import`s the parser + renderers + entity and re-exports
-   their entry points, so each artifact imports *one* module. Option B: each
+   their entry points, so each artifact imports _one_ module. Option B: each
    artifact imports the pieces it needs directly (what fuzz.zig does).
 2. In `build.zig`, stop building/​linking `addParserLib` / `addEntityLib` /
    `addZigRenderer` as separate static libs for the CLI/wasm/napi; instead add
@@ -102,6 +103,7 @@ napi + fuzz-zig.
 ### 4b — De-extern `md_parse` + renderer entry points
 
 **Steps:**
+
 1. Drop `export` + `callconv(.c)` from `md_parse`, `md_html`/`md_html_ex`,
    `md_ast`, `md_ansi`, `md_text`, `md_markdown`, `md_meta`, `md_heal`,
    `entity_lookup` → plain `pub fn`. Update `abi.zig` re-exports accordingly.
@@ -124,6 +126,7 @@ path **and all 7 renderers (5 callbacks each ≈ 35 implementations)**, with
 byte-identical output.
 
 **Steps (test-first):**
+
 1. **Strengthen the abort/OOM matrix first.** The abort-code contract is md4c
    parity: a NEGATIVE callback code is propagated verbatim, a POSITIVE one
    returns 0 (pinned by the abort-matrix native test in `md4x.zig`). OOM and a
@@ -158,6 +161,7 @@ Debug and ReleaseFast.
 ### Folded-in cleanups (do alongside 4c where natural)
 
 These earlier deferred items become free once the internals are Zig-native:
+
 - **§8.2 OOM/abort result type** — see 4c step 3.
 - **`TRUE`/`FALSE` → `bool`** where genuinely two-state (tri-state recognizers
   excepted).
@@ -175,20 +179,19 @@ These earlier deferred items become free once the internals are Zig-native:
    stdout per format/flag, and the wasm/napi/Comark-AST JS surface.
 2. **Edge ABI stays C:** the wasm exported function set and the napi module
    registration are real boundaries — keep `export`/`callconv(.c)` there.
-   (The *internal* convention is now free — that is the goal.)
+   (The _internal_ convention is now free — that is the goal.)
 3. **Generated files off-limits** — `unicode_tables.zig`, `entity.zig` (change
    the generator if output must change; it shouldn't).
 4. **No Debug-vs-Release behavior**; no `unreachable` on adversarial-reachable
    paths (prefer defensive guards).
 5. **Do not touch engine logic** — the mark-resolution/emphasis mod-3 engine
    (`inlines.zig`) and the block-analysis state machine (`blocks.zig`/
-   `process.zig`): in 4c, change detail *packaging* at the emission boundary
+   `process.zig`): in 4c, change detail _packaging_ at the emission boundary
    only, never the logic or ordering. Leave the `qsort`/`bsearch`/`memcmp`
    libc externs (glibc tie-break parity).
-6. **Keep docs in sync** — `AGENTS.md` / `docs/*.md` / `CHANGELOG.md`. **These
-   are currently STALE after Phases 1–3** (they still describe a frozen C ABI,
-   `.h` headers, and a C CLI). Updating them is the immediate next task
-   regardless of Phase 4 (see below).
+6. **Keep docs in sync** — `AGENTS.md` / `docs/*.md` / `CHANGELOG.md`. The
+   post-Phase-3 doc sync is **done** (see "Doc sync" below); keep them current
+   as Phase 4 lands.
 
 ## Verification gate (run after every change)
 
@@ -213,16 +216,33 @@ Capture the baseline from the Phase-3 commit (`83abae9`) before starting:
 
 ---
 
-## Immediate next task (independent of Phase 4): doc sync
+## Doc sync (independent of Phase 4) — ✅ DONE
 
-Phases 1–3 are committed but `AGENTS.md` / `docs/*.md` / `CHANGELOG.md` still
-describe the old C-ABI architecture (frozen `.h`, C ABI "preserved unchanged",
-C CLI driver, C/libFuzzer harnesses, `lib/include` outputs). Update them to the
-Zig-library-only reality:
-- Architecture/Structure: no `.h` headers; `src/abi.zig` is the ABI types
-  module; CLI is `src/cli/md4x-cli.zig`; entry points are Zig.
-- Building: no installed static libs / headers (only `bin/md4x` + wasm/napi).
-- Fuzzing: C/libFuzzer harnesses removed; `zig build fuzz-zig` is the harness.
-- CHANGELOG: a user-facing entry for "dropped the C ABI / public headers /
-  static-lib + header outputs / C CLI / C fuzzers".
-- Drop or rewrite the "C ABI frozen" framing throughout (it's now inverted).
+`AGENTS.md` / `docs/*.md` / `CHANGELOG.md` were stale after Phases 1–3 (they
+still described a frozen C ABI, `.h` headers, a C CLI, and the C/libFuzzer
+harnesses). Now updated to the Zig-library-only reality:
+
+- `AGENTS.md`: no `.h` headers in the structure tree; `src/abi.zig` documented
+  as the ABI types module; CLI is `src/cli/md4x-cli.zig`; build section states
+  only `bin/md4x` is installed and that the static libs are an _internal_ seam
+  Phase 4a collapses; the C/libFuzzer harness section removed; the memory-safety
+  and "adding new block/span types" checklists retargeted at the Zig sources;
+  the CLI option table corrected (`markdown` format, `--heal`, `--replay-fuzz`).
+- `docs/parser-api.md`: retitled to `src/abi.zig`, signatures/structs converted
+  to Zig; the stale `MD_BLOCK_CODE_DETAIL` gained its missing `filename`/`meta`/
+  `highlights` fields; the abort-code contract documented.
+- `docs/renderers.md`: section titles point at the `.zig` sources, signatures
+  converted to Zig, AST-renderer architecture note rewritten for the flat
+  `Detail` struct + arena.
+- `docs/js-bindings.md`: "the C renderer" → "the AST renderer".
+- `docs/zig-migration.md` / `docs/parser-port.md`: archived-log banners (they
+  are historical records of a completed port; not rewritten).
+- `CHANGELOG.md`: a **Breaking Changes** entry for dropping the C ABI / public
+  headers / static-lib + header install outputs / the C CLI / the C fuzzers,
+  plus a corrected internal entry for `src/abi.zig`.
+
+**Known doc gaps, not caused by the C-ABI drop (left alone):**
+`docs/renderers.md` has no section for the **markdown** renderer (`md_markdown`)
+even though it ships and has a CLI format. `CHANGELOG.md`'s WIP heading says
+`v0.0.18` while the last tag is `v0.0.25` — a release-process question, not a
+doc-sync one.

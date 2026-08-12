@@ -1,5 +1,13 @@
 # Parser Port (`src/md4x.c` → `src/md4x.zig`) — multi-pass handoff
 
+> **🗄️ HISTORICAL — this port is COMPLETE and this document is an archived
+> handoff log. Do not treat it as current guidance.** It was written while
+> `src/md4x.c` still existed and the `md4x.h` C ABI was the frozen contract.
+> `md4x.c` is gone, the headers are gone, and `@cImport("md4x.h")` has been
+> replaced by `@import("abi")` (`src/abi.zig`). The parser has since been split
+> out of the monolithic `md4x.zig` into `src/parser/*.zig`. For the current
+> architecture see `AGENTS.md`; for the remaining work see `PLAN.md`.
+
 Goal: port the 8047-LoC C parser to `src/md4x.zig`, byte-for-byte identical, exporting the
 exact `md4x.h` C ABI (`int md_parse(const MD_CHAR*, MD_SIZE, const MD_PARSER*, void*)` — the ONLY
 non-static symbol). Done across SEVERAL agent passes that each extend `md4x.zig` and verify the

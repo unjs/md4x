@@ -1,32 +1,45 @@
-# Parser API (`md4x.h`)
+# Parser API (`src/abi.zig`)
+
+> **There is no public C ABI.** MD4X is a Zig library; `src/abi.zig` is the single
+> source of truth for the shared `MD_*` types, enums, flags, and `MD_PARSER`.
+> The declarations below are a verbatim transcription of the former `md4x.h`
+> (via `zig translate-c`), so field names, order, and layout are unchanged from
+> the original C implementation — Phase 4c of `PLAN.md` idiomatizes them.
 
 Core function:
 
-```c
-int md_parse(const MD_CHAR* text, MD_SIZE size, const MD_PARSER* parser, void* userdata);
+```zig
+pub extern fn md_parse(
+    text: [*c]const MD_CHAR,
+    size: MD_SIZE,
+    parser: [*c]const MD_PARSER,
+    userdata: ?*anyopaque,
+) c_int;
 ```
 
 Returns `0` on success, `-1` on runtime error (e.g. memory failure), or the non-zero return value of any callback that aborted parsing.
 
-`MD_CHAR` is `char` by default, or `WCHAR` when `MD4X_USE_UTF16` is defined on Windows.
+`MD_CHAR` is `u8`; `MD_SIZE` and `MD_OFFSET` are `c_uint`. UTF-8 is the only supported encoding (the `MD4X_USE_ASCII` / `MD4X_USE_UTF16` build variants were dropped with the C sources).
 
 The `MD_PARSER` struct holds callbacks and flags:
 
-```c
-typedef struct MD_PARSER {
-    unsigned abi_version;   // Reserved, set to 0
-    unsigned flags;         // Bitmask of MD_FLAG_xxxx values
-    int (*enter_block)(MD_BLOCKTYPE, void* detail, void* userdata);
-    int (*leave_block)(MD_BLOCKTYPE, void* detail, void* userdata);
-    int (*enter_span)(MD_SPANTYPE, void* detail, void* userdata);
-    int (*leave_span)(MD_SPANTYPE, void* detail, void* userdata);
-    int (*text)(MD_TEXTTYPE, const MD_CHAR*, MD_SIZE, void* userdata);
-    void (*debug_log)(const char* msg, void* userdata);  // Optional (NULL ok)
-    void (*syntax)(void);   // Reserved, set to NULL
-} MD_PARSER;
+```zig
+pub const MD_PARSER = extern struct {
+    abi_version: c_uint = 0,   // Reserved, set to 0
+    flags: c_uint = 0,         // Bitmask of MD_FLAG_xxxx values
+    enter_block: ?*const fn (MD_BLOCKTYPE, ?*anyopaque, ?*anyopaque) callconv(.c) c_int = null,
+    leave_block: ?*const fn (MD_BLOCKTYPE, ?*anyopaque, ?*anyopaque) callconv(.c) c_int = null,
+    enter_span: ?*const fn (MD_SPANTYPE, ?*anyopaque, ?*anyopaque) callconv(.c) c_int = null,
+    leave_span: ?*const fn (MD_SPANTYPE, ?*anyopaque, ?*anyopaque) callconv(.c) c_int = null,
+    text: ?*const fn (MD_TEXTTYPE, [*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) c_int = null,
+    debug_log: ?*const fn ([*c]const u8, ?*anyopaque) callconv(.c) void = null,  // Optional
+    syntax: ?*const fn () callconv(.c) void = null,   // Reserved, set to null
+};
 ```
 
-`MD_RENDERER` is a deprecated typedef alias for `MD_PARSER` (backward compat).
+`MD_RENDERER` is a deprecated alias for `MD_PARSER`.
+
+The `?*anyopaque` detail argument points at the matching `MD_*_DETAIL` struct for the block/span type (or is `null` where the table below says "—").
 
 ## Architecture
 
@@ -35,6 +48,8 @@ typedef struct MD_PARSER {
 - Callbacks are invoked in nested order (block > span > text)
 - Strings passed to callbacks are **not** null-terminated — always use the size parameter
 - Any callback may abort parsing by returning non-zero
+
+**Abort-code contract:** `md_parse` propagates a **negative** callback code verbatim, but returns `0` for a **positive** one (md4c parity). OOM and a callback returning `-1` are intentionally unified as `-1` in the emission path. This is pinned by the abort-matrix native test in `src/md4x.zig` (`zig build test`) — do not change it.
 
 **Linear time guarantee** — Protections against pathological inputs:
 
@@ -63,15 +78,7 @@ leave_block(MD_BLOCK_DOC)
 
 ## Encoding
 
-MD4X assumes ASCII-compatible encoding. Preprocessor macros:
-
-| Macro            | Effect                                                 |
-| ---------------- | ------------------------------------------------------ |
-| _(default)_      | UTF-8 support enabled (since v0.4.3, UTF-8 is default) |
-| `MD4X_USE_ASCII` | Force ASCII-only mode                                  |
-| `MD4X_USE_UTF16` | Windows UTF-16 via `WCHAR` (Windows only)              |
-
-Unicode matters for: word boundary classification (emphasis), case-insensitive link reference matching (case-folding), entity translation (left to renderer).
+MD4X assumes UTF-8. Unicode matters for: word boundary classification (emphasis), case-insensitive link reference matching (case-folding), entity translation (left to renderer). The tables live in the generated `src/unicode_tables.zig` (Unicode 15.1).
 
 ## Block Types (`MD_BLOCKTYPE`)
 
@@ -102,16 +109,16 @@ Unicode matters for: word boundary classification (emphasis), case-insensitive l
 
 | Type                        | HTML             | Detail struct                    |
 | --------------------------- | ---------------- | -------------------------------- |
-| `MD_SPAN_EM`                | `<em>`           | `MD_SPAN_ATTRS_DETAIL` or `NULL` |
-| `MD_SPAN_STRONG`            | `<strong>`       | `MD_SPAN_ATTRS_DETAIL` or `NULL` |
+| `MD_SPAN_EM`                | `<em>`           | `MD_SPAN_ATTRS_DETAIL` or `null` |
+| `MD_SPAN_STRONG`            | `<strong>`       | `MD_SPAN_ATTRS_DETAIL` or `null` |
 | `MD_SPAN_A`                 | `<a>`            | `MD_SPAN_A_DETAIL`               |
 | `MD_SPAN_IMG`               | `<img>`          | `MD_SPAN_IMG_DETAIL`             |
-| `MD_SPAN_CODE`              | `<code>`         | `MD_SPAN_ATTRS_DETAIL` or `NULL` |
-| `MD_SPAN_DEL`               | `<del>`          | `MD_SPAN_ATTRS_DETAIL` or `NULL` |
+| `MD_SPAN_CODE`              | `<code>`         | `MD_SPAN_ATTRS_DETAIL` or `null` |
+| `MD_SPAN_DEL`               | `<del>`          | `MD_SPAN_ATTRS_DETAIL` or `null` |
 | `MD_SPAN_LATEXMATH`         | _(inline math)_  | —                                |
 | `MD_SPAN_LATEXMATH_DISPLAY` | _(display math)_ | —                                |
 | `MD_SPAN_WIKILINK`          | _(wiki link)_    | `MD_SPAN_WIKILINK_DETAIL`        |
-| `MD_SPAN_U`                 | `<u>`            | `MD_SPAN_ATTRS_DETAIL` or `NULL` |
+| `MD_SPAN_U`                 | `<u>`            | `MD_SPAN_ATTRS_DETAIL` or `null` |
 | `MD_SPAN_COMPONENT`         | _(dynamic tag)_  | `MD_SPAN_COMPONENT_DETAIL`       |
 | `MD_SPAN_SPAN`              | `<span>`         | `MD_SPAN_SPAN_DETAIL`            |
 
@@ -130,108 +137,115 @@ Unicode matters for: word boundary classification (emphasis), case-insensitive l
 
 ## Detail Structs
 
-```c
-typedef struct MD_BLOCK_UL_DETAIL {
-    int is_tight;       /* Non-zero if tight list, zero if loose */
-    MD_CHAR mark;       /* Bullet character: '-', '+', '*' */
-} MD_BLOCK_UL_DETAIL;
+All are `extern struct` in `src/abi.zig` (field defaults omitted here for brevity).
 
-typedef struct MD_BLOCK_OL_DETAIL {
-    unsigned start;         /* Start index of ordered list */
-    int is_tight;           /* Non-zero if tight list, zero if loose */
-    MD_CHAR mark_delimiter; /* '.' or ')' */
-} MD_BLOCK_OL_DETAIL;
+```zig
+pub const MD_BLOCK_UL_DETAIL = extern struct {
+    is_tight: c_int,        // Non-zero if tight list, zero if loose
+    mark: MD_CHAR,          // Bullet character: '-', '+', '*'
+};
 
-typedef struct MD_BLOCK_LI_DETAIL {
-    int is_task;                /* Non-zero only with MD_FLAG_TASKLISTS */
-    MD_CHAR task_mark;          /* 'x', 'X', or ' ' (if is_task) */
-    MD_OFFSET task_mark_offset; /* Offset of char between '[' and ']' */
-} MD_BLOCK_LI_DETAIL;
+pub const MD_BLOCK_OL_DETAIL = extern struct {
+    start: c_uint,          // Start index of ordered list
+    is_tight: c_int,        // Non-zero if tight list, zero if loose
+    mark_delimiter: MD_CHAR, // '.' or ')'
+};
 
-typedef struct MD_BLOCK_H_DETAIL {
-    unsigned level;     /* Header level (1-6) */
-} MD_BLOCK_H_DETAIL;
+pub const MD_BLOCK_LI_DETAIL = extern struct {
+    is_task: c_int,             // Non-zero only with MD_FLAG_TASKLISTS
+    task_mark: MD_CHAR,         // 'x', 'X', or ' ' (if is_task)
+    task_mark_offset: MD_OFFSET, // Offset of char between '[' and ']'
+};
 
-typedef struct MD_BLOCK_CODE_DETAIL {
-    MD_ATTRIBUTE info;      /* Full info string */
-    MD_ATTRIBUTE lang;      /* First word of info string (language) */
-    MD_CHAR fence_char;     /* Fence character, or zero for indented code */
-} MD_BLOCK_CODE_DETAIL;
+pub const MD_BLOCK_H_DETAIL = extern struct {
+    level: c_uint,          // Header level (1-6)
+};
 
-typedef struct MD_BLOCK_TABLE_DETAIL {
-    unsigned col_count;         /* Number of columns */
-    unsigned head_row_count;    /* Header rows (currently always 1) */
-    unsigned body_row_count;    /* Body rows */
-} MD_BLOCK_TABLE_DETAIL;
+pub const MD_BLOCK_CODE_DETAIL = extern struct {
+    info: MD_ATTRIBUTE,     // Full info string
+    lang: MD_ATTRIBUTE,     // First word of info string (language)
+    fence_char: MD_CHAR,    // Fence character, or zero for indented code
+    filename: MD_ATTRIBUTE, // `[filename]` from the info string
+    meta: [*c]const MD_CHAR,   // Raw metadata remainder, or null
+    meta_size: MD_SIZE,
+    highlights: [*c]const c_uint, // Line numbers from `{1-3,5}`, or null
+    highlight_count: c_uint,      // Length of `highlights` (no capacity field)
+};
 
-typedef struct MD_BLOCK_TD_DETAIL {
-    MD_ALIGN align;     /* MD_ALIGN_DEFAULT, _LEFT, _CENTER, or _RIGHT */
-} MD_BLOCK_TD_DETAIL;
+pub const MD_BLOCK_TABLE_DETAIL = extern struct {
+    col_count: c_uint,      // Number of columns
+    head_row_count: c_uint, // Header rows (currently always 1)
+    body_row_count: c_uint, // Body rows
+};
 
-typedef struct MD_SPAN_ATTRS_DETAIL {
-    const MD_CHAR* raw_attrs;       /* Raw attrs from trailing {...}, or NULL. Not null-terminated */
-    MD_SIZE raw_attrs_size;         /* Size of raw_attrs */
-} MD_SPAN_ATTRS_DETAIL;
+pub const MD_BLOCK_TD_DETAIL = extern struct {
+    @"align": MD_ALIGN,     // MD_ALIGN_DEFAULT, _LEFT, _CENTER, or _RIGHT
+};
 
-/* Note: fields up to raw_attrs_size are binary-compatible with MD_SPAN_IMG_DETAIL. */
-typedef struct MD_SPAN_A_DETAIL {
-    MD_ATTRIBUTE href;
-    MD_ATTRIBUTE title;
-    const MD_CHAR* raw_attrs;       /* Raw attrs from trailing {...}, or NULL */
-    MD_SIZE raw_attrs_size;         /* Size of raw_attrs */
-    int is_autolink;                /* Non-zero if autolink */
-} MD_SPAN_A_DETAIL;
+pub const MD_SPAN_ATTRS_DETAIL = extern struct {
+    raw_attrs: [*c]const MD_CHAR, // Raw attrs from trailing {...}, or null. Not NUL-terminated
+    raw_attrs_size: MD_SIZE,
+};
 
-typedef struct MD_SPAN_IMG_DETAIL {
-    MD_ATTRIBUTE src;
-    MD_ATTRIBUTE title;
-    const MD_CHAR* raw_attrs;       /* Raw attrs from trailing {...}, or NULL */
-    MD_SIZE raw_attrs_size;         /* Size of raw_attrs */
-} MD_SPAN_IMG_DETAIL;
+// Fields up to raw_attrs_size are layout-compatible with MD_SPAN_IMG_DETAIL.
+pub const MD_SPAN_A_DETAIL = extern struct {
+    href: MD_ATTRIBUTE,
+    title: MD_ATTRIBUTE,
+    raw_attrs: [*c]const MD_CHAR,
+    raw_attrs_size: MD_SIZE,
+    is_autolink: c_int,     // Non-zero if autolink
+};
 
-typedef struct MD_SPAN_SPAN_DETAIL {
-    const MD_CHAR* raw_attrs;       /* Raw attrs string from {...}. Not null-terminated */
-    MD_SIZE raw_attrs_size;         /* Size of raw_attrs */
-} MD_SPAN_SPAN_DETAIL;
+pub const MD_SPAN_IMG_DETAIL = extern struct {
+    src: MD_ATTRIBUTE,
+    title: MD_ATTRIBUTE,
+    raw_attrs: [*c]const MD_CHAR,
+    raw_attrs_size: MD_SIZE,
+};
 
-typedef struct MD_SPAN_WIKILINK_DETAIL {
-    MD_ATTRIBUTE target;
-} MD_SPAN_WIKILINK_DETAIL;
+pub const MD_SPAN_SPAN_DETAIL = extern struct {
+    raw_attrs: [*c]const MD_CHAR, // Raw attrs from {...}. Not NUL-terminated
+    raw_attrs_size: MD_SIZE,
+};
 
-typedef struct MD_SPAN_COMPONENT_DETAIL {
-    MD_ATTRIBUTE tag_name;          /* Component name (e.g. "badge", "icon-star") */
-    const MD_CHAR* raw_props;       /* Raw props string from {...}, or NULL. Not null-terminated */
-    MD_SIZE raw_props_size;         /* Size of raw_props */
-} MD_SPAN_COMPONENT_DETAIL;
+pub const MD_SPAN_WIKILINK_DETAIL = extern struct {
+    target: MD_ATTRIBUTE,
+};
 
-typedef struct MD_BLOCK_COMPONENT_DETAIL {
-    MD_ATTRIBUTE tag_name;          /* Component name (e.g. "alert", "card") */
-    const MD_CHAR* raw_props;       /* Raw props string from {...}, or NULL. Not null-terminated */
-    MD_SIZE raw_props_size;         /* Size of raw_props */
-    const MD_CHAR* title;           /* Title text after name (e.g. "STOP" in :::danger STOP), or NULL */
-    MD_SIZE title_size;             /* Size of title */
-} MD_BLOCK_COMPONENT_DETAIL;
+pub const MD_SPAN_COMPONENT_DETAIL = extern struct {
+    tag_name: MD_ATTRIBUTE,      // Component name (e.g. "badge", "icon-star")
+    raw_props: [*c]const MD_CHAR, // Raw props from {...}, or null. Not NUL-terminated
+    raw_props_size: MD_SIZE,
+};
 
-typedef struct MD_BLOCK_TEMPLATE_DETAIL {
-    MD_ATTRIBUTE name;              /* Slot name (e.g. "header", "footer") */
-} MD_BLOCK_TEMPLATE_DETAIL;
+pub const MD_BLOCK_COMPONENT_DETAIL = extern struct {
+    tag_name: MD_ATTRIBUTE,      // Component name (e.g. "alert", "card")
+    raw_props: [*c]const MD_CHAR, // Raw props from {...}, or null
+    raw_props_size: MD_SIZE,
+    title: [*c]const MD_CHAR,    // Title after name (e.g. "STOP" in :::danger STOP), or null
+    title_size: MD_SIZE,
+};
 
-typedef struct MD_BLOCK_ALERT_DETAIL {
-    MD_ATTRIBUTE type_name;         /* Alert type (e.g. "NOTE", "WARNING") */
-} MD_BLOCK_ALERT_DETAIL;
+pub const MD_BLOCK_TEMPLATE_DETAIL = extern struct {
+    name: MD_ATTRIBUTE,     // Slot name (e.g. "header", "footer")
+};
+
+pub const MD_BLOCK_ALERT_DETAIL = extern struct {
+    type_name: MD_ATTRIBUTE, // Alert type (e.g. "NOTE", "WARNING")
+};
 ```
 
 ## `MD_ATTRIBUTE`
 
 String attribute for non-text-flow content (titles, URLs, etc.) that may contain mixed substrings (normal text + entities):
 
-```c
-typedef struct MD_ATTRIBUTE {
-    const MD_CHAR* text;
-    MD_SIZE size;
-    const MD_TEXTTYPE* substr_types;    /* Array of substring types */
-    const MD_OFFSET* substr_offsets;    /* Array of substring offsets */
-} MD_ATTRIBUTE;
+```zig
+pub const MD_ATTRIBUTE = extern struct {
+    text: [*c]const MD_CHAR,
+    size: MD_SIZE,
+    substr_types: [*c]const MD_TEXTTYPE,   // Array of substring types
+    substr_offsets: [*c]const MD_OFFSET,   // Array of substring offsets
+};
 ```
 
 Invariants: `substr_offsets[0] == 0`, `substr_offsets[LAST+1] == size`. Only `MD_TEXT_NORMAL`, `MD_TEXT_ENTITY`, and `MD_TEXT_NULLCHAR` substrings appear.

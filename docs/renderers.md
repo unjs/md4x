@@ -1,32 +1,42 @@
 # Renderers
 
-## HTML Renderer API (`md4x-html.h`)
+## HTML Renderer API (`src/renderers/md4x-html.zig`)
 
 Convenience library that wraps `md_parse()` and produces HTML output:
 
-```c
-int md_html(const MD_CHAR* input, MD_SIZE input_size,
-            void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
-            void* userdata, unsigned parser_flags, unsigned renderer_flags);
+```zig
+pub extern fn md_html(
+    input: [*c]const MD_CHAR,
+    input_size: MD_SIZE,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    userdata: ?*anyopaque,
+    parser_flags: c_uint,
+    renderer_flags: c_uint,
+) c_int;
 ```
 
 Only `<body>` contents are generated. Frontmatter blocks are suppressed from output.
 
 Extended API with full-HTML document generation:
 
-```c
-typedef struct MD_HTML_OPTS {
-    const char* title;      /* Document title override (NULL = use frontmatter) */
-    const char* css_url;    /* CSS stylesheet URL (NULL = omit) */
-} MD_HTML_OPTS;
+```zig
+pub const MD_HTML_OPTS = extern struct {
+    title: [*c]const u8 = null,   // Document title override (null = use frontmatter)
+    css_url: [*c]const u8 = null, // CSS stylesheet URL (null = omit)
+};
 
-int md_html_ex(const MD_CHAR* input, MD_SIZE input_size,
-               void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
-               void* userdata, unsigned parser_flags, unsigned renderer_flags,
-               const MD_HTML_OPTS* opts);
+pub extern fn md_html_ex(
+    input: [*c]const MD_CHAR,
+    input_size: MD_SIZE,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    userdata: ?*anyopaque,
+    parser_flags: c_uint,
+    renderer_flags: c_uint,
+    opts: [*c]const MD_HTML_OPTS,
+) c_int;
 ```
 
-When `MD_HTML_FLAG_FULL_HTML` is set, `md_html_ex()` generates a complete HTML document (`<!DOCTYPE html>`, `<head>`, `<body>`). If YAML frontmatter exists, `title` and `description` fields are used in `<head>`. The `opts->title` overrides the frontmatter title. `opts` may be NULL.
+When `MD_HTML_FLAG_FULL_HTML` is set, `md_html_ex()` generates a complete HTML document (`<!DOCTYPE html>`, `<head>`, `<body>`). If YAML frontmatter exists, `title` and `description` fields are used in `<head>`. `opts.title` overrides the frontmatter title. `opts` may be null.
 
 ### Renderer Flags (`MD_HTML_FLAG_*`)
 
@@ -47,25 +57,25 @@ When `MD_HTML_FLAG_FULL_HTML` is set, `md_html_ex()` generates a complete HTML d
 - URL attributes are percent-encoded; HTML content is entity-escaped
 - Alerts render as `<blockquote class="alert alert-{type}">` (type lowercased in class)
 
-## Shared Property Parser (`md4x-props.h`)
+## Shared Property Parser (`src/renderers/md4x-props.zig`)
 
-Header-only utility for parsing component property strings (`{key="value" bool #id .class :bind='json'}`). Used by both JSON and HTML renderers.
+Zig module for parsing component property strings (`{key="value" bool #id .class :bind='json'}`). Imported by every renderer that handles props.
 
-```c
-#include "md4x-props.h"
+```zig
+const props = @import("md4x-props.zig");
 
-MD_PARSED_PROPS parsed;
-md_parse_props(raw, size, &parsed);
+var parsed: props.MD_PARSED_PROPS = undefined;
+props.md_parse_props(raw, size, &parsed);
 ```
 
 **Parsed output (`MD_PARSED_PROPS`):**
 
-| Field                     | Type                         | Description                                    |
-| ------------------------- | ---------------------------- | ---------------------------------------------- |
-| `props[32]`               | `MD_PROP[]`                  | Parsed props (key/value pairs, booleans, bind) |
-| `n_props`                 | `int`                        | Number of parsed props                         |
-| `id` / `id_size`          | `const MD_CHAR*` / `MD_SIZE` | `#id` shorthand (last wins)                    |
-| `class_buf` / `class_len` | `MD_CHAR[512]` / `MD_SIZE`   | Merged `.class` values (space-separated)       |
+| Field                     | Type                            | Description                                    |
+| ------------------------- | ------------------------------- | ---------------------------------------------- |
+| `props[32]`               | `[32]MD_PROP`                   | Parsed props (key/value pairs, booleans, bind) |
+| `n_props`                 | `c_int`                         | Number of parsed props                         |
+| `id` / `id_size`          | `[*c]const MD_CHAR` / `MD_SIZE` | `#id` shorthand (last wins)                    |
+| `class_buf` / `class_len` | `[512]MD_CHAR` / `MD_SIZE`      | Merged `.class` values (space-separated)       |
 
 **Prop types (`MD_PROP_TYPE`):**
 
@@ -77,19 +87,24 @@ md_parse_props(raw, size, &parsed);
 
 All `key`/`value` pointers are zero-copy references into the original raw string (not null-terminated — use `*_size` fields).
 
-## AST Renderer API (`md4x-ast.h`)
+## AST Renderer API (`src/renderers/md4x-ast.zig`)
 
 Renders Markdown into a Comark AST (array-based JSON format):
 
-```c
-int md_ast(const MD_CHAR* input, MD_SIZE input_size,
-            void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
-            void* userdata, unsigned parser_flags, unsigned renderer_flags);
+```zig
+pub extern fn md_ast(
+    input: [*c]const MD_CHAR,
+    input_size: MD_SIZE,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    userdata: ?*anyopaque,
+    parser_flags: c_uint,
+    renderer_flags: c_uint,
+) c_int;
 ```
 
 Produces `{"nodes":[...],"frontmatter":{...},"meta":{}}` where each node is either a plain JSON string (text) or a tuple array `["tag", {props}, ...children]`. Frontmatter YAML is parsed into the top-level `frontmatter` object (not included in `nodes`). HTML comments are represented as `[null, {}, "comment body"]`.
 
-**Internal architecture:** Unlike the streaming HTML/ANSI renderers, the AST renderer builds an in-memory tree of `JSON_NODE` structs during parsing, then serializes the tree to JSON. Each node has a `detail` union for type-specific data (code block info, link href, component props, etc.). Nodes with `tag_is_dynamic = 1` are user-defined components — their tag name is heap-allocated and they use the `detail.component` union member exclusively. All dispatch on `node->tag` (in `json_node_free`, `json_write_props`, `json_serialize_node`) must check `tag_is_dynamic` first to avoid union misinterpretation when a component name collides with a built-in tag.
+**Internal architecture:** Unlike the streaming HTML/ANSI renderers, the AST renderer builds an in-memory tree of `JsonNode` structs during parsing, then serializes the tree to JSON. The whole tree is **arena-allocated** (`JsonCtx.arena`) and freed wholesale, so there is no per-node free. Each node carries a **flat `Detail` struct** — one field per variant, not a union — which structurally rules out the type-confusion bug class the C renderer suffered from. Nodes with `tag_is_dynamic = true` are user-defined components. All tag dispatch (`jsonWriteProps`, `jsonSerializeNode`) must still resolve `tag_is_dynamic` / `tag_kind` **first**, so a component whose name collides with a built-in tag reads the right `Detail` field. See `AGENTS.md` for the full rule.
 
 ### AST Renderer Flags (`MD_AST_FLAG_*`)
 
@@ -98,14 +113,19 @@ Produces `{"nodes":[...],"frontmatter":{...},"meta":{}}` where each node is eith
 | `MD_AST_FLAG_DEBUG`         | `0x0001` | Send debug output from `md_parse()` to stderr |
 | `MD_AST_FLAG_SKIP_UTF8_BOM` | `0x0002` | Skip UTF-8 BOM at input start                 |
 
-## ANSI Renderer API (`md4x-ansi.h`)
+## ANSI Renderer API (`src/renderers/md4x-ansi.zig`)
 
 Renders Markdown into ANSI terminal output with escape codes for styling:
 
-```c
-int md_ansi(const MD_CHAR* input, MD_SIZE input_size,
-            void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
-            void* userdata, unsigned parser_flags, unsigned renderer_flags);
+```zig
+pub extern fn md_ansi(
+    input: [*c]const MD_CHAR,
+    input_size: MD_SIZE,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    userdata: ?*anyopaque,
+    parser_flags: c_uint,
+    renderer_flags: c_uint,
+) c_int;
 ```
 
 ### Renderer Flags (`MD_ANSI_FLAG_*`)
@@ -142,12 +162,12 @@ int md_ansi(const MD_CHAR* input, MD_SIZE input_size,
 
 Uses streaming renderer pattern (like HTML renderer), no AST construction.
 
-## Shared JSON Writer (`md4x-json.h`)
+## Shared JSON Writer (`src/renderers/md4x-json.zig`)
 
-Header-only utility providing JSON serialization and YAML-to-JSON conversion helpers. Used by both the AST and meta renderers.
+Zig module providing JSON serialization and YAML-to-JSON conversion helpers (libyaml-backed). Imported by the AST and meta renderers.
 
-```c
-#include "md4x-json.h"
+```zig
+const json = @import("md4x-json.zig");
 ```
 
 **Key components:**
@@ -157,14 +177,19 @@ Header-only utility providing JSON serialization and YAML-to-JSON conversion hel
 - `json_write_escaped()` / `json_write_string()` — JSON-escaped string output
 - `json_write_yaml_props()` — Parses YAML frontmatter and writes key-value pairs as JSON properties (using libyaml)
 
-## Meta Renderer API (`md4x-meta.h`)
+## Meta Renderer API (`src/renderers/md4x-meta.zig`)
 
 Lightweight metadata extractor that parses frontmatter and headings from Markdown:
 
-```c
-int md_meta(const MD_CHAR* input, MD_SIZE input_size,
-            void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
-            void* userdata, unsigned parser_flags, unsigned renderer_flags);
+```zig
+pub extern fn md_meta(
+    input: [*c]const MD_CHAR,
+    input_size: MD_SIZE,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    userdata: ?*anyopaque,
+    parser_flags: c_uint,
+    renderer_flags: c_uint,
+) c_int;
 ```
 
 Produces a flat JSON object with frontmatter properties spread at the top level plus a `headings` array. No AST construction — uses SAX callbacks to capture only frontmatter text and heading plain text.
@@ -197,14 +222,19 @@ Produces a flat JSON object with frontmatter properties spread at the top level 
 - HTML entities in headings are resolved to UTF-8 characters
 - Uses streaming renderer pattern (like HTML renderer), no AST construction
 
-## Text Renderer API (`md4x-text.h`)
+## Text Renderer API (`src/renderers/md4x-text.zig`)
 
 Strips markdown formatting and produces plain text output:
 
-```c
-int md_text(const MD_CHAR* input, MD_SIZE input_size,
-            void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
-            void* userdata, unsigned parser_flags, unsigned renderer_flags);
+```zig
+pub extern fn md_text(
+    input: [*c]const MD_CHAR,
+    input_size: MD_SIZE,
+    process_output: ?*const fn ([*c]const MD_CHAR, MD_SIZE, ?*anyopaque) callconv(.c) void,
+    userdata: ?*anyopaque,
+    parser_flags: c_uint,
+    renderer_flags: c_uint,
+) c_int;
 ```
 
 ### Renderer Flags (`MD_TEXT_FLAG_*`)
@@ -234,16 +264,19 @@ int md_text(const MD_CHAR* input, MD_SIZE input_size,
 - Raw HTML: stripped (no output)
 - Uses streaming renderer pattern (like HTML renderer), no AST construction
 
-## Heal Utility API (`md4x-heal.h`)
+## Heal Utility API (`src/renderers/md4x-heal.zig`)
 
 Fixes incomplete/streaming Markdown text so it renders correctly mid-stream. This is a **pre-parser text transform** — it does not use `md_parse()` and has no parser dependency.
 
 Inspired by [remend](https://github.com/vercel/streamdown/tree/main/packages/remend).
 
-```c
-int md_heal(const char* input, unsigned input_size,
-            void (*process_output)(const char*, unsigned, void*),
-            void* userdata);
+```zig
+pub extern fn md_heal(
+    input: [*c]const u8,
+    input_size: c_uint,
+    process_output: ?*const fn ([*c]const u8, c_uint, ?*anyopaque) callconv(.c) void,
+    userdata: ?*anyopaque,
+) c_int;
 ```
 
 Returns 0 on success, -1 on error.

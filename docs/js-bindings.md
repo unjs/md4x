@@ -93,7 +93,7 @@ import { renderToHtml } from "md4x/napi";
 const html = renderToHtml("# Hello");
 ```
 
-The NAPI API is sync. All extensions are enabled by default (`MD_DIALECT_ALL`). `renderToAST` returns the raw JSON string from the C renderer. `parseAST` parses it into a `ComarkTree` object.
+The NAPI API is sync. All extensions are enabled by default (`MD_DIALECT_ALL`). `renderToAST` returns the raw JSON string from the AST renderer. `parseAST` parses it into a `ComarkTree` object.
 
 `init(opts?)` is optional for NAPI — the native binding loads lazily on first render call. It accepts an optional options object with a `binding` property to provide a custom NAPI binding.
 
@@ -125,7 +125,7 @@ All extensions (`MD_DIALECT_ALL`) are enabled by default. No parser/renderer fla
 | `renderToText(input: string)` | `string`                                 | `string`                                 |
 | `heal(input: string)`         | `string`                                 | `string`                                 |
 
-`renderToAST` returns the raw JSON string from the C renderer. `parseAST` calls `renderToAST` and parses the result into a `ComarkTree` object. `renderToMeta` returns the raw JSON string from the meta renderer. `parseMeta` calls `renderToMeta`, parses the result, and falls back to the first heading as `title` if no frontmatter title exists. See `lib/types.d.ts` for types.
+`renderToAST` returns the raw JSON string from the AST renderer. `parseAST` calls `renderToAST` and parses the result into a `ComarkTree` object. `renderToMeta` returns the raw JSON string from the meta renderer. `parseMeta` calls `renderToMeta`, parses the result, and falls back to the first heading as `title` if no frontmatter title exists. See `lib/types.d.ts` for types.
 
 Both `renderToHtml` and `renderToAnsi` accept an optional `highlighter` callback for custom code block highlighting:
 
