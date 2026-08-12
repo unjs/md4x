@@ -400,7 +400,7 @@ fn _test_run_inline(parser: *const c.Parser, text: [*c]const CHAR, size: SZ) c_i
         n_lines = 1;
     }
 
-    var ret = md_analyze_inlines(&ctx, lines[0..n_lines], FALSE);
+    var ret = md_analyze_inlines(&ctx, lines[0..n_lines], false);
     if (ret == 0) ret = md_process_inlines(&ctx, lines[0..n_lines]);
 
     // ptr_stack cleanup (mirrors md_process_normal_block_contents).

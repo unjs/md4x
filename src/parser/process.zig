@@ -138,7 +138,7 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.BlockType, beg: OFF, end:
     line.end = end;
 
     // Break the line into table cells by identifying pipe characters.
-    ret = md_analyze_inlines(ctx, @as([*]const MD_LINE, @ptrCast(&line))[0..1], TRUE);
+    ret = md_analyze_inlines(ctx, @as([*]const MD_LINE, @ptrCast(&line))[0..1], true);
     if (ret < 0) {
         ctx.table_cell_boundaries_head = -1;
         ctx.table_cell_boundaries_tail = -1;
@@ -266,7 +266,7 @@ pub fn md_process_table_block_contents(ctx: *MD_CTX, col_count: c_int, lines: []
 
 // md4x.c ~5394.
 pub fn md_process_normal_block_contents(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
-    var ret: c_int = md_analyze_inlines(ctx, lines, FALSE);
+    var ret: c_int = md_analyze_inlines(ctx, lines, false);
     if (ret >= 0) ret = md_process_inlines(ctx, lines);
 
     // Free any temporary memory blocks stored within some dummy marks.

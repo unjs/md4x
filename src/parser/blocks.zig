@@ -561,7 +561,7 @@ pub fn md_is_html_block_start_condition(ctx: *MD_CTX, beg: OFF) c_int {
     if (off + 1 < ctx.size) {
         var end: OFF = undefined;
 
-        if (md_is_html_tag(ctx, &[_]MD_LINE{}, beg, ctx.size, &end) != 0) {
+        if (md_is_html_tag(ctx, &[_]MD_LINE{}, beg, ctx.size, &end)) {
             // Only optional whitespace and new line may follow.
             while (end < ctx.size and ctx.isWhitespace(end))
                 end += 1;
