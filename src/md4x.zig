@@ -972,6 +972,132 @@ test "permissive e-mail autolink: multi-dot user name back-scan (PLAN 9b repro)"
     }
 }
 
+// Counts enter/leave of one block type and remembers the first and last name
+// its detail carried. That is all it takes to see the pre-fix aliasing of
+// `types.MAX_BLOCK_INFO_RECORDS`: the info-record index rode through the 16-bit
+// `MD_BLOCK.bits.data`, so record 65 536 wrapped to 0 and re-emitted the FIRST
+// name (`<c0>` where `<c65536>` was written).
+const CapProbe = struct {
+    want: c.BlockType,
+    n_enter: usize = 0,
+    n_leave: usize = 0,
+    first: [32]u8 = @splat(0),
+    first_len: usize = 0,
+    last: [32]u8 = @splat(0),
+    last_len: usize = 0,
+    aliased_first: bool = false,
+    overlong: bool = false,
+
+    fn nameOf(detail: *const c.BlockDetail) ?[]const u8 {
+        return switch (detail.*) {
+            .component => |d| d.tag_name.text,
+            .template => |d| d.name.text,
+            .alert => |d| d.type_name.text,
+            else => null,
+        };
+    }
+
+    fn enterBlock(detail: *const c.BlockDetail, ud: ?*anyopaque) c.CallbackResult {
+        const self: *CapProbe = @ptrCast(@alignCast(ud.?));
+        if (std.meta.activeTag(detail.*) != self.want) return 0;
+        const name = nameOf(detail) orelse return 0;
+        if (name.len > self.last.len) {
+            self.overlong = true;
+            return 0;
+        }
+        if (self.n_enter == 0) {
+            @memcpy(self.first[0..name.len], name);
+            self.first_len = name.len;
+        } else if (std.mem.eql(u8, self.first[0..self.first_len], name)) {
+            self.aliased_first = true;
+        }
+        @memcpy(self.last[0..name.len], name);
+        self.last_len = name.len;
+        self.n_enter += 1;
+        return 0;
+    }
+
+    fn leaveBlock(detail: *const c.BlockDetail, ud: ?*anyopaque) c.CallbackResult {
+        const self: *CapProbe = @ptrCast(@alignCast(ud.?));
+        if (std.meta.activeTag(detail.*) == self.want) self.n_leave += 1;
+        return 0;
+    }
+
+    fn noopSpan(detail: *const c.SpanDetail, ud: ?*anyopaque) c.CallbackResult {
+        _ = detail;
+        _ = ud;
+        return 0;
+    }
+    fn noopText(ty: c.TextType, str: []const CHAR, ud: ?*anyopaque) c.CallbackResult {
+        _ = ty;
+        _ = str;
+        _ = ud;
+        return 0;
+    }
+
+    fn parser() c.Parser {
+        var p: c.Parser = .{};
+        p.flags = c.MD_DIALECT_ALL;
+        p.enter_block = CapProbe.enterBlock;
+        p.leave_block = CapProbe.leaveBlock;
+        p.enter_span = CapProbe.noopSpan;
+        p.leave_span = CapProbe.noopSpan;
+        p.text = CapProbe.noopText;
+        return p;
+    }
+};
+
+test "16-bit info index: component/slot/alert openers stop at the cap (PLAN 10)" {
+    const alloc = std.testing.allocator;
+    const cap = types.MAX_BLOCK_INFO_RECORDS;
+    // Two records past the cap, so the wrap would have aliased records 0 and 1.
+    const n = cap + 2;
+
+    const Case = struct {
+        want: c.BlockType,
+        // Per-record line(s). `{d}` is the record ordinal.
+        body: []const u8,
+        prologue: []const u8 = "",
+        epilogue: []const u8 = "",
+        // Expected name of the LAST record that is still allowed to open.
+        last: []const u8,
+    };
+    // Every one of the three sites is separately drivable past the cap: the
+    // component and slot forms below are flat (no nesting), so this costs one
+    // linear parse each, not a 65 536-deep container stack.
+    const cases = [_]Case{
+        .{ .want = .component, .body = "::c{d}\n::\n", .last = "c65535" },
+        .{ .want = .template, .body = "#s{d}\n\n", .prologue = "::box\n", .epilogue = "::\n", .last = "s65535" },
+        .{ .want = .alert, .body = "> [!t{d}]\n> x\n\n", .last = "t65535" },
+    };
+
+    inline for (cases) |case| {
+        var input: std.ArrayListUnmanaged(u8) = .empty;
+        defer input.deinit(alloc);
+        try input.appendSlice(alloc, case.prologue);
+        for (0..n) |i| {
+            const cut = comptime std.mem.indexOf(u8, case.body, "{d}").?;
+            try input.appendSlice(alloc, case.body[0..cut]);
+            try input.print(alloc, "{d}", .{i});
+            try input.appendSlice(alloc, case.body[cut + 3 ..]);
+        }
+        try input.appendSlice(alloc, case.epilogue);
+
+        var probe: CapProbe = .{ .want = case.want };
+        var p = CapProbe.parser();
+        const ret = md_parse(@ptrCast(input.items.ptr), @intCast(input.items.len), &p, &probe);
+        try std.testing.expectEqual(@as(c_int, 0), ret);
+        try std.testing.expect(!probe.overlong);
+        // Exactly `cap` records open; the two past it are refused, not aliased.
+        try std.testing.expectEqual(cap, probe.n_enter);
+        try std.testing.expectEqualStrings(case.last, probe.last[0..probe.last_len]);
+        // Pre-fix this fired: record 65 536 re-emitted record 0's name.
+        try std.testing.expect(!probe.aliased_first);
+        // Refusing at the opener must not unbalance emission (AGENTS.md #4).
+        try std.testing.expectEqual(probe.n_enter, probe.n_leave);
+    }
+}
+
 test "link label hash + cmp: whitespace & case-fold equivalence" {
     // Case-fold + whitespace collapse mean these labels are equivalent.
     const a = "Foo   Bar";

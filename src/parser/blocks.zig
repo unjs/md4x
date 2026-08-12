@@ -31,6 +31,7 @@ const MD_BLOCK_CONTAINER_OPENER = types.MD_BLOCK_CONTAINER_OPENER;
 const MD_BLOCK_CONTAINER_CLOSER = types.MD_BLOCK_CONTAINER_CLOSER;
 const MD_BLOCK_LOOSE_LIST = types.MD_BLOCK_LOOSE_LIST;
 const MD_BLOCK_SETEXT_HEADER = types.MD_BLOCK_SETEXT_HEADER;
+const MAX_BLOCK_INFO_RECORDS = types.MAX_BLOCK_INFO_RECORDS;
 
 const uval = util.uval;
 const ISANYOF2_ = util.ISANYOF2_;
@@ -1177,7 +1178,11 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             var name_beg: OFF = undefined;
             var name_end: OFF = undefined;
             var slot_end: OFF = undefined;
-            if (md_is_slot_opener(ctx, off, &name_beg, &name_end, &slot_end) != 0) {
+            // Same 16-bit index cap as the block-component opener below; past
+            // it `#slot-name` is left to render as literal text.
+            if (md_is_slot_opener(ctx, off, &name_beg, &name_end, &slot_end) != 0 and
+                ctx.slot_info.items.len < MAX_BLOCK_INFO_RECORDS)
+            {
                 const slot_idx = md_push_slot_info(ctx, name_beg, name_end) catch {
                     ret = -1;
                     return ret;
@@ -1294,7 +1299,12 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                         tmp += 1;
                         while (tmp < ctx.size and ctx.isBlank(tmp))
                             tmp += 1;
-                        if (tmp >= ctx.size or ctx.isNewline(tmp)) {
+                        // Same 16-bit index cap as the block-component opener
+                        // below; past it the blockquote stays a plain
+                        // blockquote and `[!TYPE]` renders as literal text.
+                        if ((tmp >= ctx.size or ctx.isNewline(tmp)) and
+                            ctx.block_alert_info.items.len < MAX_BLOCK_INFO_RECORDS)
+                        {
                             const alert_idx = md_push_block_alert_info(ctx, type_beg, type_end) catch {
                                 ret = -1;
                                 return ret;
@@ -1458,7 +1468,11 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
             var title_end: OFF = undefined;
             var comp_end: OFF = undefined;
             const colon_count = md_is_block_component_opener(ctx, off, &name_beg, &name_end, &props_beg, &props_end, &title_beg, &title_end, &comp_end);
-            if (colon_count > 0) {
+            // The info-record index has to survive a trip through the 16-bit
+            // MD_BLOCK.bits.data, so stop recognizing openers at the cap rather
+            // than wrapping onto an earlier record's name/props. See
+            // types.MAX_BLOCK_INFO_RECORDS.
+            if (colon_count > 0 and ctx.block_component_info.items.len < MAX_BLOCK_INFO_RECORDS) {
                 const comp_idx = md_push_block_component_info(ctx, colon_count, name_beg, name_end, props_beg, props_end, title_beg, title_end) catch {
                     ret = -1;
                     return ret;

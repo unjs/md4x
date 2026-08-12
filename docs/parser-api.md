@@ -105,6 +105,12 @@ from a callback's `-1`.
 - Code span mark limits (32 backticks max)
 - Table column limits (128 max)
 - Link reference definition abuse limits
+- Block components, template slots and alerts: at most **65 536 records of each
+  kind per document** (`types.MAX_BLOCK_INFO_RECORDS`). Each one keeps its
+  name/props/title source offsets in a side array whose index travels through
+  the 16-bit `MD_BLOCK.bits.data`, so the cap is where that index would wrap.
+  Past it the opener simply stops being recognized and the line renders as
+  literal text — see `docs/markdown-syntax.md`
 - Inline `{...}` attributes: the document's `{`…`}` pairing is computed once per
   parse (one linear pass, lazily on the first candidate) and then queried by
   binary search, so a candidate never re-scans the document — unbalanced or

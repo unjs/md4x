@@ -119,6 +119,26 @@ pub const MD_BLOCK = extern struct {
     }
 };
 
+/// Hard cap on how many `::component` / `#slot` / `> [!ALERT]` records one
+/// document may carry (65 536 of each, counted separately).
+///
+/// `MD_BLOCK.bits.data` above is 16 bits wide, and that width is frozen: an
+/// `MD_BLOCK` is interleaved with `MD_LINE`/`MD_VERBATIMLINE` inside the raw
+/// `block_bytes` arena, so widening the field is a layout change, not a type
+/// change. The ul/ol/li/h/table payloads that travel through `data` are a mark
+/// character, a heading level or a ≤128 column count, all of which fit — but
+/// the three MDC container kinds route the *array index* of their info record
+/// (`block_component_info` / `slot_info` / `block_alert_info`) through it. Past
+/// 65 536 records the index would wrap and `md_process_block` would read a
+/// different record: wrong tag name, wrong props, wrong slot name, silently.
+///
+/// So the three openers stop recognizing their syntax once this many records
+/// exist. The line then falls through the rest of line classification exactly
+/// as it would with the extension disabled — literal text — instead of opening
+/// a container that aliases an earlier one. Refusing at the *opener* keeps
+/// enter/leave emission balanced; no container is pushed, so none is popped.
+pub const MAX_BLOCK_INFO_RECORDS: usize = 0x10000;
+
 // `struct MD_CONTAINER_tag` (md4x.c ~5379). Internal-only (never crosses the C
 // ABI). C uses several `unsigned :8`/`:2` bitfields; we model with plain integer
 // fields since only the *values* matter (containers live in ctx.containers, a

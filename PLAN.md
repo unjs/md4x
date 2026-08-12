@@ -34,7 +34,8 @@ see its section below):
 | 1c — attr builder OOM free length | `efd4025`                       |
 | 8 — `zig build test` in CI + safe | `4855d1b`                       |
 | 9b — out-of-range mark cursor     | `c666da4`                       |
-| 9 — list loosened by `::` / `#`   | _the commit adding this row_    |
+| 9 — list loosened by `::` / `#`   | `ce1db56`                       |
+| 10 — 16-bit comp/slot/alert index | _the commit adding this row_    |
 
 Zero `TRUE`/`FALSE` tokens remain in `src/`. Verified at `3c3d2f7`: `zig build`,
 `zig build test` (ReleaseFast **and** Debug), 16 spec suites / 1001 assertions,
@@ -331,23 +332,47 @@ Golden SAX trace unchanged. Regression coverage is bidirectional: the two bug
 cases fail against the pre-fix binary, and the third case fails against the
 "all four positive" variant.
 
-### 10. Component/slot/alert index truncated to 16 bits
+### ~~10. Component/slot/alert index truncated to 16 bits~~ — LANDED
 
-`blocks.zig:242` does `block.bits.data = @truncate(data)` into a `u16`
-(`types.zig:98`). For ul/ol/li/h/table the payload is a mark char / level /
-≤128 column count — all fit. But md4x also routes the **array index** of the
-component/slot/alert info record through that field
-(`container.start = @intCast(comp_idx)`, pushed `:843` / `:886`). Past 65,536
-records the index wraps and `process.zig:724` / `:750` / `:765` reads the wrong
-record — wrong tag name, wrong props, wrong slot name. Confirmed with a 775 KB /
-65,537-component input: the 65,537th renders as `<first>` instead of `<c65536>`.
+**All three sites confirmed drivable, not just the component one.** Reproduced
+against the pre-fix binary with three generated documents, each 65,537 records:
 
-Not a memory-safety hole (the wrapped index is always < 65536 ≤ `items.len`, and
-`process.zig` range-checks) — purely wrong output. Cheapest fix is a
-`>= 0x10000` guard at the three `container.start = @intCast(idx)` sites,
-refusing to open the component rather than silently aliasing. Widening
-`bits.data` is a real `MD_BLOCK` layout change (it is `extern` and interleaved
-in `block_bytes`).
+| Site        | Input                         | Size   | Parse | 65,537th rendered as     |
+| ----------- | ----------------------------- | ------ | ----- | ------------------------ |
+| `component` | `::cN` / `::` × N (flat)      | 775 KB | 20 ms | `<c0>` (want `<c65536>`) |
+| `template`  | `::box` + `#sN` + blank × N   | 578 KB | 20 ms | `name="s0"`              |
+| `alert`     | `> [!tN]` / `> x` / blank × N | 1.1 MB | 36 ms | `class="alert alert-t0"` |
+
+Slots are the cheapest per record (4 bytes), not components — and the _nested_
+component form (`::cN` × N with no closers) costs 3.2 s for a 65,537-deep
+container stack, while the flat form above is 20 ms, so none of the three is
+expensive to reach.
+
+Fixed as PLAN suggested, with the guard moved **before** the info-record push
+rather than at `container.start = @intCast(idx)`: `types.MAX_BLOCK_INFO_RECORDS`
+(`0x10000`) now gates the three openers' recognition conditions
+(`blocks.zig` component / slot / alert). Placing it before the push also means
+no `@intCast` ever sees an out-of-range index — relevant because item 8 made
+`zig build test` ReleaseSafe, where an `@intCast` range violation panics, and
+ReleaseFast, where it is UB.
+
+**The refusal renders as literal text**, which is exactly what each construct
+degrades to with its extension disabled: `<p>::c65536\n::</p>`,
+`<p>#s65536</p>`, and a plain `<blockquote><p>[!t65536]\nx</p></blockquote>`
+(the last is already the documented behavior for a disqualified alert). The
+line simply falls through the rest of line classification. Refusing at the
+_opener_ is what keeps SAX emission balanced (AGENTS.md memory-safety pattern
+#4): no container is pushed, so none is popped — verified as 65,536 enters and
+65,536 leaves on all three paths.
+
+Corpus diff empty at 168 hashes (nothing in the corpus is within four orders of
+magnitude of the cap), golden SAX trace unchanged. Pinned by a Zig unit test
+(`16-bit info index: component/slot/alert openers stop at the cap`) that drives
+all three sites to `cap + 2` records and asserts the count, the last record's
+name, enter/leave balance, and that no later record re-emits the first one's
+name. It fails against the pre-fix parser (`expected 65536, found 65538`). It
+is deliberately **not** a `test/regressions.txt` case: the smallest input that
+reaches the cap is ~578 KB, and that file is itself a `diff-corpus.sh` input.
 
 ### 11. All five `Parser` callbacks are nullable but unwrapped `.?`
 

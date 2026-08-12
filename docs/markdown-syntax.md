@@ -70,6 +70,7 @@ GitHub-style alert/admonition syntax. A blockquote whose first line is `> [!TYPE
 - The `[!TYPE]` line must be the **first line** of the blockquote and the **only content** on that line
 - Text after `[!TYPE]` on the same line disqualifies it (treated as normal blockquote)
 - `[!TYPE]` not on the first line is treated as literal text
+- At most **65 536 alerts per document**, counted independently of components and slots (`types.MAX_BLOCK_INFO_RECORDS` — the alert type is stored in a side array whose index rides through the 16-bit `MD_BLOCK.bits.data`); past that the blockquote stays a plain blockquote and `[!TYPE]` renders as literal text
 - Supports all GitHub types (NOTE, TIP, IMPORTANT, WARNING, CAUTION) plus custom types
 - Content supports full markdown (inline formatting, lists, nested blockquotes, code blocks)
 
@@ -138,8 +139,9 @@ Constraints:
 - A closer with N colons closes the innermost open component with ≤N colons
 - Component name: `[a-zA-Z][a-zA-Z0-9-]*` (same as inline components)
 - Content is always treated as loose (paragraphs wrapped in `<p>`)
+- At most **65 536 block components per document**; past that the opener is no longer recognized and the line renders as literal text (see below)
 
-Implementation: Block components use the container mechanism (`MD_CONTAINER` with `ch = ':'`). Component info (name/props/title source offsets) is stored in a growing array on `MD_CTX`, indexed by the block's `data` field.
+Implementation: Block components use the container mechanism (`MD_CONTAINER` with `ch = ':'`). Component info (name/props/title source offsets) is stored in a growing array on `MD_CTX`, indexed by the block's `data` field. That field is 16 bits wide and its layout is frozen, so the array is capped at `types.MAX_BLOCK_INFO_RECORDS` (65 536) records — beyond it the index would wrap onto an earlier record and render the wrong name/props/title. The opener therefore stops matching at the cap, and `::name` falls through line classification like any other text.
 
 HTML renderer: `<component-name title="..." ...attrs>content</component-name>`. JSON renderer: `["component-name", {"title": "...", ...props}, ...children]`. ANSI renderer: title used as display label for alert-style components.
 
@@ -192,8 +194,9 @@ Constraints:
 - Slots **cannot interrupt paragraphs** (require blank line before)
 - Slots are only recognized inside block component containers
 - `#slot-name` outside a component is treated as literal text
+- At most **65 536 slots per document**, counted independently of components; past that `#slot-name` is treated as literal text too
 
-Implementation: Slots use the container mechanism (`MD_CONTAINER` with `ch = '#'`). Slot info (name offsets) is stored in a growing array on `MD_CTX`, indexed by the block's `data` field. A new `#slot` implicitly closes any existing slot within the current component.
+Implementation: Slots use the container mechanism (`MD_CONTAINER` with `ch = '#'`). Slot info (name offsets) is stored in a growing array on `MD_CTX`, indexed by the block's `data` field, and is capped at `types.MAX_BLOCK_INFO_RECORDS` for the same 16-bit reason as block components. A new `#slot` implicitly closes any existing slot within the current component.
 
 HTML renderer: `<template name="slot-name">...content...</template>`. JSON renderer: `["template", {"name": "slot-name"}, ...children]`. ANSI renderer: transparent (content renders normally).
 
