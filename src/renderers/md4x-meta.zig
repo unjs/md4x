@@ -62,7 +62,7 @@ const META_CTX = struct {
     fm_text: ?[*]u8 = null,
     fm_size: c.MD_SIZE = 0,
     fm_cap: c.MD_SIZE = 0,
-    in_frontmatter: c_int = 0,
+    in_frontmatter: bool = false,
 
     // Headings array.
     headings: ?[*]META_HEADING = null,
@@ -70,7 +70,7 @@ const META_CTX = struct {
     heading_cap: c_int = 0,
 
     // Current heading accumulator.
-    in_heading: c_int = 0,
+    in_heading: bool = false,
     heading_level: c_uint = 0,
     heading_buf: ?[*]u8 = null,
     heading_buf_size: c.MD_SIZE = 0,
@@ -195,10 +195,10 @@ fn meta_enter_block(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.Callb
         .component => ctx.comp_depth += 1,
         // Only capture document-level frontmatter, not component frontmatter.
         .frontmatter => if (ctx.comp_depth == 0) {
-            ctx.in_frontmatter = 1;
+            ctx.in_frontmatter = true;
         },
         .h => |*d| {
-            ctx.in_heading = 1;
+            ctx.in_heading = true;
             ctx.heading_level = d.level;
             ctx.heading_buf_size = 0;
         },
@@ -215,7 +215,7 @@ fn meta_leave_block(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.Callb
     if (block_type == c.BlockType.component) {
         ctx.comp_depth -= 1;
     } else if (block_type == c.BlockType.frontmatter) {
-        ctx.in_frontmatter = 0;
+        ctx.in_frontmatter = false;
     } else if (block_type == c.BlockType.h) {
         // Store the completed heading.
         if (ctx.heading_count >= ctx.heading_cap) {
@@ -257,7 +257,7 @@ fn meta_leave_block(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.Callb
         }
 
         ctx.heading_count += 1;
-        ctx.in_heading = 0;
+        ctx.in_heading = false;
     }
 
     return 0;
@@ -280,7 +280,7 @@ fn meta_text(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata: ?*a
     const text: [*]const u8 = text_slice.ptr;
     const size: c.MD_SIZE = @intCast(text_slice.len);
 
-    if (ctx.in_frontmatter != 0) {
+    if (ctx.in_frontmatter) {
         if (meta_buf_append(&ctx.fm_text, &ctx.fm_size, &ctx.fm_cap, text, size) != 0) {
             ctx.err = 1;
             return -1;
@@ -288,7 +288,7 @@ fn meta_text(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata: ?*a
         return 0;
     }
 
-    if (ctx.in_heading != 0) {
+    if (ctx.in_heading) {
         switch (text_type) {
             .softbr, .br => {
                 if (meta_buf_append(&ctx.heading_buf, &ctx.heading_buf_size, &ctx.heading_buf_cap, " ", 1) != 0) {

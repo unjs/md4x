@@ -55,11 +55,11 @@ const MD_TEXT = struct {
     quote_depth: c_int,
     list_depth: c_int,
     ol_counter: c_int,
-    in_code_block: c_int,
-    need_newline: c_int, // pending newline before next block
-    need_indent: c_int, // emit indent prefix on next code text
-    li_opened: c_int, // just opened a list item (bullet already printed)
-    in_frontmatter: c_int, // skip frontmatter content
+    in_code_block: bool,
+    need_newline: bool, // pending newline before next block
+    need_indent: bool, // emit indent prefix on next code text
+    li_opened: bool, // just opened a list item (bullet already printed)
+    in_frontmatter: bool, // skip frontmatter content
 };
 
 // AppendFn mirrors the C `void (*fn_append)(MD_TEXT*, const MD_CHAR*, MD_SIZE)`.
@@ -192,24 +192,24 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         .doc => {},
 
         .quote => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.quote_depth += 1;
         },
 
         .ul => {
-            if (r.need_newline != 0 and r.list_depth == 0) {
+            if (r.need_newline and r.list_depth == 0) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
         },
 
         .ol => |*ol| {
-            if (r.need_newline != 0 and r.list_depth == 0) {
+            if (r.need_newline and r.list_depth == 0) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.ol_counter = @intCast(ol.start);
         },
@@ -233,53 +233,53 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
                 }
             }
             r.list_depth += 1;
-            r.li_opened = 1;
+            r.li_opened = true;
         },
 
         .hr => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             render_indent(r);
             render_verbatim_lit(r, "---");
             render_newline(r);
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .h => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             render_indent(r);
         },
 
         .code => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
-            r.in_code_block = 1;
-            r.need_indent = 1;
+            r.in_code_block = true;
+            r.need_indent = true;
         },
 
         .html => {},
 
         .p => {
-            if (r.need_newline != 0 and r.li_opened == 0) {
+            if (r.need_newline and !r.li_opened) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
-            if (r.li_opened == 0)
+            if (!r.li_opened)
                 render_indent(r);
-            r.li_opened = 0;
+            r.li_opened = false;
         },
 
         .table => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
         },
 
@@ -296,20 +296,20 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         .td => {},
 
         .frontmatter => {
-            r.in_frontmatter = 1;
+            r.in_frontmatter = true;
         },
 
         .component => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
         },
 
         .alert => |*det| {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.quote_depth += 1;
             render_indent(r);
@@ -336,12 +336,12 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
 
         .ul => {
             r.ol_counter = 0;
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .ol => {
             r.ol_counter = 0;
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .li => {
@@ -353,23 +353,23 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
 
         .h => {
             render_newline(r);
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .code => {
-            r.in_code_block = 0;
-            r.need_newline = 1;
+            r.in_code_block = false;
+            r.need_newline = true;
         },
 
         .html => {},
 
         .p => {
             render_newline(r);
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .table => {
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .thead => {},
@@ -389,16 +389,16 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         },
 
         .frontmatter => {
-            r.in_frontmatter = 0;
+            r.in_frontmatter = false;
         },
 
         .component => {
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .alert => {
             r.quote_depth -= 1;
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .template => {},
@@ -430,7 +430,7 @@ fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata:
     const text: [*]const u8 = text_slice.ptr;
     const size: c.MD_SIZE = @intCast(text_slice.len);
 
-    if (r.in_frontmatter != 0)
+    if (r.in_frontmatter)
         return 0;
 
     switch (text_type) {
@@ -459,15 +459,15 @@ fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata:
         },
 
         .code => {
-            if (r.in_code_block != 0) {
+            if (r.in_code_block) {
                 if (size == 1 and text[0] == '\n') {
                     render_newline(r);
-                    r.need_indent = 1;
+                    r.need_indent = true;
                 } else {
-                    if (r.need_indent != 0) {
+                    if (r.need_indent) {
                         render_indent(r);
                         render_verbatim_lit(r, "  ");
-                        r.need_indent = 0;
+                        r.need_indent = false;
                     }
                     render_verbatim(r, text, size);
                 }

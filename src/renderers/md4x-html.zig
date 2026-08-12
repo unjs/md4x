@@ -99,12 +99,12 @@ const MD_HTML = struct {
     image_nesting_level: c_int = 0,
 
     // Frontmatter suppression state.
-    in_frontmatter: c_int = 0,
+    in_frontmatter: bool = false,
     component_nesting: c_int = 0,
 
     // Component frontmatter: deferred open tag.
-    comp_fm_pending: c_int = 0,
-    comp_fm_capturing: c_int = 0,
+    comp_fm_pending: bool = false,
+    comp_fm_capturing: bool = false,
     comp_fm_tag: ?[*]u8 = null,
     comp_fm_tag_size: c.MD_SIZE = 0,
     comp_fm_tag_cap: c.MD_SIZE = 0,
@@ -114,7 +114,7 @@ const MD_HTML = struct {
 
     // Full-HTML mode state.
     opts: ?*const MD_HTML_OPTS = null,
-    head_emitted: c_int = 0,
+    head_emitted: bool = false,
 
     // Frontmatter YAML capture buffer (allocated only when FULL_HTML).
     fm_text: ?[*]u8 = null,
@@ -123,7 +123,7 @@ const MD_HTML = struct {
 
     // Code block metadata tracking.
     output_offset: c.MD_SIZE = 0,
-    in_code_block: c_int = 0,
+    in_code_block: bool = false,
     code_blocks: ?[*]MD_HTML_CODE_META = null,
     n_code_blocks: c_int = 0,
     code_blocks_cap: c_int = 0,
@@ -695,8 +695,8 @@ fn comp_fm_flush_tag(r: *MD_HTML) void {
     // Reset buffers.
     r.comp_fm_tag_size = 0;
     r.comp_fm_text_size = 0;
-    r.comp_fm_pending = 0;
-    r.comp_fm_capturing = 0;
+    r.comp_fm_pending = false;
+    r.comp_fm_capturing = false;
 }
 
 fn render_open_block_component(r: *MD_HTML, det: *const c.BlockComponentDetail) void {
@@ -746,12 +746,12 @@ fn render_open_block_component(r: *MD_HTML, det: *const c.BlockComponentDetail) 
         r.userdata = saved_ud;
     }
 
-    r.comp_fm_pending = 1;
+    r.comp_fm_pending = true;
 }
 
 fn render_close_block_component(r: *MD_HTML, det: *const c.BlockComponentDetail) void {
     // Flush pending open tag if it was never flushed (empty component).
-    if (r.comp_fm_pending != 0)
+    if (r.comp_fm_pending)
         comp_fm_flush_tag(r);
     render_verbatim_lit(r, "</");
     render_attribute(r, &det.tag_name, render_html_escaped);
@@ -782,7 +782,7 @@ fn code_meta_push(r: *MD_HTML) ?*MD_HTML_CODE_META {
 fn code_meta_cleanup(r: *MD_HTML) void {
     if (r.code_blocks) |blocks| {
         // Free committed entries + the in-progress entry if parse was aborted.
-        const count: usize = @intCast(r.n_code_blocks + (if (r.in_code_block != 0) @as(c_int, 1) else 0));
+        const count: usize = @intCast(r.n_code_blocks + @as(c_int, @intFromBool(r.in_code_block)));
         var i: usize = 0;
         while (i < count) : (i += 1) {
             if (blocks[i].highlights) |h|
@@ -1017,9 +1017,9 @@ fn ensure_head_emitted(r: *MD_HTML) void {
     var yaml_title: ?[*:0]u8 = null;
     var yaml_desc: ?[*:0]u8 = null;
 
-    if (r.head_emitted != 0)
+    if (r.head_emitted)
         return;
-    r.head_emitted = 1;
+    r.head_emitted = true;
 
     // Parse YAML frontmatter for title/description.
     if (r.fm_text != null and r.fm_size > 0)
@@ -1070,16 +1070,16 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
 
     // Frontmatter: always suppress, capture text for full-HTML or component props.
     if (block_type == c.BlockType.frontmatter) {
-        r.in_frontmatter = 1;
-        if (r.comp_fm_pending != 0) {
-            r.comp_fm_capturing = 1;
+        r.in_frontmatter = true;
+        if (r.comp_fm_pending) {
+            r.comp_fm_capturing = true;
         }
         return 0;
     }
 
     // If a component tag is pending and the next block is not frontmatter,
     // flush the buffered tag immediately.
-    if (r.comp_fm_pending != 0 and block_type != c.BlockType.frontmatter) {
+    if (r.comp_fm_pending and block_type != c.BlockType.frontmatter) {
         comp_fm_flush_tag(r);
     }
 
@@ -1124,7 +1124,7 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
                             m.highlight_count = @intCast(det.highlights.len);
                         }
                     }
-                    r.in_code_block = 1;
+                    r.in_code_block = true;
                 }
             }
         },
@@ -1164,8 +1164,8 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
 
     // Frontmatter: always suppress.
     if (block_type == c.BlockType.frontmatter) {
-        r.in_frontmatter = 0;
-        if (r.comp_fm_capturing != 0) {
+        r.in_frontmatter = false;
+        if (r.comp_fm_capturing) {
             // Component frontmatter done — flush the buffered tag with YAML attrs.
             comp_fm_flush_tag(r);
         }
@@ -1188,10 +1188,10 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
             render_verbatim_lit_runtime(r, head[d.level - 1]);
         },
         .code => {
-            if ((r.flags & MD_HTML_FLAG_CODE_META != 0) and r.in_code_block != 0) {
+            if ((r.flags & MD_HTML_FLAG_CODE_META != 0) and r.in_code_block) {
                 r.code_blocks.?[@intCast(r.n_code_blocks)].end = r.output_offset;
                 r.n_code_blocks += 1;
-                r.in_code_block = 0;
+                r.in_code_block = false;
             }
             render_verbatim_lit(r, "</code></pre>\n");
         },
@@ -1273,8 +1273,8 @@ fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata:
     const size: c.MD_SIZE = @intCast(text_slice.len);
 
     // Frontmatter text: capture for full-HTML or component frontmatter, always suppress output.
-    if (r.in_frontmatter != 0) {
-        if (r.comp_fm_capturing != 0)
+    if (r.in_frontmatter) {
+        if (r.comp_fm_capturing)
             _ = comp_fm_text_append(r, text, size)
         else if ((r.flags & MD_HTML_FLAG_FULL_HTML != 0) and r.component_nesting == 0)
             _ = fm_append(r, text, size);

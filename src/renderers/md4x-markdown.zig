@@ -55,17 +55,17 @@ const MD_MARKDOWN = struct {
     quote_depth: c_int,
     list_depth: c_int,
     ol_counter: c_int,
-    in_code_block: c_int,
-    in_code_span: c_int,
-    need_newline: c_int,
-    need_indent: c_int,
-    li_opened: c_int,
-    in_frontmatter: c_int,
+    in_code_block: bool,
+    in_code_span: bool,
+    need_newline: bool,
+    need_indent: bool,
+    li_opened: bool,
+    in_frontmatter: bool,
 
     // Table state
-    in_table: c_int,
-    in_thead: c_int,
-    thead_done: c_int,
+    in_table: bool,
+    in_thead: bool,
+    thead_done: bool,
     current_col: c_int,
     col_count: c_int,
     col_aligns: [128]c.Align,
@@ -220,25 +220,25 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         .doc => {},
 
         .quote => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.quote_depth += 1;
         },
 
         .ul => {
-            if (r.need_newline != 0 and r.list_depth == 0) {
+            if (r.need_newline and r.list_depth == 0) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.ol_counter = 0;
         },
 
         .ol => |*ol| {
-            if (r.need_newline != 0 and r.list_depth == 0) {
+            if (r.need_newline and r.list_depth == 0) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.ol_counter = @intCast(ol.start);
         },
@@ -262,25 +262,25 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
                 }
             }
             r.list_depth += 1;
-            r.li_opened = 1;
+            r.li_opened = true;
         },
 
         .hr => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             render_indent(r);
             render_verbatim_lit(r, "---");
             render_newline(r);
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .h => |*h| {
             const level = h.level;
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             render_indent(r);
             var i: c_uint = 0;
@@ -290,9 +290,9 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         },
 
         .code => |*code| {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             render_indent(r);
             r.fence_char = code.fence_char;
@@ -307,8 +307,8 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
                 render_attribute(r, &code.info, render_verbatim);
             }
             render_newline(r);
-            r.in_code_block = 1;
-            r.need_indent = 1;
+            r.in_code_block = true;
+            r.need_indent = true;
         },
 
         .html => {
@@ -316,21 +316,21 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         },
 
         .p => {
-            if (r.need_newline != 0 and r.li_opened == 0) {
+            if (r.need_newline and !r.li_opened) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
-            if (r.li_opened == 0)
+            if (!r.li_opened)
                 render_indent(r);
-            r.li_opened = 0;
+            r.li_opened = false;
         },
 
         .table => |*tbl| {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
-            r.in_table = 1;
+            r.in_table = true;
             r.col_count = @intCast(tbl.col_count);
             if (r.col_count > 128)
                 r.col_count = 128;
@@ -338,8 +338,8 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         },
 
         .thead => {
-            r.in_thead = 1;
-            r.thead_done = 0;
+            r.in_thead = true;
+            r.thead_done = false;
         },
 
         .tbody => {},
@@ -361,13 +361,13 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         },
 
         .frontmatter => {
-            r.in_frontmatter = 1;
+            r.in_frontmatter = true;
         },
 
         .component => |*comp| {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             render_indent(r);
             render_verbatim_lit(r, "<");
@@ -384,9 +384,9 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         },
 
         .alert => |*det| {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_newline(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.quote_depth += 1;
             render_indent(r);
@@ -417,12 +417,12 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
 
         .ul => {
             r.ol_counter = 0;
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .ol => {
             r.ol_counter = 0;
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .li => {
@@ -434,7 +434,7 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
 
         .h => {
             render_newline(r);
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .code => {
@@ -445,33 +445,33 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
                 render_verbatim_lit(r, "```");
             }
             render_newline(r);
-            r.in_code_block = 0;
-            r.need_newline = 1;
+            r.in_code_block = false;
+            r.need_newline = true;
         },
 
         .html => {},
 
         .p => {
             render_newline(r);
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .table => {
-            r.in_table = 0;
-            r.need_newline = 1;
+            r.in_table = false;
+            r.need_newline = true;
         },
 
         .thead => {
-            r.in_thead = 0;
+            r.in_thead = false;
         },
 
         .tbody => {},
 
         .tr => {
             render_newline(r);
-            if (r.in_thead != 0 and r.thead_done == 0) {
+            if (r.in_thead and !r.thead_done) {
                 render_table_separator(r);
-                r.thead_done = 1;
+                r.thead_done = true;
             }
         },
 
@@ -486,7 +486,7 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         },
 
         .frontmatter => {
-            r.in_frontmatter = 0;
+            r.in_frontmatter = false;
         },
 
         .component => |*comp| {
@@ -496,12 +496,12 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
                 render_attribute(r, &comp.tag_name, render_verbatim);
             render_verbatim_lit(r, ">");
             render_newline(r);
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .alert => {
             r.quote_depth -= 1;
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .template => {},
@@ -533,7 +533,7 @@ fn enter_span_callback(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.Cal
 
         .code => {
             render_verbatim_lit(r, "`");
-            r.in_code_span = 1;
+            r.in_code_span = true;
         },
 
         .del => {
@@ -610,7 +610,7 @@ fn leave_span_callback(detail: *const c.SpanDetail, userdata: ?*anyopaque) c.Cal
 
         .code => {
             render_verbatim_lit(r, "`");
-            r.in_code_span = 0;
+            r.in_code_span = false;
         },
 
         .del => {
@@ -653,7 +653,7 @@ fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata:
     const text: [*]const u8 = text_slice.ptr;
     const size: c.MD_SIZE = @intCast(text_slice.len);
 
-    if (r.in_frontmatter != 0)
+    if (r.in_frontmatter)
         return 0;
 
     switch (text_type) {
@@ -681,14 +681,14 @@ fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata:
         },
 
         .code => {
-            if (r.in_code_block != 0) {
+            if (r.in_code_block) {
                 if (size == 1 and text[0] == '\n') {
                     render_newline(r);
-                    r.need_indent = 1;
+                    r.need_indent = true;
                 } else {
-                    if (r.need_indent != 0) {
+                    if (r.need_indent) {
                         render_indent(r);
-                        r.need_indent = 0;
+                        r.need_indent = false;
                     }
                     render_verbatim(r, text, size);
                 }

@@ -127,14 +127,14 @@ const MD_ANSI = struct {
     quote_depth: c_int,
     list_depth: c_int,
     ol_counter: c_int,
-    in_code_block: c_int,
-    need_newline: c_int, // pending newline before next block
-    need_indent: c_int, // emit indent prefix on next code text
-    li_opened: c_int, // just opened a list item (bullet already printed)
-    in_alert: c_int, // inside an alert block
+    in_code_block: bool,
+    need_newline: bool, // pending newline before next block
+    need_indent: bool, // emit indent prefix on next code text
+    li_opened: bool, // just opened a list item (bullet already printed)
+    in_alert: bool, // inside an alert block
     alert_color: ?[*:0]const u8, // ANSI color escape for current alert bar
     component_nesting: c_int, // block component nesting depth
-    in_comp_frontmatter: c_int, // inside component frontmatter (suppress output)
+    in_comp_frontmatter: bool, // inside component frontmatter (suppress output)
 
     // Code block metadata tracking (only active when MD_ANSI_FLAG_CODE_META is set)
     output_offset: c.MD_SIZE,
@@ -180,7 +180,7 @@ fn render_indent(r: *MD_ANSI) void {
         render_verbatim_lit(r, "  " ++ QUOTE_BAR ++ " ");
         render_ansi(r, ANSI_DIM_OFF);
     }
-    if (r.in_alert != 0 and r.alert_color != null) {
+    if (r.in_alert and r.alert_color != null) {
         render_ansi_ptr(r, r.alert_color.?);
         render_verbatim_lit(r, ALERT_BAR ++ " ");
         render_ansi(r, ANSI_COLOR_DEFAULT);
@@ -198,7 +198,7 @@ fn render_newline(r: *MD_ANSI) void {
 // Render a blank separator line with alert bar prefix when inside an alert.
 fn render_separator(r: *MD_ANSI) void {
     render_newline(r);
-    if (r.in_alert != 0 and r.alert_color != null) {
+    if (r.in_alert and r.alert_color != null) {
         render_ansi_ptr(r, r.alert_color.?);
         render_verbatim_lit(r, ALERT_BAR);
         render_ansi(r, ANSI_COLOR_DEFAULT);
@@ -349,7 +349,7 @@ fn ansi_code_meta_push(r: *MD_ANSI) ?*MD_ANSI_CODE_META {
 
 fn ansi_code_meta_cleanup(r: *MD_ANSI) void {
     if (r.code_blocks) |blocks| {
-        const count: usize = @intCast(r.n_code_blocks + (if (r.in_code_block != 0) @as(c_int, 1) else 0));
+        const count: usize = @intCast(r.n_code_blocks + @as(c_int, @intFromBool(r.in_code_block)));
         var i: usize = 0;
         while (i < count) : (i += 1) {
             if (blocks[i].highlights) |h|
@@ -461,24 +461,24 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         .doc => {},
 
         .quote => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_separator(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.quote_depth += 1;
         },
 
         .ul => {
-            if (r.need_newline != 0 and r.list_depth == 0) {
+            if (r.need_newline and r.list_depth == 0) {
                 render_separator(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
         },
 
         .ol => |*ol| {
-            if (r.need_newline != 0 and r.list_depth == 0) {
+            if (r.need_newline and r.list_depth == 0) {
                 render_separator(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.ol_counter = @intCast(ol.start);
         },
@@ -509,38 +509,38 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
                 }
             }
             r.list_depth += 1;
-            r.li_opened = 1;
+            r.li_opened = true;
         },
 
         .hr => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_separator(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             render_indent(r);
             render_ansi(r, ANSI_DIM);
             render_verbatim_lit(r, HORIZONTAL_RULE);
             render_ansi(r, ANSI_DIM_OFF);
             render_newline(r);
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .h => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_separator(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             render_indent(r);
             render_ansi(r, ANSI_HEADING);
         },
 
         .code => |*code_det| {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_separator(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
-            r.in_code_block = 1;
-            r.need_indent = 1;
+            r.in_code_block = true;
+            r.need_indent = true;
             if (r.flags & MD_ANSI_FLAG_CODE_META != 0) {
                 const meta_opt = ansi_code_meta_push(r);
                 if (meta_opt) |meta| {
@@ -591,19 +591,19 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         .html => {},
 
         .p => {
-            if (r.need_newline != 0 and r.li_opened == 0) {
+            if (r.need_newline and !r.li_opened) {
                 render_separator(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
-            if (r.li_opened == 0)
+            if (!r.li_opened)
                 render_indent(r);
-            r.li_opened = 0;
+            r.li_opened = false;
         },
 
         .table => {
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_separator(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
         },
 
@@ -623,11 +623,11 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
 
         .frontmatter => {
             if (r.component_nesting > 0) {
-                r.in_comp_frontmatter = 1;
+                r.in_comp_frontmatter = true;
             } else if (r.flags & MD_ANSI_FLAG_SHOW_FRONTMATTER != 0) {
                 render_ansi(r, ANSI_DIM);
             } else {
-                r.in_comp_frontmatter = 1;
+                r.in_comp_frontmatter = true;
             }
         },
 
@@ -658,9 +658,9 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
                 if (color == null) color = ANSI_COLOR_YELLOW;
             }
 
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_separator(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.component_nesting += 1;
             if (color != null) {
@@ -674,7 +674,7 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
                 render_ansi(r, ANSI_BOLD_OFF);
                 render_ansi(r, ANSI_COLOR_DEFAULT);
                 render_newline(r);
-                r.in_alert = 1;
+                r.in_alert = true;
             } else {
                 render_ansi(r, ANSI_COLOR_CYAN);
             }
@@ -683,9 +683,9 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         .alert => |*det| {
             var color = alert_type_color(det.type_name.text.ptr, det.type_name.size());
             if (color == null) color = ANSI_COLOR_YELLOW;
-            if (r.need_newline != 0) {
+            if (r.need_newline) {
                 render_separator(r);
-                r.need_newline = 0;
+                r.need_newline = false;
             }
             r.alert_color = color;
             // Render title line: ▌ TYPE
@@ -699,7 +699,7 @@ fn enter_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
             render_ansi(r, ANSI_COLOR_DEFAULT);
             render_newline(r);
             // Set in_alert after title so render_indent doesn't double-bar
-            r.in_alert = 1;
+            r.in_alert = true;
         },
 
         .template => {
@@ -722,14 +722,14 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
 
         .ul => {
             r.ol_counter = 0;
-            r.li_opened = 0;
-            r.need_newline = 1;
+            r.li_opened = false;
+            r.need_newline = true;
         },
 
         .ol => {
             r.ol_counter = 0;
-            r.li_opened = 0;
-            r.need_newline = 1;
+            r.li_opened = false;
+            r.need_newline = true;
         },
 
         .li => {
@@ -742,7 +742,7 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         .h => {
             render_ansi(r, ANSI_RESET);
             render_newline(r);
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .code => {
@@ -751,19 +751,19 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
                 r.code_blocks.?[@intCast(r.n_code_blocks)].end = r.output_offset;
                 r.n_code_blocks += 1;
             }
-            r.in_code_block = 0;
-            r.need_newline = 1;
+            r.in_code_block = false;
+            r.need_newline = true;
         },
 
         .html => {},
 
         .p => {
             render_newline(r);
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .table => {
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .thead => {
@@ -790,29 +790,29 @@ fn leave_block_callback(detail: *const c.BlockDetail, userdata: ?*anyopaque) c.C
         },
 
         .frontmatter => {
-            if (r.in_comp_frontmatter != 0) {
-                r.in_comp_frontmatter = 0;
+            if (r.in_comp_frontmatter) {
+                r.in_comp_frontmatter = false;
             } else {
                 render_ansi(r, ANSI_DIM_OFF);
-                r.need_newline = 1;
+                r.need_newline = true;
             }
         },
 
         .component => {
             r.component_nesting -= 1;
-            if (r.in_alert != 0) {
-                r.in_alert = 0;
+            if (r.in_alert) {
+                r.in_alert = false;
                 r.alert_color = null;
             } else {
                 render_ansi(r, ANSI_COLOR_DEFAULT);
             }
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .alert => {
-            r.in_alert = 0;
+            r.in_alert = false;
             r.alert_color = null;
-            r.need_newline = 1;
+            r.need_newline = true;
         },
 
         .template => {
@@ -906,7 +906,7 @@ fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata:
     const size: c.MD_SIZE = @intCast(text_slice.len);
 
     // Suppress component frontmatter text.
-    if (r.in_comp_frontmatter != 0)
+    if (r.in_comp_frontmatter)
         return 0;
 
     switch (text_type) {
@@ -937,18 +937,18 @@ fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata:
         },
 
         .code => {
-            if (r.in_code_block != 0) {
+            if (r.in_code_block) {
                 // Inside code block: the parser sends each line and its \n
                 // as separate callbacks. We use need_indent to track when
                 // we need to emit the indent prefix at line start.
                 if (size == 1 and text[0] == '\n') {
                     render_newline(r);
-                    r.need_indent = 1;
+                    r.need_indent = true;
                 } else {
-                    if (r.need_indent != 0) {
+                    if (r.need_indent) {
                         render_indent(r);
                         render_verbatim_lit(r, "  ");
-                        r.need_indent = 0;
+                        r.need_indent = false;
                     }
                     render_verbatim(r, text, size);
                 }
