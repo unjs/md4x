@@ -30,7 +30,8 @@ hashes, golden SAX trace unchanged, nothing re-recorded):
 | 6 — doc gaps (first two bullets)  | `494cf3f`, `73d6e27`            |
 | 9a — quadratic `{...}` attrs scan | `521bca5`                       |
 | 1c — attr builder OOM free length | `efd4025`                       |
-| 8 — `zig build test` in CI + safe | _the commit adding this row_    |
+| 8 — `zig build test` in CI + safe | `4855d1b`                       |
+| 9b — out-of-range mark cursor     | _the commit adding this row_    |
 
 Zero `TRUE`/`FALSE` tokens remain in `src/`. Verified at `3c3d2f7`: `zig build`,
 `zig build test` (ReleaseFast **and** Debug), 16 spec suites / 1001 assertions,
@@ -82,14 +83,14 @@ verified by reproduction — item 9 is user-visible on ordinary MDC prose. They
 are not refactors, they must not ride along with one, and item 9 deliberately
 **breaks the "corpus diff must be empty" rule** because the baseline currently
 encodes the bug. Read the gate exception on item 9 before touching it. (9a, the
-reachable DoS, is **landed** — see the table above.)
+reachable DoS, and 9b, the out-of-range mark cursor, are **landed** — see the
+table above.)
 
 **Suggested priority.** `8` is **landed** (it was why three of these bugs went
 unseen); take the rest in any order.
 
-**Ordering constraint.** Items 7/5 and bug 9b all rewrite overlapping parser
-files and must stay **serial**. Renderer-only and docs-only work parallelizes
-freely.
+**Ordering constraint.** Items 7 and 5 rewrite overlapping parser files and must
+stay **serial**. Renderer-only and docs-only work parallelizes freely.
 
 **Do not fold a bug fix into a refactor commit**, and do not let a refactor
 "tidy" an adjacent bug — constraint #4 makes the refactors type/name-only, and
@@ -207,26 +208,35 @@ All three sub-problems are fixed; see the landed table above.
 > These are **not** refactors and must not ride along with one. Each needs its
 > own commit and its own regression test.
 
-### 9b. Out-of-range pointer in `md_scan_left_for_resolved_mark`
+### ~~9b. Out-of-range pointer in `md_scan_left_for_resolved_mark`~~ — LANDED
 
-`inlines.zig:1482`. The walk is
-`while (@intFromPtr(mark) >= @intFromPtr(ctx.marks.items.ptr)) : (mark -= 1)`.
-At index 0 the continue-expression forms `items.ptr - 1`. Zig lowers `[*c]T`
-arithmetic through `getelementptr`; an out-of-range result is **poison**, and
-the `@intFromPtr` comparison propagates it. That pointer is also **stored** into
-`left_cursor` and fed back in on the next call (`:1557`). Never dereferenced, so
-nothing mis-renders today.
+Confirmed before fixing, with temporary instrumentation on a Debug build: the
+hand-traced trigger was right (the real mark table has 3 entries, not 2, but the
+mechanism is exactly as described). `a.b@c.d` prints
+`cursor index -1 ... off=1`; `a.b.c@d.e` forms the terminal at `off=3` and then
+**re-enters the scan with it** at `off=1`; `a-b_c.d@e.f` re-enters three times.
 
-Trigger (hand-traced): input `a.b@c.d` produces `marks[0]='@'(beg=3)`,
-`marks[1]='D'(beg=0,end=7)`; the permissive-autolink username back-scan calls
-`md_scan_left_for_resolved_mark(ctx, &marks[0], 1, &left_cursor)`, and
-`marks[0].beg(3) > off(1)` → continue → `&marks[-1]`.
+The `left_cursor`/`right_cursor` pair is now a signed mark index
+(`inlines.MarkCursor` = `isize`), and the two scans return `?*MD_MARK` instead
+of `[*c]MD_MARK`. Both terminals are representable — `-1` on the left,
+`nMarks()` on the right — with no pointer formed. Traversal order, the visited
+mark set and every early exit are unchanged (constraint #4): the loop bound
+`mark >= items.ptr` became `idx >= 0` and `mark < end_ptr` became
+`idx < nMarks()`, nothing else. Corpus diff empty at 168 hashes, golden SAX
+trace unchanged.
 
-Fix: switch the `left_cursor`/`right_cursor` pair to **indices** rather than
-pointers. This is control-flow-adjacent, so under constraint #4 it must **not**
-ride along with item 2's mechanical renaming — separate commit, preferably
-_after_ item 2 so that diff stays purely mechanical. (The sibling
-`md_scan_right_for_resolved_mark` at `:1498` is fine; one-past-the-end is legal.)
+Regression coverage: a unit test pinning both helpers' cursor terminals _and_
+the inert re-feed of a terminal cursor, plus an end-to-end `md_parse` case over
+eight back-scan inputs. Both run in the ReleaseSafe test artifact item 8 pinned,
+so the new `items[@intCast(idx)]` bounds checks are armed on this path — which
+is the only kind of proof a no-output-change UB fix can have.
+
+**No `test/regressions.txt` case, on purpose.** Output never changed, so a
+rendered-HTML diff has no signal here; and `test/*.txt` is itself a
+`diff-corpus.sh` **input**, so adding cases mutates six corpus hashes (one per
+format) and forces a re-baseline. Item 9b was granted no gate exception, so the
+cost buys nothing. If a `.txt` case is ever wanted for this, land it alongside
+item 9, which already requires a deliberate re-baseline.
 
 ### 9. `::component` / `#slot` retroactively flips an earlier list to loose
 

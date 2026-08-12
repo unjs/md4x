@@ -843,6 +843,135 @@ test "no callback abort: md_parse returns 0" {
     try std.testing.expectEqual(@as(c_int, 0), md_parse(@ptrCast(input), @intCast(input.len), &p, &probe));
 }
 
+// Regression for PLAN item 9b — out-of-range pointer in the permissive-autolink
+// boundary scans.
+//
+// `md_scan_left_for_resolved_mark` walks DOWNWARD and legitimately runs one step
+// past index 0. While its cursor was a `[*c]MD_MARK`, that step formed
+// `ctx.marks.items.ptr - 1` — out-of-range pointer arithmetic, which Zig lowers
+// through `getelementptr` and which is POISON, propagated by the loop's own
+// `@intFromPtr` comparison. Worse, the terminal value was STORED through
+// `p_cursor` and handed back to the next call. The cursor pair is now a signed
+// index (`inlines.MarkCursor`), which represents both terminals — -1 on the
+// left, `nMarks()` on the right — exactly, without forming a pointer.
+//
+// This case pins the helper contract directly; the end-to-end case below drives
+// the same terminals from real input.
+test "scan-for-resolved-mark: both cursor terminals are representable indices" {
+    var ctx: MD_CTX = .{ .alloc = std.testing.allocator };
+    defer ctx.marks.deinit(ctx.alloc);
+
+    // Mirrors the mark table `a.b.c@d.e` produces: the '@' permissive-autolink
+    // opener, plus the 'D' dummy spanning the line. Neither is resolved, so
+    // every scan walks off its end — the case that used to go out of range.
+    (try inlines.md_add_mark(&ctx)).* = .{ .beg = 5, .end = 6, .ch = '@' };
+    (try inlines.md_add_mark(&ctx)).* = .{ .beg = 0, .end = 9, .ch = 'D' };
+
+    // Left: mark[0].beg (5) > off (3) → `continue` steps to -1 and terminates.
+    var cursor: inlines.MarkCursor = 0;
+    try std.testing.expect(inlines.md_scan_left_for_resolved_mark(&ctx, cursor, 3, &cursor) == null);
+    try std.testing.expectEqual(@as(inlines.MarkCursor, -1), cursor);
+    // ...and the terminal cursor is fed straight back in on the next iteration
+    // of the username back-scan: the loop must not run, the cursor must not move.
+    try std.testing.expect(inlines.md_scan_left_for_resolved_mark(&ctx, cursor, 1, &cursor) == null);
+    try std.testing.expectEqual(@as(inlines.MarkCursor, -1), cursor);
+
+    // Right: one-past-the-end was always a legal pointer, but the cursor is half
+    // of the same pair, so pin its terminal and its no-op re-feed too.
+    const n_marks: inlines.MarkCursor = ctx.nMarks();
+    cursor = 0;
+    try std.testing.expect(inlines.md_scan_right_for_resolved_mark(&ctx, cursor, 7, &cursor) == null);
+    try std.testing.expectEqual(n_marks, cursor);
+    try std.testing.expect(inlines.md_scan_right_for_resolved_mark(&ctx, cursor, 8, &cursor) == null);
+    try std.testing.expectEqual(n_marks, cursor);
+}
+
+// End-to-end companion to the case above: real inputs whose e-mail-autolink
+// username back-scan drives the left cursor to its terminal. The two multi-dot
+// forms additionally re-enter the scan with the terminal cursor. The test
+// artifact is pinned to a safety-armed mode (see the runtime-safety test at the
+// top of this section), so the index rewrite's bounds checks are live here.
+const HrefProbe = struct {
+    alloc: std.mem.Allocator,
+    out: std.ArrayListUnmanaged(u8) = .empty,
+    oom: bool = false,
+
+    fn enterSpan(detail: *const c.SpanDetail, ud: ?*anyopaque) c.CallbackResult {
+        const self: *HrefProbe = @ptrCast(@alignCast(ud.?));
+        switch (detail.*) {
+            c.SpanType.a => |x| {
+                self.out.appendSlice(self.alloc, x.href.text) catch {
+                    self.oom = true;
+                };
+                self.out.append(self.alloc, '\n') catch {
+                    self.oom = true;
+                };
+            },
+            else => {},
+        }
+        return 0;
+    }
+    fn noopBlock(detail: *const c.BlockDetail, ud: ?*anyopaque) c.CallbackResult {
+        _ = detail;
+        _ = ud;
+        return 0;
+    }
+    fn noopSpan(detail: *const c.SpanDetail, ud: ?*anyopaque) c.CallbackResult {
+        _ = detail;
+        _ = ud;
+        return 0;
+    }
+    fn noopText(ty: c.TextType, str: []const CHAR, ud: ?*anyopaque) c.CallbackResult {
+        _ = ty;
+        _ = str;
+        _ = ud;
+        return 0;
+    }
+
+    fn parser() c.Parser {
+        var p: c.Parser = .{};
+        p.flags = c.MD_DIALECT_ALL;
+        p.enter_block = HrefProbe.noopBlock;
+        p.leave_block = HrefProbe.noopBlock;
+        p.enter_span = HrefProbe.enterSpan;
+        p.leave_span = HrefProbe.noopSpan;
+        p.text = HrefProbe.noopText;
+        return p;
+    }
+};
+
+test "permissive e-mail autolink: multi-dot user name back-scan (PLAN 9b repro)" {
+    const Case = struct { input: []const u8, hrefs: []const u8 };
+    const cases = [_]Case{
+        // Single '.' in the user name: forms the terminal cursor once.
+        .{ .input = "a.b@c.d\n", .hrefs = "mailto:a.b@c.d\n" },
+        // Two: the second scan is entered WITH the terminal cursor.
+        .{ .input = "a.b.c@d.e\n", .hrefs = "mailto:a.b.c@d.e\n" },
+        // The other back-scan separators ('-', '_', '+'), three re-entries deep.
+        .{ .input = "a-b_c.d@e.f\n", .hrefs = "mailto:a-b_c.d@e.f\n" },
+        .{ .input = "x+y.z@w.v\n", .hrefs = "mailto:x+y.z@w.v\n" },
+        // A resolved mark to the left, so the scan terminates on a mark instead
+        // of on the terminal — the branch that must keep working unchanged.
+        .{ .input = "*e*a.b@c.d\n", .hrefs = "" },
+        .{ .input = "*e* a.b@c.d\n", .hrefs = "mailto:a.b@c.d\n" },
+        // Right-cursor side: a URL autolink whose scan walks off the end.
+        .{ .input = "www.a-b.com/x_y and q.r@s.t\n", .hrefs = "http://www.a-b.com/x_y\nmailto:q.r@s.t\n" },
+        // Degenerate: user name is entirely separators, so the back-scan stops
+        // immediately and md_analyze_permissive_autolink bails ("empty user name").
+        .{ .input = ".@c.d\n", .hrefs = "" },
+    };
+
+    for (cases) |case| {
+        var probe = HrefProbe{ .alloc = std.testing.allocator };
+        defer probe.out.deinit(std.testing.allocator);
+        var p = HrefProbe.parser();
+        const ret = md_parse(@ptrCast(case.input.ptr), @intCast(case.input.len), &p, &probe);
+        try std.testing.expectEqual(@as(c_int, 0), ret);
+        try std.testing.expect(!probe.oom);
+        try std.testing.expectEqualStrings(case.hrefs, probe.out.items);
+    }
+}
+
 test "link label hash + cmp: whitespace & case-fold equivalence" {
     // Case-fold + whitespace collapse mean these labels are equivalent.
     const a = "Foo   Bar";

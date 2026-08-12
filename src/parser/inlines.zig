@@ -1516,34 +1516,45 @@ pub fn md_analyze_dollar(ctx: *MD_CTX, mark_index: c_int) void {
         md_mark_stack_push(ctx, &ctx.opener_stacks[DOLLAR_OPENERS], mark_index);
 }
 
+// The cursor the two scans below carry across calls is a SIGNED MARK INDEX, not
+// a pointer. Both walks legitimately run one step past their end — the left one
+// down to -1, the right one up to `nMarks()` — and only the right of those is a
+// legal pointer value. Forming `marks.items.ptr - 1` was out-of-range pointer
+// arithmetic (poison under `getelementptr`), and the left scan additionally
+// STORED it through `p_cursor` for the next call to read back. An `isize` index
+// represents both out-of-range terminals exactly, with no pointer ever formed.
+pub const MarkCursor = isize;
+
 // md4x.c ~4159.
-pub fn md_scan_left_for_resolved_mark(ctx: *MD_CTX, mark_from: [*c]MD_MARK, off: OFF, p_cursor: ?*[*c]MD_MARK) [*c]MD_MARK {
-    var mark = mark_from;
-    while (@intFromPtr(mark) >= @intFromPtr(ctx.marks.items.ptr)) : (mark -= 1) {
-        if (mark.*.ch == 'D' or mark.*.beg > off) continue;
-        if (mark.*.beg <= off and off < mark.*.end and (mark.*.flags & MarkFlags.resolved != 0)) {
-            if (p_cursor != null) p_cursor.?.* = mark;
+pub fn md_scan_left_for_resolved_mark(ctx: *MD_CTX, mark_from: MarkCursor, off: OFF, p_cursor: ?*MarkCursor) ?*MD_MARK {
+    var idx = mark_from;
+    while (idx >= 0) : (idx -= 1) {
+        const mark = &ctx.marks.items[@intCast(idx)];
+        if (mark.ch == 'D' or mark.beg > off) continue;
+        if (mark.beg <= off and off < mark.end and (mark.flags & MarkFlags.resolved != 0)) {
+            if (p_cursor != null) p_cursor.?.* = idx;
             return mark;
         }
-        if (mark.*.end <= off) break;
+        if (mark.end <= off) break;
     }
-    if (p_cursor != null) p_cursor.?.* = mark;
+    if (p_cursor != null) p_cursor.?.* = idx;
     return null;
 }
 
 // md4x.c ~4181.
-pub fn md_scan_right_for_resolved_mark(ctx: *MD_CTX, mark_from: [*c]MD_MARK, off: OFF, p_cursor: ?*[*c]MD_MARK) [*c]MD_MARK {
-    var mark = mark_from;
-    const end_ptr = ctx.marks.items.ptr + @as(usize, @intCast(ctx.nMarks()));
-    while (@intFromPtr(mark) < @intFromPtr(end_ptr)) : (mark += 1) {
-        if (mark.*.ch == 'D' or mark.*.end <= off) continue;
-        if (mark.*.beg <= off and off < mark.*.end and (mark.*.flags & MarkFlags.resolved != 0)) {
-            if (p_cursor != null) p_cursor.?.* = mark;
+pub fn md_scan_right_for_resolved_mark(ctx: *MD_CTX, mark_from: MarkCursor, off: OFF, p_cursor: ?*MarkCursor) ?*MD_MARK {
+    var idx = mark_from;
+    const n_marks: MarkCursor = ctx.nMarks();
+    while (idx < n_marks) : (idx += 1) {
+        const mark = &ctx.marks.items[@intCast(idx)];
+        if (mark.ch == 'D' or mark.end <= off) continue;
+        if (mark.beg <= off and off < mark.end and (mark.flags & MarkFlags.resolved != 0)) {
+            if (p_cursor != null) p_cursor.?.* = idx;
             return mark;
         }
-        if (mark.*.beg > off) break;
+        if (mark.beg > off) break;
     }
-    if (p_cursor != null) p_cursor.?.* = mark;
+    if (p_cursor != null) p_cursor.?.* = idx;
     return null;
 }
 
@@ -1569,9 +1580,9 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
     const line_end: OFF = closer.end;
     var beg: OFF = opener.beg;
     var end: OFF = opener.end;
-    var left_cursor: [*c]MD_MARK = opener;
+    var left_cursor: MarkCursor = mark_index;
     var left_boundary_ok: bool = false;
-    var right_cursor: [*c]MD_MARK = opener;
+    var right_cursor: MarkCursor = mark_index;
     var right_boundary_ok: bool = false;
 
     if (opener.ch == '@') {
@@ -1595,7 +1606,7 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
         left_boundary_ok = true;
     } else if (ctx.isAnyOf(beg - 1, "*_~")) {
         const left_mark = md_scan_left_for_resolved_mark(ctx, left_cursor, beg - 1, &left_cursor);
-        if (left_mark != null and (left_mark.*.flags & MarkFlags.opener != 0)) left_boundary_ok = true;
+        if (left_mark != null and (left_mark.?.flags & MarkFlags.opener != 0)) left_boundary_ok = true;
     }
     if (!left_boundary_ok) return;
 
@@ -1646,7 +1657,7 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
         right_boundary_ok = true;
     } else {
         const right_mark = md_scan_right_for_resolved_mark(ctx, right_cursor, end, &right_cursor);
-        if (right_mark != null and (right_mark.*.flags & MarkFlags.closer != 0)) right_boundary_ok = true;
+        if (right_mark != null and (right_mark.?.flags & MarkFlags.closer != 0)) right_boundary_ok = true;
     }
     if (!right_boundary_ok) return;
 
