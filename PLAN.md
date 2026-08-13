@@ -43,8 +43,34 @@ same-toolchain A/B against `571aa9c` (the last commit with the C wired in).
 | `md4x-small.wasm` gzip | 108,514 | 108,939 | +425 (+0.4%) |
 | ns / 296-byte frontmatter | ~5,500 | ~7,800 | **~1.4x slower** |
 
-**The size and speed case did not materialise.** Two self-inflicted causes were
-found and fixed, and they are the reason the numbers are not worse:
+**The size and speed case did not materialise.**
+
+A per-function breakdown of both wasm binaries (parsing the `name` section
+directly) shows the growth is entirely the port, and nothing else:
+
+| bucket | C build | Zig build | delta |
+| --- | --- | --- | --- |
+| YAML implementation | 62,720 | **89,011** | **+26,291 (1.42x)** |
+| md4x parser/renderers | 99,006 | 99,124 | +118 |
+| std / libc / runtime | 159,522 | 160,225 | +703 |
+
+and it concentrates in the three scalar scanners — ~10.5 KB of that 26 KB:
+
+| | C | Zig | delta |
+| --- | --- | --- | --- |
+| flow scalar | 9,356 | 14,292 | +4,936 |
+| block scalar | 4,707 | 7,706 | +2,999 |
+| plain scalar | 4,878 | 7,507 | +2,629 |
+
+Those three are exactly where the port uses the most `errdefer`. The C has ONE
+`error:` cleanup block per function that every failure `goto`s to, while Zig
+emits cleanup at every error-propagation site, and each of these scanners
+juggles three or four owned `String`s. Together with an `Allocator` vtable
+indirect call where the C calls `malloc` directly, that is the leading
+hypothesis for both the size and the runtime gap — testable, not yet tested.
+
+Two self-inflicted costs were found and fixed, and they are the reason the
+numbers are not worse:
 
 - `Buffer.init` zeroed the whole 64 KB input window per parser. `BUFFER_INIT`
   in the C mallocs and never memsets. Worth ~11% of runtime — and for
@@ -71,8 +97,10 @@ keeping either way.
 
 - **The emitter, writer, loader and dumper are not ported.** md4x consumes an
   event stream from a byte slice; it never emits YAML and never composes a
-  document tree. That is 3 336 of libyaml's 10 271 lines that simply do not come
-  along.
+  document tree. Note this is **not a size saving**: `build.zig` never compiled
+  those four files, and the linker had already dropped every unreachable
+  function from `api.c` — only 42 libyaml functions, all live, were in the
+  pre-port wasm.
 - **File input is not ported.** `yaml_parser_set_input_string` only; the wasm
   build has no filesystem.
 - **No semantic changes.** Not YAML 1.2, not a different scalar schema, not
