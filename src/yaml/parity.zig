@@ -126,6 +126,19 @@ fn cStr(p: ?[*:0]const u8) ?[]const u8 {
     return if (p) |s| std.mem.span(s) else null;
 }
 
+/// A tag as a C consumer sees it: up to the first NUL.
+///
+/// A tag URI may legally contain an embedded NUL — `%00` survives
+/// `yaml_parser_scan_uri_escapes` — and libyaml builds, stores and hands out
+/// tags with `strlen`/`strcmp`/`yaml_strdup`, so the C side of this harness can
+/// only ever print the strlen prefix. The Zig port carries the same bytes in a
+/// `[:0]u8` whose `.len` may run past that NUL, so printing the whole slice
+/// would report a divergence that exists only in the harness. Anchors need no
+/// such treatment: `yaml_parser_scan_anchor` accepts `IS_ALPHA` bytes only.
+fn tagView(t: [:0]const u8) []const u8 {
+    return std.mem.sliceTo(t, 0);
+}
+
 // ---- The Zig port ----
 
 pub fn dumpZig(alloc: Allocator, input: []const u8, out: *Sink) Allocator.Error!void {
@@ -172,7 +185,7 @@ pub fn dumpZig(alloc: Allocator, input: []const u8, out: *Sink) Allocator.Error!
                 }
                 if (d.tag) |t| {
                     try out.appendSlice(alloc, " <");
-                    try out.appendSlice(alloc, t);
+                    try out.appendSlice(alloc, tagView(t));
                     try out.append(alloc, '>');
                 }
                 try out.append(alloc, '\n');
@@ -186,7 +199,7 @@ pub fn dumpZig(alloc: Allocator, input: []const u8, out: *Sink) Allocator.Error!
                 }
                 if (d.tag) |t| {
                     try out.appendSlice(alloc, " <");
-                    try out.appendSlice(alloc, t);
+                    try out.appendSlice(alloc, tagView(t));
                     try out.append(alloc, '>');
                 }
                 try out.append(alloc, '\n');
@@ -200,7 +213,7 @@ pub fn dumpZig(alloc: Allocator, input: []const u8, out: *Sink) Allocator.Error!
                 }
                 if (d.tag) |t| {
                     try out.appendSlice(alloc, " <");
-                    try out.appendSlice(alloc, t);
+                    try out.appendSlice(alloc, tagView(t));
                     try out.append(alloc, '>');
                 }
                 try out.appendSlice(alloc, switch (d.style) {
@@ -523,11 +536,21 @@ test "parity: inline cases" {
 }
 
 test "parity: corpus" {
-    var checked: usize = 0;
-    for (corpus_dirs) |dir| try checkCorpusDir(testing.allocator, dir, &checked);
-    // Not an assertion on the count: the fetched suite is optional, and the
-    // tracked seed dir is small on purpose.
-    if (checked == 0) std.debug.print("(no corpus files found; ran inline cases only)\n", .{});
+    // The seed dir is tracked, so a zero count there means the walk itself is
+    // broken (wrong cwd, a `dirent` layout this build does not know) — and a
+    // silently-empty corpus would make this test pass for the wrong reason,
+    // which is the one failure mode a parity gate must not have.
+    var seeds: usize = 0;
+    try checkCorpusDir(testing.allocator, corpus_dirs[0], &seeds);
+    try testing.expect(seeds >= 20);
+
+    // The fetched yaml-test-suite is optional (scripts/fetch-yaml-corpus.sh).
+    var suite: usize = 0;
+    try checkCorpusDir(testing.allocator, corpus_dirs[1], &suite);
+    if (suite == 0) std.debug.print(
+        "(no yaml-test-suite corpus; run scripts/fetch-yaml-corpus.sh)\n",
+        .{},
+    );
 }
 
 test "parity: fuzz" {
