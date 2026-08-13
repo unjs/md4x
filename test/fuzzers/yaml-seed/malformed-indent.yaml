@@ -1,0 +1,5 @@
+ok: 1
+bad indent:
+ a: 1
+  b: 2
+after: 2

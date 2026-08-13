@@ -1,0 +1,8 @@
+authors:
+  - name: Pooya Parsa
+    to: https://github.com/pi0
+  - name: Someone Else
+    to: https://example.com
+links:
+  - label: Docs
+    icon: i-lucide-book

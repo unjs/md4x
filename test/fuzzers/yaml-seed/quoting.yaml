@@ -1,0 +1,8 @@
+plain: a b c
+single: 'it''s here'
+double: "a \"b\" c \n \t \u00e9 \x41"
+empty_double: ""
+empty_single: ''
+multiline_plain: a
+  b
+  c

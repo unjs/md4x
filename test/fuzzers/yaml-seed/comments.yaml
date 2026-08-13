@@ -1,0 +1,6 @@
+# leading comment
+key: value # trailing
+
+# between
+other: value
+#trailing eof comment

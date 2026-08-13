@@ -117,6 +117,10 @@ pub fn build(b: *std.Build) void {
 
     addZigFuzzer(b, target, include_paths, libyaml_src, abi_mod);
 
+    // --- YAML port: differential harness against the vendored C libyaml ---
+
+    addYamlParity(b, target, include_paths, libyaml_src);
+
     // --- WASM & NAPI targets ---
 
     const pkg_optimize: std.builtin.OptimizeMode = .ReleaseFast;
@@ -325,6 +329,37 @@ fn addNapi(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
     }
 
     return napi_all_step;
+}
+
+/// Differential harness for the pure-Zig libyaml port (`src/yaml/`).
+///
+/// The C libyaml this links is the SAME vendored source the shipped artifacts
+/// compile — the oracle has to be the exact code being replaced, not a system
+/// copy. `src/yaml/parity.zig` drives both implementations over the same bytes
+/// and compares their event streams; the port's own unit tests are pulled into
+/// the same binary, so one step covers everything under `src/yaml/`.
+///
+/// Built ReleaseSafe regardless of -Doptimize: a port that only agrees with C
+/// because an out-of-bounds read happened to land on the right byte is not a
+/// port, and only the safety checks can tell the difference.
+///
+///   zig build yaml-parity           # corpus + inline cases
+///   zig build yaml-parity --fuzz    # coverage-guided differential fuzzing
+fn addYamlParity(b: *std.Build, target: std.Build.ResolvedTarget, include_paths: []const std.Build.LazyPath, libyaml_src: std.Build.Module.AddCSourceFilesOptions) void {
+    const parity_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/yaml/parity.zig"),
+            .target = target,
+            .optimize = .ReleaseSafe,
+            .link_libc = true,
+            .single_threaded = true,
+        }),
+    });
+    for (include_paths) |p| parity_tests.root_module.addIncludePath(p);
+    parity_tests.root_module.addCSourceFiles(libyaml_src);
+    const run_parity_tests = b.addRunArtifact(parity_tests);
+    const parity_step = b.step("yaml-parity", "Diff the Zig YAML port against the vendored C libyaml (add --fuzz)");
+    parity_step.dependOn(&run_parity_tests.step);
 }
 
 /// Zig-native, coverage-instrumented fuzz harness (`src/fuzz.zig`). It imports

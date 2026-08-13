@@ -1,0 +1,6 @@
+%TAG !e! tag:example.com,2000:
+---
+plain: !e!foo bar
+std: !!str 123
+verbatim: !<tag:yaml.org,2002:int> 7
+non_specific: ! plain

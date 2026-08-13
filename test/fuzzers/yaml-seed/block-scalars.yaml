@@ -1,0 +1,14 @@
+literal: |
+  line one
+  line two
+folded: >
+  folded one
+  folded two
+keep: |+
+  kept
+
+
+strip: |-
+  stripped
+indent_indicator: |2
+   two-space body

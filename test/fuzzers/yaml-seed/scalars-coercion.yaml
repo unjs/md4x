@@ -1,0 +1,15 @@
+nil: ~
+null_word: null
+empty:
+yes_bool: yes
+no_bool: no
+on_bool: on
+off_bool: off
+true_bool: true
+int: 42
+negative: -7
+float: 1.5
+exp: 1e3
+octal: 0o17
+hex: 0x1F
+string_num: "42"

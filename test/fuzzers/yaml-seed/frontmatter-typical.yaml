@@ -1,0 +1,8 @@
+title: Getting started
+description: A fast markdown parser
+navigation:
+  title: Intro
+  icon: i-heroicons-home
+tags: [markdown, parser, zig]
+draft: false
+version: 1.4

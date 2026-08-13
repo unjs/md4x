@@ -1,0 +1,8 @@
+base: &base
+  a: 1
+  b: 2
+derived:
+  <<: *base
+  b: 3
+alias_scalar: &s hello
+use: *s

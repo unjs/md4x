@@ -97,3 +97,6 @@ stamp-*
 
 # Core dumps (e.g. ZLS crashes in the editor)
 core.*
+
+# Zig YAML port: fetched yaml-test-suite corpus (scripts/fetch-yaml-corpus.sh)
+test/fuzzers/yaml-corpus/
