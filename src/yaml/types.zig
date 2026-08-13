@@ -176,7 +176,7 @@ pub const Token = struct {
     start_mark: Mark = .{},
     end_mark: Mark = .{},
 
-    pub inline fn getType(self: *const Token) TokenType {
+    pub fn getType(self: *const Token) TokenType {
         return self.data;
     }
 
@@ -231,7 +231,7 @@ pub const Event = struct {
     start_mark: Mark = .{},
     end_mark: Mark = .{},
 
-    pub inline fn getType(self: *const Event) EventType {
+    pub fn getType(self: *const Event) EventType {
         return self.data;
     }
 
@@ -407,13 +407,13 @@ pub const Parser = struct {
 
     /// `CACHE(parser, length)`: make sure at least `length` characters are
     /// decoded and available at the cursor.
-    pub inline fn cache(self: *Parser, length: usize) Error!void {
+    pub fn cache(self: *Parser, length: usize) Error!void {
         if (self.unread >= length) return;
         return @import("reader.zig").updateBuffer(self, length);
     }
 
     /// `SKIP(parser)`: step over one character.
-    pub inline fn skip(self: *Parser) void {
+    pub fn skip(self: *Parser) void {
         self.mark.index += 1;
         self.mark.column += 1;
         self.unread -= 1;
@@ -421,7 +421,7 @@ pub const Parser = struct {
     }
 
     /// `SKIP_LINE(parser)`: step over one line break, whatever its spelling.
-    pub inline fn skipLine(self: *Parser) void {
+    pub fn skipLine(self: *Parser) void {
         if (chars.isCrlf(&self.buffer)) {
             self.mark.index += 2;
             self.mark.column = 0;
@@ -438,7 +438,7 @@ pub const Parser = struct {
     }
 
     /// `READ(parser, string)`: copy one character into `s` and step over it.
-    pub inline fn read(self: *Parser, s: *String) Error!void {
+    pub fn read(self: *Parser, s: *String) Error!void {
         try s.extend(self.alloc);
         const w = chars.width(&self.buffer);
         var i: usize = 0;
@@ -451,7 +451,7 @@ pub const Parser = struct {
 
     /// `READ_LINE(parser, string)`: copy one line break into `s`, normalising
     /// CR, CRLF and NEL to LF while leaving LS and PS as they are.
-    pub inline fn readLine(self: *Parser, s: *String) Error!void {
+    pub fn readLine(self: *Parser, s: *String) Error!void {
         try s.extend(self.alloc);
         const b = &self.buffer;
         if (chars.checkAt(b, '\r', 0) and chars.checkAt(b, '\n', 1)) {
@@ -495,91 +495,91 @@ pub const Parser = struct {
 
     // ---- Character predicates over the cursor ----
 
-    pub inline fn check(self: *const Parser, octet: u8) bool {
+    pub fn check(self: *const Parser, octet: u8) bool {
         return chars.check(&self.buffer, octet);
     }
-    pub inline fn checkAt(self: *const Parser, octet: u8, offset: usize) bool {
+    pub fn checkAt(self: *const Parser, octet: u8, offset: usize) bool {
         return chars.checkAt(&self.buffer, octet, offset);
     }
-    pub inline fn isAlpha(self: *const Parser) bool {
+    pub fn isAlpha(self: *const Parser) bool {
         return chars.isAlpha(&self.buffer);
     }
-    pub inline fn isAlphaAt(self: *const Parser, offset: usize) bool {
+    pub fn isAlphaAt(self: *const Parser, offset: usize) bool {
         return chars.isAlphaAt(&self.buffer, offset);
     }
-    pub inline fn isDigit(self: *const Parser) bool {
+    pub fn isDigit(self: *const Parser) bool {
         return chars.isDigit(&self.buffer);
     }
-    pub inline fn isDigitAt(self: *const Parser, offset: usize) bool {
+    pub fn isDigitAt(self: *const Parser, offset: usize) bool {
         return chars.isDigitAt(&self.buffer, offset);
     }
-    pub inline fn asDigit(self: *const Parser) u8 {
+    pub fn asDigit(self: *const Parser) u8 {
         return chars.asDigit(&self.buffer);
     }
-    pub inline fn isHex(self: *const Parser) bool {
+    pub fn isHex(self: *const Parser) bool {
         return chars.isHex(&self.buffer);
     }
-    pub inline fn isHexAt(self: *const Parser, offset: usize) bool {
+    pub fn isHexAt(self: *const Parser, offset: usize) bool {
         return chars.isHexAt(&self.buffer, offset);
     }
-    pub inline fn asHexAt(self: *const Parser, offset: usize) u8 {
+    pub fn asHexAt(self: *const Parser, offset: usize) u8 {
         return chars.asHexAt(&self.buffer, offset);
     }
-    pub inline fn isAscii(self: *const Parser) bool {
+    pub fn isAscii(self: *const Parser) bool {
         return chars.isAscii(&self.buffer);
     }
-    pub inline fn isPrintable(self: *const Parser) bool {
+    pub fn isPrintable(self: *const Parser) bool {
         return chars.isPrintable(&self.buffer);
     }
-    pub inline fn isZ(self: *const Parser) bool {
+    pub fn isZ(self: *const Parser) bool {
         return chars.isZ(&self.buffer);
     }
-    pub inline fn isZAt(self: *const Parser, offset: usize) bool {
+    pub fn isZAt(self: *const Parser, offset: usize) bool {
         return chars.isZAt(&self.buffer, offset);
     }
-    pub inline fn isBom(self: *const Parser) bool {
+    pub fn isBom(self: *const Parser) bool {
         return chars.isBom(&self.buffer);
     }
-    pub inline fn isSpace(self: *const Parser) bool {
+    pub fn isSpace(self: *const Parser) bool {
         return chars.isSpace(&self.buffer);
     }
-    pub inline fn isSpaceAt(self: *const Parser, offset: usize) bool {
+    pub fn isSpaceAt(self: *const Parser, offset: usize) bool {
         return chars.isSpaceAt(&self.buffer, offset);
     }
-    pub inline fn isTab(self: *const Parser) bool {
+    pub fn isTab(self: *const Parser) bool {
         return chars.isTab(&self.buffer);
     }
-    pub inline fn isBlank(self: *const Parser) bool {
+    pub fn isBlank(self: *const Parser) bool {
         return chars.isBlank(&self.buffer);
     }
-    pub inline fn isBlankAt(self: *const Parser, offset: usize) bool {
+    pub fn isBlankAt(self: *const Parser, offset: usize) bool {
         return chars.isBlankAt(&self.buffer, offset);
     }
-    pub inline fn isBreak(self: *const Parser) bool {
+    pub fn isBreak(self: *const Parser) bool {
         return chars.isBreak(&self.buffer);
     }
-    pub inline fn isBreakAt(self: *const Parser, offset: usize) bool {
+    pub fn isBreakAt(self: *const Parser, offset: usize) bool {
         return chars.isBreakAt(&self.buffer, offset);
     }
-    pub inline fn isCrlf(self: *const Parser) bool {
+    pub fn isCrlf(self: *const Parser) bool {
         return chars.isCrlf(&self.buffer);
     }
-    pub inline fn isBreakz(self: *const Parser) bool {
+    pub fn isBreakz(self: *const Parser) bool {
         return chars.isBreakz(&self.buffer);
     }
-    pub inline fn isBreakzAt(self: *const Parser, offset: usize) bool {
+    pub fn isBreakzAt(self: *const Parser, offset: usize) bool {
         return chars.isBreakzAt(&self.buffer, offset);
     }
-    pub inline fn isSpacez(self: *const Parser) bool {
+    pub fn isSpacez(self: *const Parser) bool {
         return chars.isSpacez(&self.buffer);
     }
-    pub inline fn isBlankz(self: *const Parser) bool {
+    pub fn isBlankz(self: *const Parser) bool {
         return chars.isBlankz(&self.buffer);
     }
-    pub inline fn isBlankzAt(self: *const Parser, offset: usize) bool {
+    pub fn isBlankzAt(self: *const Parser, offset: usize) bool {
         return chars.isBlankzAt(&self.buffer, offset);
     }
-    pub inline fn width(self: *const Parser) usize {
+    pub fn width(self: *const Parser) usize {
         return chars.width(&self.buffer);
     }
 };

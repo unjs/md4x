@@ -29,6 +29,44 @@ frontmatter), and the pure-Zig ones are either work-in-progress, struct-hydratio
 only, or unproven. Porting is the same move this project already made for md4c,
 at similar scale.
 
+## Measured outcome (2026-08-13)
+
+The port is **done and proven behaviourally identical**. The size and speed
+projections above were the *motivation*; here is what actually happened, in a
+same-toolchain A/B against `571aa9c` (the last commit with the C wired in).
+
+| | C libyaml | Zig port | delta |
+| --- | --- | --- | --- |
+| `md4x.wasm` raw | 387,201 | 414,587 | **+27,386 (+7.1%)** |
+| `md4x.wasm` gzip | 128,659 | 134,981 | +6,322 (+4.9%) |
+| `md4x-small.wasm` raw | 292,407 | 286,541 | **−5,866 (−2.0%)** |
+| `md4x-small.wasm` gzip | 108,514 | 108,939 | +425 (+0.4%) |
+| ns / 296-byte frontmatter | ~5,500 | ~7,800 | **~1.4x slower** |
+
+**The size and speed case did not materialise.** Two self-inflicted causes were
+found and fixed, and they are the reason the numbers are not worse:
+
+- `Buffer.init` zeroed the whole 64 KB input window per parser. `BUFFER_INIT`
+  in the C mallocs and never memsets. Worth ~11% of runtime — and for
+  frontmatter this is once per document, so it was pure overhead.
+- `inline` on the 74 predicate/cursor wrappers cost ~15 KB in ReleaseSmall and
+  ~10 KB in ReleaseFast. The C spells them as macros, but LLVM inlines the Zig
+  ones perfectly well without being forced to.
+
+The likely remaining runtime gap is `String.toOwned`'s shrink-realloc: one
+extra allocator call per scalar that libyaml does not make (it hands the whole
+buffer over, because `yaml_free` needs no length). Removing it means carrying a
+capacity beside every owned string.
+
+What *did* improve is real but not what was advertised: YAML now runs under
+ReleaseSafe and Zig's coverage-guided fuzzer instead of being the one
+UB-capable region of the build, and three upstream hazards (notably the
+unsigned-wrap `memmove` in `roll_indent`) now trap rather than corrupt memory.
+
+**This is a decision point, not a finished argument.** Keep and optimise, keep
+as-is for the safety, or revert — the parity harness and corpus are worth
+keeping either way.
+
 ## Non-goals
 
 - **The emitter, writer, loader and dumper are not ported.** md4x consumes an

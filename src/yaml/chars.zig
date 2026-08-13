@@ -21,17 +21,17 @@ const mem = @import("mem.zig");
 const Buffer = mem.Buffer;
 
 /// `CHECK_AT(string, octet, offset)`
-pub inline fn checkAt(b: *const Buffer, octet: u8, offset: usize) bool {
+pub fn checkAt(b: *const Buffer, octet: u8, offset: usize) bool {
     return b.at(offset) == octet;
 }
 
 /// `CHECK(string, octet)`
-pub inline fn check(b: *const Buffer, octet: u8) bool {
+pub fn check(b: *const Buffer, octet: u8) bool {
     return checkAt(b, octet, 0);
 }
 
 /// `IS_ALPHA_AT`: an ASCII alphanumeric, `_` or `-`.
-pub inline fn isAlphaAt(b: *const Buffer, offset: usize) bool {
+pub fn isAlphaAt(b: *const Buffer, offset: usize) bool {
     const c = b.at(offset);
     return (c >= '0' and c <= '9') or
         (c >= 'A' and c <= 'Z') or
@@ -39,64 +39,64 @@ pub inline fn isAlphaAt(b: *const Buffer, offset: usize) bool {
         c == '_' or c == '-';
 }
 
-pub inline fn isAlpha(b: *const Buffer) bool {
+pub fn isAlpha(b: *const Buffer) bool {
     return isAlphaAt(b, 0);
 }
 
 /// `IS_DIGIT_AT`
-pub inline fn isDigitAt(b: *const Buffer, offset: usize) bool {
+pub fn isDigitAt(b: *const Buffer, offset: usize) bool {
     const c = b.at(offset);
     return c >= '0' and c <= '9';
 }
 
-pub inline fn isDigit(b: *const Buffer) bool {
+pub fn isDigit(b: *const Buffer) bool {
     return isDigitAt(b, 0);
 }
 
 /// `AS_DIGIT_AT`
-pub inline fn asDigitAt(b: *const Buffer, offset: usize) u8 {
+pub fn asDigitAt(b: *const Buffer, offset: usize) u8 {
     return b.at(offset) - '0';
 }
 
-pub inline fn asDigit(b: *const Buffer) u8 {
+pub fn asDigit(b: *const Buffer) u8 {
     return asDigitAt(b, 0);
 }
 
 /// `IS_HEX_AT`
-pub inline fn isHexAt(b: *const Buffer, offset: usize) bool {
+pub fn isHexAt(b: *const Buffer, offset: usize) bool {
     const c = b.at(offset);
     return (c >= '0' and c <= '9') or
         (c >= 'A' and c <= 'F') or
         (c >= 'a' and c <= 'f');
 }
 
-pub inline fn isHex(b: *const Buffer) bool {
+pub fn isHex(b: *const Buffer) bool {
     return isHexAt(b, 0);
 }
 
 /// `AS_HEX_AT`
-pub inline fn asHexAt(b: *const Buffer, offset: usize) u8 {
+pub fn asHexAt(b: *const Buffer, offset: usize) u8 {
     const c = b.at(offset);
     if (c >= 'A' and c <= 'F') return c - 'A' + 10;
     if (c >= 'a' and c <= 'f') return c - 'a' + 10;
     return c - '0';
 }
 
-pub inline fn asHex(b: *const Buffer) u8 {
+pub fn asHex(b: *const Buffer) u8 {
     return asHexAt(b, 0);
 }
 
 /// `IS_ASCII_AT`
-pub inline fn isAsciiAt(b: *const Buffer, offset: usize) bool {
+pub fn isAsciiAt(b: *const Buffer, offset: usize) bool {
     return b.at(offset) <= 0x7F;
 }
 
-pub inline fn isAscii(b: *const Buffer) bool {
+pub fn isAscii(b: *const Buffer) bool {
     return isAsciiAt(b, 0);
 }
 
 /// `IS_PRINTABLE_AT`: a character that can be written unescaped.
-pub inline fn isPrintableAt(b: *const Buffer, offset: usize) bool {
+pub fn isPrintableAt(b: *const Buffer, offset: usize) bool {
     const c = b.at(offset);
     return c == 0x0A // . == #x0A
     or (c >= 0x20 and c <= 0x7E) // #x20 <= . <= #x7E
@@ -106,57 +106,57 @@ pub inline fn isPrintableAt(b: *const Buffer, offset: usize) bool {
     and !(b.at(offset + 1) == 0xBF and (b.at(offset + 2) == 0xBE or b.at(offset + 2) == 0xBF)));
 }
 
-pub inline fn isPrintable(b: *const Buffer) bool {
+pub fn isPrintable(b: *const Buffer) bool {
     return isPrintableAt(b, 0);
 }
 
 /// `IS_Z_AT`: NUL, which is also how libyaml spells end-of-input.
-pub inline fn isZAt(b: *const Buffer, offset: usize) bool {
+pub fn isZAt(b: *const Buffer, offset: usize) bool {
     return checkAt(b, 0, offset);
 }
 
-pub inline fn isZ(b: *const Buffer) bool {
+pub fn isZ(b: *const Buffer) bool {
     return isZAt(b, 0);
 }
 
 /// `IS_BOM_AT`
-pub inline fn isBomAt(b: *const Buffer, offset: usize) bool {
+pub fn isBomAt(b: *const Buffer, offset: usize) bool {
     return checkAt(b, 0xEF, offset) and checkAt(b, 0xBB, offset + 1) and checkAt(b, 0xBF, offset + 2);
 }
 
-pub inline fn isBom(b: *const Buffer) bool {
+pub fn isBom(b: *const Buffer) bool {
     return isBomAt(b, 0);
 }
 
 /// `IS_SPACE_AT`
-pub inline fn isSpaceAt(b: *const Buffer, offset: usize) bool {
+pub fn isSpaceAt(b: *const Buffer, offset: usize) bool {
     return checkAt(b, ' ', offset);
 }
 
-pub inline fn isSpace(b: *const Buffer) bool {
+pub fn isSpace(b: *const Buffer) bool {
     return isSpaceAt(b, 0);
 }
 
 /// `IS_TAB_AT`
-pub inline fn isTabAt(b: *const Buffer, offset: usize) bool {
+pub fn isTabAt(b: *const Buffer, offset: usize) bool {
     return checkAt(b, '\t', offset);
 }
 
-pub inline fn isTab(b: *const Buffer) bool {
+pub fn isTab(b: *const Buffer) bool {
     return isTabAt(b, 0);
 }
 
 /// `IS_BLANK_AT`: space or tab.
-pub inline fn isBlankAt(b: *const Buffer, offset: usize) bool {
+pub fn isBlankAt(b: *const Buffer, offset: usize) bool {
     return isSpaceAt(b, offset) or isTabAt(b, offset);
 }
 
-pub inline fn isBlank(b: *const Buffer) bool {
+pub fn isBlank(b: *const Buffer) bool {
     return isBlankAt(b, 0);
 }
 
 /// `IS_BREAK_AT`: CR, LF, NEL (#x85), LS (#x2028) or PS (#x2029).
-pub inline fn isBreakAt(b: *const Buffer, offset: usize) bool {
+pub fn isBreakAt(b: *const Buffer, offset: usize) bool {
     return checkAt(b, '\r', offset) // CR (#xD)
     or checkAt(b, '\n', offset) // LF (#xA)
     or (checkAt(b, 0xC2, offset) and checkAt(b, 0x85, offset + 1)) // NEL (#x85)
@@ -164,49 +164,49 @@ pub inline fn isBreakAt(b: *const Buffer, offset: usize) bool {
     or (checkAt(b, 0xE2, offset) and checkAt(b, 0x80, offset + 1) and checkAt(b, 0xA9, offset + 2)); // PS (#x2029)
 }
 
-pub inline fn isBreak(b: *const Buffer) bool {
+pub fn isBreak(b: *const Buffer) bool {
     return isBreakAt(b, 0);
 }
 
 /// `IS_CRLF_AT`
-pub inline fn isCrlfAt(b: *const Buffer, offset: usize) bool {
+pub fn isCrlfAt(b: *const Buffer, offset: usize) bool {
     return checkAt(b, '\r', offset) and checkAt(b, '\n', offset + 1);
 }
 
-pub inline fn isCrlf(b: *const Buffer) bool {
+pub fn isCrlf(b: *const Buffer) bool {
     return isCrlfAt(b, 0);
 }
 
 /// `IS_BREAKZ_AT`: a line break or NUL.
-pub inline fn isBreakzAt(b: *const Buffer, offset: usize) bool {
+pub fn isBreakzAt(b: *const Buffer, offset: usize) bool {
     return isBreakAt(b, offset) or isZAt(b, offset);
 }
 
-pub inline fn isBreakz(b: *const Buffer) bool {
+pub fn isBreakz(b: *const Buffer) bool {
     return isBreakzAt(b, 0);
 }
 
 /// `IS_SPACEZ_AT`: a space, line break or NUL.
-pub inline fn isSpacezAt(b: *const Buffer, offset: usize) bool {
+pub fn isSpacezAt(b: *const Buffer, offset: usize) bool {
     return isSpaceAt(b, offset) or isBreakzAt(b, offset);
 }
 
-pub inline fn isSpacez(b: *const Buffer) bool {
+pub fn isSpacez(b: *const Buffer) bool {
     return isSpacezAt(b, 0);
 }
 
 /// `IS_BLANKZ_AT`: a space, tab, line break or NUL.
-pub inline fn isBlankzAt(b: *const Buffer, offset: usize) bool {
+pub fn isBlankzAt(b: *const Buffer, offset: usize) bool {
     return isBlankAt(b, offset) or isBreakzAt(b, offset);
 }
 
-pub inline fn isBlankz(b: *const Buffer) bool {
+pub fn isBlankz(b: *const Buffer) bool {
     return isBlankzAt(b, 0);
 }
 
 /// `WIDTH_AT`: the byte width of the UTF-8 character at `offset`, or 0 for a
 /// byte that cannot start one.
-pub inline fn widthAt(b: *const Buffer, offset: usize) usize {
+pub fn widthAt(b: *const Buffer, offset: usize) usize {
     const c = b.at(offset);
     if (c & 0x80 == 0x00) return 1;
     if (c & 0xE0 == 0xC0) return 2;
@@ -215,6 +215,6 @@ pub inline fn widthAt(b: *const Buffer, offset: usize) usize {
     return 0;
 }
 
-pub inline fn width(b: *const Buffer) usize {
+pub fn width(b: *const Buffer) usize {
     return widthAt(b, 0);
 }

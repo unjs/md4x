@@ -181,9 +181,17 @@ pub const Buffer = struct {
 
     pub const guard: usize = 8;
 
+    /// Only the guard tail is zeroed, matching the C.
+    ///
+    /// `BUFFER_INIT` mallocs and does NOT memset: the reader NUL-terminates at
+    /// `last`, and no predicate can read past that NUL (each looks ahead only
+    /// after matching a lead byte the reader already decoded). Zeroing the
+    /// whole window instead costs 64 KB of stores per parser — which, for
+    /// frontmatter, is once per document, and measured 1.6x slower than the C
+    /// on a 296-byte input before this was fixed.
     pub fn init(alloc: Allocator, cap: usize) Allocator.Error!Buffer {
         const mem = try alloc.alloc(u8, cap + guard);
-        @memset(mem, 0);
+        @memset(mem[cap..], 0);
         return .{ .mem = mem, .cap = cap, .pos = 0, .last = 0 };
     }
 
