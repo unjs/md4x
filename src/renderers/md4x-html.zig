@@ -27,18 +27,16 @@ const std = @import("std");
 const scan = @import("../scan.zig");
 
 // MD_* types now come from the Zig-native
-// abi module (replacing md4x.h / entity.h / md4x-heal.h); only genuinely
-// external C headers stay in a @cImport, bound as `sys`.
+// abi module (replacing md4x.h / entity.h / md4x-heal.h).
 const c = @import("abi");
 // Sibling units are imported directly (one Zig module per artifact), not
 // resolved through link-time C-ABI symbols. `abi` holds types only.
 const md4x = @import("../md4x.zig");
 const entity = @import("../entity.zig");
 const heal = @import("md4x-heal.zig");
-const sys = @cImport({
-    @cInclude("stdio.h");
-    @cInclude("yaml.h");
-});
+// No @cImport here any more: the last C dependency was libyaml, and the YAML
+// frontmatter helpers below now go through the pure-Zig port in src/yaml/.
+const yaml = @import("../yaml/yaml.zig");
 const diag = @import("md4x-diag.zig");
 
 const c_allocator = std.heap.c_allocator;
@@ -715,6 +713,16 @@ fn comp_fm_tag_capture(text: [*c]const c.MD_CHAR, size: c.MD_SIZE, userdata: ?*a
     _ = comp_fm_tag_append(@ptrCast(@alignCast(userdata.?)), @ptrCast(text), size);
 }
 
+// `yaml_parser_parse(&yp, &event) != 0` in boolean position: the C's status
+// return is what the two frontmatter walkers below chain their `and`s over, and
+// an `Error!void` cannot be chained that way. Failure leaves `event` erased —
+// the port clears it on entry exactly as libyaml's `memset` did — so a caller
+// that deletes the event afterwards still deletes nothing.
+fn parse_ok(yp: *yaml.Parser, event: *yaml.Event) bool {
+    yaml.parse(yp, event) catch return false;
+    return true;
+}
+
 // Flush the buffered component open tag. If YAML text was captured,
 // parse it and emit as HTML attributes before closing ">".
 fn comp_fm_flush_tag(r: *MD_HTML) void {
@@ -742,41 +750,44 @@ fn comp_fm_flush_tag(r: *MD_HTML) void {
 
     // If we captured YAML, parse and emit as attributes.
     if (r.comp_fm_text != null and text_size > 0) {
-        var yp: sys.yaml_parser_t = undefined;
-        var event: sys.yaml_event_t = undefined;
+        var event: yaml.Event = .{};
 
-        if (sys.yaml_parser_initialize(&yp) != 0) {
-            sys.yaml_parser_set_input_string(&yp, @ptrCast(r.comp_fm_text.?), text_size);
+        if (yaml.init(c_allocator)) |init_yp| {
+            var yp = init_yp;
+            yaml.setInputString(&yp, r.comp_fm_text.?[0..text_size]);
 
             // STREAM_START
-            if (sys.yaml_parser_parse(&yp, &event) != 0 and event.type == sys.YAML_STREAM_START_EVENT) {
-                sys.yaml_event_delete(&event);
+            if (parse_ok(&yp, &event) and event.data == .stream_start) {
+                event.deinit(c_allocator);
                 // DOCUMENT_START
-                if (sys.yaml_parser_parse(&yp, &event) != 0 and event.type == sys.YAML_DOCUMENT_START_EVENT) {
-                    sys.yaml_event_delete(&event);
+                if (parse_ok(&yp, &event) and event.data == .document_start) {
+                    event.deinit(c_allocator);
                     // MAPPING_START
-                    if (sys.yaml_parser_parse(&yp, &event) != 0 and event.type == sys.YAML_MAPPING_START_EVENT) {
-                        sys.yaml_event_delete(&event);
+                    if (parse_ok(&yp, &event) and event.data == .mapping_start) {
+                        event.deinit(c_allocator);
                         // Iterate key-value pairs.
-                        while (sys.yaml_parser_parse(&yp, &event) != 0) {
+                        while (parse_ok(&yp, &event)) {
                             var key_buf: [256]u8 = undefined;
-                            if (event.type == sys.YAML_MAPPING_END_EVENT) {
-                                sys.yaml_event_delete(&event);
+                            if (event.data == .mapping_end) {
+                                event.deinit(c_allocator);
                                 break;
                             }
-                            if (event.type != sys.YAML_SCALAR_EVENT) {
-                                sys.yaml_event_delete(&event);
-                                break;
-                            }
-                            var key_len: usize = event.data.scalar.length;
+                            const key = switch (event.data) {
+                                .scalar => |d| d.value,
+                                else => {
+                                    event.deinit(c_allocator);
+                                    break;
+                                },
+                            };
+                            var key_len: usize = key.len;
                             if (key_len >= key_buf.len) key_len = key_buf.len - 1;
-                            @memcpy(key_buf[0..key_len], event.data.scalar.value[0..key_len]);
+                            @memcpy(key_buf[0..key_len], key[0..key_len]);
                             key_buf[key_len] = 0;
-                            sys.yaml_event_delete(&event);
+                            event.deinit(c_allocator);
 
                             // Read value.
-                            if (sys.yaml_parser_parse(&yp, &event) == 0) break;
-                            if (event.type == sys.YAML_SCALAR_EVENT) {
+                            if (!parse_ok(&yp, &event)) break;
+                            if (event.data == .scalar) {
                                 // An EMPTY key (`"": v`) is the one key HTML has
                                 // no spelling for — there is no encoding of a
                                 // zero-length attribute name — so drop the pair
@@ -784,38 +795,39 @@ fn comp_fm_flush_tag(r: *MD_HTML) void {
                                 // a browser recovers from by inventing an
                                 // attribute literally named `="v"`.
                                 if (key_len > 0) {
+                                    const val = event.data.scalar.value;
                                     render_verbatim_lit(r, " ");
                                     render_html_attr_name(r, &key_buf, @intCast(key_len));
                                     render_verbatim_lit(r, "=\"");
-                                    render_html_escaped(r, @ptrCast(event.data.scalar.value), @intCast(event.data.scalar.length));
+                                    render_html_escaped(r, val.ptr, @intCast(val.len));
                                     render_verbatim_lit(r, "\"");
                                 }
-                            } else if (event.type == sys.YAML_MAPPING_START_EVENT or event.type == sys.YAML_SEQUENCE_START_EVENT) {
+                            } else if (event.data == .mapping_start or event.data == .sequence_start) {
                                 // Skip nested structures.
                                 var depth: c_int = 1;
-                                sys.yaml_event_delete(&event);
-                                while (depth > 0 and sys.yaml_parser_parse(&yp, &event) != 0) {
-                                    if (event.type == sys.YAML_MAPPING_START_EVENT or event.type == sys.YAML_SEQUENCE_START_EVENT)
+                                event.deinit(c_allocator);
+                                while (depth > 0 and parse_ok(&yp, &event)) {
+                                    if (event.data == .mapping_start or event.data == .sequence_start)
                                         depth += 1
-                                    else if (event.type == sys.YAML_MAPPING_END_EVENT or event.type == sys.YAML_SEQUENCE_END_EVENT)
+                                    else if (event.data == .mapping_end or event.data == .sequence_end)
                                         depth -= 1;
-                                    sys.yaml_event_delete(&event);
+                                    event.deinit(c_allocator);
                                 }
                                 continue;
                             }
-                            sys.yaml_event_delete(&event);
+                            event.deinit(c_allocator);
                         }
                     } else {
-                        sys.yaml_event_delete(&event);
+                        event.deinit(c_allocator);
                     }
                 } else {
-                    sys.yaml_event_delete(&event);
+                    event.deinit(c_allocator);
                 }
             } else {
-                sys.yaml_event_delete(&event);
+                event.deinit(c_allocator);
             }
-            sys.yaml_parser_delete(&yp);
-        }
+            yaml.deinit(&yp);
+        } else |_| {}
     }
 
     render_verbatim_lit(r, ">\n");
@@ -1044,114 +1056,119 @@ fn fm_append(r: *MD_HTML, text: [*]const u8, size: c.MD_SIZE) c_int {
 // Parse YAML frontmatter and extract title/description.
 // Caller must free *out_title and *out_description if non-NULL.
 fn parse_frontmatter_meta(text: [*]const u8, size: c.MD_SIZE, out_title: *?[*:0]u8, out_description: *?[*:0]u8) void {
-    var yp: sys.yaml_parser_t = undefined;
-    var event: sys.yaml_event_t = undefined;
+    var event: yaml.Event = .{};
 
     out_title.* = null;
     out_description.* = null;
 
-    if (sys.yaml_parser_initialize(&yp) == 0)
+    // An allocation failure is the C's `yaml_parser_initialize` returning 0:
+    // both outputs stay null and the caller falls back to its defaults.
+    var yp = yaml.init(c_allocator) catch
         return;
 
-    sys.yaml_parser_set_input_string(&yp, @ptrCast(text), size);
+    yaml.setInputString(&yp, text[0..size]);
 
     // Consume STREAM_START.
-    if (sys.yaml_parser_parse(&yp, &event) == 0) {
-        sys.yaml_parser_delete(&yp);
+    yaml.parse(&yp, &event) catch {
+        yaml.deinit(&yp);
+        return;
+    };
+    if (event.data != .stream_start) {
+        event.deinit(c_allocator);
+        yaml.deinit(&yp);
         return;
     }
-    if (event.type != sys.YAML_STREAM_START_EVENT) {
-        sys.yaml_event_delete(&event);
-        sys.yaml_parser_delete(&yp);
-        return;
-    }
-    sys.yaml_event_delete(&event);
+    event.deinit(c_allocator);
 
     // Consume DOCUMENT_START.
-    if (sys.yaml_parser_parse(&yp, &event) == 0) {
-        sys.yaml_parser_delete(&yp);
+    yaml.parse(&yp, &event) catch {
+        yaml.deinit(&yp);
+        return;
+    };
+    if (event.data != .document_start) {
+        event.deinit(c_allocator);
+        yaml.deinit(&yp);
         return;
     }
-    if (event.type != sys.YAML_DOCUMENT_START_EVENT) {
-        sys.yaml_event_delete(&event);
-        sys.yaml_parser_delete(&yp);
-        return;
-    }
-    sys.yaml_event_delete(&event);
+    event.deinit(c_allocator);
 
     // Expect top-level MAPPING_START.
-    if (sys.yaml_parser_parse(&yp, &event) == 0) {
-        sys.yaml_parser_delete(&yp);
+    yaml.parse(&yp, &event) catch {
+        yaml.deinit(&yp);
+        return;
+    };
+    if (event.data != .mapping_start) {
+        event.deinit(c_allocator);
+        yaml.deinit(&yp);
         return;
     }
-    if (event.type != sys.YAML_MAPPING_START_EVENT) {
-        sys.yaml_event_delete(&event);
-        sys.yaml_parser_delete(&yp);
-        return;
-    }
-    sys.yaml_event_delete(&event);
+    event.deinit(c_allocator);
 
     // Iterate top-level key-value pairs.
     while (true) {
         var target: ?*?[*:0]u8 = null;
 
-        if (sys.yaml_parser_parse(&yp, &event) == 0) {
-            sys.yaml_parser_delete(&yp);
+        yaml.parse(&yp, &event) catch {
+            yaml.deinit(&yp);
             return;
-        }
-        if (event.type == sys.YAML_MAPPING_END_EVENT) {
-            sys.yaml_event_delete(&event);
+        };
+        if (event.data == .mapping_end) {
+            event.deinit(c_allocator);
             break;
         }
-        if (event.type != sys.YAML_SCALAR_EVENT) {
-            sys.yaml_event_delete(&event);
-            sys.yaml_parser_delete(&yp);
-            return;
-        }
+        const key = switch (event.data) {
+            .scalar => |d| d.value,
+            else => {
+                event.deinit(c_allocator);
+                yaml.deinit(&yp);
+                return;
+            },
+        };
 
         // Check if key is "title" or "description".
-        if (event.data.scalar.length == 5 and std.mem.eql(u8, event.data.scalar.value[0..5], "title")) {
+        if (std.mem.eql(u8, key, "title")) {
             target = out_title;
-        } else if (event.data.scalar.length == 11 and std.mem.eql(u8, event.data.scalar.value[0..11], "description")) {
+        } else if (std.mem.eql(u8, key, "description")) {
             target = out_description;
         }
-        sys.yaml_event_delete(&event);
+        event.deinit(c_allocator);
 
         // Read the value.
-        if (sys.yaml_parser_parse(&yp, &event) == 0) {
-            sys.yaml_parser_delete(&yp);
+        yaml.parse(&yp, &event) catch {
+            yaml.deinit(&yp);
             return;
-        }
+        };
 
-        if (target != null and event.type == sys.YAML_SCALAR_EVENT and event.data.scalar.length > 0) {
-            const len: usize = event.data.scalar.length;
+        if (target != null and event.data == .scalar and event.data.scalar.value.len > 0) {
+            const val = event.data.scalar.value;
+            const len: usize = val.len;
             const s = c_allocator.allocSentinel(u8, len, 0) catch null;
             if (s) |buf| {
-                @memcpy(buf[0..len], event.data.scalar.value[0..len]);
+                @memcpy(buf[0..len], val[0..len]);
                 if (target.?.*) |old| c_allocator.free(std.mem.span(old));
                 target.?.* = buf.ptr;
             }
-        } else if (event.type == sys.YAML_MAPPING_START_EVENT or event.type == sys.YAML_SEQUENCE_START_EVENT) {
+        } else if (event.data == .mapping_start or event.data == .sequence_start) {
             // Skip nested structures.
             var depth: c_int = 1;
-            sys.yaml_event_delete(&event);
+            event.deinit(c_allocator);
             while (depth > 0) {
-                if (sys.yaml_parser_parse(&yp, &event) == 0) {
-                    sys.yaml_parser_delete(&yp);
+                yaml.parse(&yp, &event) catch {
+                    yaml.deinit(&yp);
                     return;
-                }
-                if (event.type == sys.YAML_MAPPING_START_EVENT or event.type == sys.YAML_SEQUENCE_START_EVENT)
+                };
+                if (event.data == .mapping_start or event.data == .sequence_start)
                     depth += 1
-                else if (event.type == sys.YAML_MAPPING_END_EVENT or event.type == sys.YAML_SEQUENCE_END_EVENT)
+                else if (event.data == .mapping_end or event.data == .sequence_end)
                     depth -= 1;
-                sys.yaml_event_delete(&event);
+                event.deinit(c_allocator);
             }
             continue;
         }
-        sys.yaml_event_delete(&event);
+        event.deinit(c_allocator);
     }
 
-    sys.yaml_parser_delete(&yp);
+    yaml.deinit(&yp);
 }
 
 // Emit the <!DOCTYPE html><html><head>...<body> preamble.

@@ -5,9 +5,9 @@
 // This is the Zig counterpart of the (orphaned) header-only md4x-json.h. The C
 // header's helpers are `static`, so @cImport translates them as unresolved
 // external references (which the WASM linker cannot satisfy). The streaming JSON
-// writer and the libyaml-backed YAML-to-JSON conversion are therefore ported to
-// Zig here and shared by the AST and meta renderers. Behavior is kept
-// byte-for-byte identical to the C source, including YAML 1.1 type coercion.
+// writer and the YAML-to-JSON conversion are therefore ported to Zig here and
+// shared by the AST and meta renderers. Behavior is kept byte-for-byte identical
+// to the C source, including YAML 1.1 type coercion.
 //
 // Imported (not @cImport'd into a clashing symbol) by each renderer lib: Zig
 // compiles its own internal copy per importing artifact, so there is no
@@ -16,14 +16,18 @@
 const std = @import("std");
 const scan = @import("../scan.zig");
 
-// MD_* types now come from the Zig-native abi module (replacing md4x.h);
-// genuinely external C headers (if any) stay in a @cImport bound as `sys`.
+// MD_* types now come from the Zig-native abi module (replacing md4x.h).
 const c = @import("abi");
 // stdio.h is gone with the last `snprintf` (the `\u00xx` escape is open-coded
-// below); only libyaml is genuinely external now.
-const sys = @cImport({
-    @cInclude("yaml.h");
-});
+// below), and libyaml is gone with the pure-Zig port in src/yaml/ — this file
+// has no C dependency left.
+const yaml = @import("../yaml/yaml.zig");
+
+// The YAML parser allocates (its buffers, its token queue, every scalar it
+// produces). libyaml reached `malloc` directly; the port takes an allocator, and
+// the renderers' idiom for one is `std.heap.c_allocator` (see md4x-ast.zig) —
+// the same heap, so the allocation behaviour is unchanged.
+const c_allocator = std.heap.c_allocator;
 
 // Non-optional, like the five required SAX callbacks: every sink here is called
 // unconditionally, so a null one was a null-function-pointer call (a panic in
@@ -207,13 +211,14 @@ fn yaml_is_number(s: [*]const u8, len: c.MD_SIZE) bool {
 }
 
 // Write a YAML scalar as a typed JSON value (YAML 1.1 resolution for plain scalars).
-fn json_write_yaml_scalar(w: *JsonWriter, event: *const sys.yaml_event_t) void {
-    const val: [*]const u8 = @ptrCast(event.data.scalar.value);
-    const len: c.MD_SIZE = @intCast(event.data.scalar.length);
-    const style = event.data.scalar.style;
+fn json_write_yaml_scalar(w: *JsonWriter, event: *const yaml.Event) void {
+    const d = event.data.scalar;
+    const val: [*]const u8 = d.value.ptr;
+    const len: c.MD_SIZE = @intCast(d.value.len);
+    const style = d.style;
 
     // Quoted scalars are always strings.
-    if (style == sys.YAML_SINGLE_QUOTED_SCALAR_STYLE or style == sys.YAML_DOUBLE_QUOTED_SCALAR_STYLE) {
+    if (style == .single_quoted or style == .double_quoted) {
         json_write_string(w, val, len);
         return;
     }
@@ -247,36 +252,37 @@ fn json_write_yaml_scalar(w: *JsonWriter, event: *const sys.yaml_event_t) void {
 // ---- Malformed-YAML contract ----
 //
 // `JsonWriter` streams straight through `process_output`: bytes handed to the
-// sink cannot be retracted, and libyaml reports a syntax error only once it has
-// already emitted the events preceding it. So a mid-mapping error is repaired
+// sink cannot be retracted, and the YAML parser reports a syntax error only once
+// it has already emitted the events preceding it. So a mid-mapping error is repaired
 // *forward*, never rolled back. Every function below upholds one invariant:
 //
 //   **on return — success or error — the JSON it emitted is balanced.**
 //
 // Concretely: a container it opened is always closed, and a position that
 // syntactically demands a value always receives one (`null` when nothing could
-// be parsed). What is kept is therefore the prefix libyaml did parse, plus an
+// be parsed). What is kept is therefore the prefix the parser did read, plus an
 // explicit `null` for the key whose value it did not. Dropping the failing key
 // instead would make a truncated document indistinguishable from one where the
 // author simply omitted the field.
 
 // ---- Nesting cap ----
 //
-// The functions below walk libyaml's event stream RECURSIVELY (event -> mapping
+// The functions below walk the YAML event stream RECURSIVELY (event -> mapping
 // / sequence -> value -> event), so the document's nesting depth is the native
-// recursion depth. libyaml's own MAX_NESTING_LEVEL is 1000 -- far past what the
-// native stack survives here, and it exists only in the master commit pinned in
-// build.zig.zon, not in the 0.2.5 release -- and the markdown parser imposes
+// recursion depth. The parser's own `max_nest_level` is 1000 (libyaml's
+// MAX_NESTING_LEVEL, which the port carries as a field) -- far past what the
+// native stack survives here -- and the markdown parser imposes
 // nothing at all, handing frontmatter over as opaque bytes. So `a: [[[[...` in
 // frontmatter (or in a plain `.yml` through md_yaml) used to run until the
 // native stack was gone: a SIGSEGV, which also skipped the AST renderer's
-// `ctx.arena.deinit()` and `yaml_parser_delete` (through the wasm binding it
+// `ctx.arena.deinit()` and the parser teardown (through the wasm binding it
 // trapped instead, leaking ~4 MB of linear memory per attempt, unreclaimable).
 // Past the cap the writer emits `null` and ENDS the parse; see
 // json_write_yaml_truncate().
 //
 // Ending it, rather than skipping to the end of the offending subtree, is also
-// what bounds the CPU. libyaml's flow-collection handling is O(depth^2) --
+// what bounds the CPU. Flow-collection handling is O(depth^2) -- libyaml's, and
+// the port reproduces it exactly --
 // `a: [` x n through `--format=json` measures 1.2 s at n = 25 000, 4.6 s at
 // 50 000, 19.1 s at 100 000, 96.3 s at 200 000, and the same curve on a build
 // from before this cap existed, so it is a separate pre-existing defect, driven
@@ -288,12 +294,13 @@ fn json_write_yaml_scalar(w: *JsonWriter, event: *const sys.yaml_event_t) void {
 // jsonAtMaxDepth() (src/renderers/md4x-ast.zig), sized for a much heavier
 // frame. Measured headroom (balanced `'[' * n + ']' * n` in frontmatter,
 // binary-searched against the uncapped build under `ulimit -s`, so the numbers
-// are where the recursion actually dies):
+// are where the recursion actually dies; measured against the libyaml-backed
+// build, whose event record and frame layout the port matches):
 //
 //   * native, linear in the level count -- ~177 B per level in ReleaseFast
 //     (what ships; 47 280 levels on an 8 MiB stack, 2 593 on a 512 KiB one),
 //     ~194 B in ReleaseSafe, ~354 B in Debug. Three frames per level, each
-//     holding libyaml's ~104-byte `yaml_event_t` by value, is what makes this
+//     holding the ~104-byte event record by value, is what makes this
 //     ~3.5x the AST serializer's ~50 B per level.
 //
 // 256 levels is therefore ~45 KB of stack at the cap -- about the same stack
@@ -321,15 +328,15 @@ fn yaml_at_max_depth(depth: usize) bool {
 // report an error, which every caller already knows how to handle -- each one
 // closes what it opened and returns without asking for another event, so the
 // output stays balanced and the walk unwinds without touching the parser again.
-// `json_write_yaml_props` / `md_yaml` then run their normal `yaml_parser_delete`
-// teardown, which frees libyaml's buffers, its token queue (deleting each queued
-// token) and its indent/simple-key/state/mark stacks whatever state the parse was
-// left in. No event is owned here either -- the START event was deleted by the
-// caller before the check -- so abandoning mid-stream leaks nothing.
+// `json_write_yaml_props` / `md_yaml` then run their normal `yaml.deinit`
+// teardown, which frees the parser's buffers, its token queue (deleting each
+// queued token) and its indent/simple-key/state/mark stacks whatever state the
+// parse was left in. No event is owned here either -- the START event was deleted
+// by the caller before the check -- so abandoning mid-stream leaks nothing.
 //
 // **Stopping is the point, not a shortcut.** Consuming the rest of the subtree
 // (walking to its matching END so the siblings after it could still be emitted)
-// keeps the output prettier but makes libyaml scan the whole nesting anyway --
+// keeps the output prettier but makes the parser scan the whole nesting anyway --
 // and its flow-collection handling is O(depth^2) (see the note above
 // YAML_MAX_DEPTH), so a 200 KB document still burned ~96 s of one core. Ending
 // the parse bounds the work at the cap instead: what is dropped is the tail of a
@@ -345,35 +352,38 @@ fn json_write_yaml_truncate(w: *JsonWriter) c_int {
 // success, -1 on error; `n_written` is incremented once per pair actually
 // emitted (including a pair whose value had to be repaired to `null`, since its
 // key bytes are already on the wire).
-fn json_write_yaml_mapping(w: *JsonWriter, yp: *sys.yaml_parser_t, n_written: *c_int, depth: usize) c_int {
-    var event: sys.yaml_event_t = undefined;
+fn json_write_yaml_mapping(w: *JsonWriter, yp: *yaml.Parser, n_written: *c_int, depth: usize) c_int {
+    var event: yaml.Event = .{};
 
     while (true) {
-        if (sys.yaml_parser_parse(yp, &event) == 0)
+        yaml.parse(yp, &event) catch
             return -1;
 
-        if (event.type == sys.YAML_MAPPING_END_EVENT) {
-            sys.yaml_event_delete(&event);
+        if (event.data == .mapping_end) {
+            event.deinit(c_allocator);
             break;
         }
 
-        if (event.type != sys.YAML_SCALAR_EVENT) {
-            // A non-scalar key (a complex `? key` mapping, or a stray
-            // structural event). No byte of this pair has been written yet —
-            // not even the separating comma — so stopping here already leaves
-            // the object well-formed.
-            sys.yaml_event_delete(&event);
-            return -1;
-        }
+        const key = switch (event.data) {
+            .scalar => |d| d.value,
+            else => {
+                // A non-scalar key (a complex `? key` mapping, or a stray
+                // structural event). No byte of this pair has been written yet —
+                // not even the separating comma — so stopping here already leaves
+                // the object well-formed.
+                event.deinit(c_allocator);
+                return -1;
+            },
+        };
 
         if (n_written.* > 0)
             json_write(w, ",", 1);
 
         // Write key.
         json_write(w, "\"", 1);
-        json_write_escaped(w, @ptrCast(event.data.scalar.value), @intCast(event.data.scalar.length));
+        json_write_escaped(w, key.ptr, @intCast(key.len));
         json_write_str(w, "\":");
-        sys.yaml_event_delete(&event);
+        event.deinit(c_allocator);
 
         // Write value (recursive). Past this point the key is committed, so the
         // pair counts as written whatever happens: `json_write_yaml_value`
@@ -389,24 +399,24 @@ fn json_write_yaml_mapping(w: *JsonWriter, yp: *sys.yaml_parser_t, n_written: *c
 // Write a YAML sequence as a JSON array.
 // Assumes SEQUENCE_START consumed. `depth` is the nesting depth of this
 // sequence's ELEMENTS. Returns 0 on success, -1 on error.
-fn json_write_yaml_sequence(w: *JsonWriter, yp: *sys.yaml_parser_t, depth: usize) c_int {
-    var event: sys.yaml_event_t = undefined;
+fn json_write_yaml_sequence(w: *JsonWriter, yp: *yaml.Parser, depth: usize) c_int {
+    var event: yaml.Event = .{};
     var n: c_int = 0;
     var ret: c_int = 0;
 
     json_write(w, "[", 1);
 
     while (true) {
-        if (sys.yaml_parser_parse(yp, &event) == 0) {
+        yaml.parse(yp, &event) catch {
             // Nothing is pending here: the comma is written only after an event
             // has been parsed successfully, so the array closes cleanly on the
             // elements seen so far.
             ret = -1;
             break;
-        }
+        };
 
-        if (event.type == sys.YAML_SEQUENCE_END_EVENT) {
-            sys.yaml_event_delete(&event);
+        if (event.data == .sequence_end) {
+            event.deinit(c_allocator);
             break;
         }
 
@@ -429,116 +439,120 @@ fn json_write_yaml_sequence(w: *JsonWriter, yp: *sys.yaml_parser_t, depth: usize
 // of `event` and deletes it. `depth` is the nesting depth of this value itself
 // (0 for a document's root node). Returns 0 on success, -1 on error; the output
 // is balanced either way (see the malformed-YAML contract above).
-fn json_write_yaml_event(w: *JsonWriter, yp: *sys.yaml_parser_t, event: *sys.yaml_event_t, depth: usize) c_int {
-    if (event.type == sys.YAML_SCALAR_EVENT) {
-        json_write_yaml_scalar(w, event);
-        sys.yaml_event_delete(event);
-        return 0;
+fn json_write_yaml_event(w: *JsonWriter, yp: *yaml.Parser, event: *yaml.Event, depth: usize) c_int {
+    switch (event.data) {
+        .scalar => {
+            json_write_yaml_scalar(w, event);
+            event.deinit(c_allocator);
+            return 0;
+        },
+        .mapping_start => {
+            event.deinit(c_allocator);
+            // Too deep to nest any further (see YAML_MAX_DEPTH): the position gets
+            // `null` and the walk unwinds.
+            if (yaml_at_max_depth(depth))
+                return json_write_yaml_truncate(w);
+            json_write(w, "{", 1);
+            var n: c_int = 0;
+            const ret = json_write_yaml_mapping(w, yp, &n, depth + 1);
+            json_write(w, "}", 1);
+            return ret;
+        },
+        .sequence_start => {
+            event.deinit(c_allocator);
+            if (yaml_at_max_depth(depth))
+                return json_write_yaml_truncate(w);
+            return json_write_yaml_sequence(w, yp, depth + 1);
+        },
+        .alias => {
+            // The parser does not compose, so anchors are never resolved; an
+            // alias is a defined `null` rather than an error.
+            event.deinit(c_allocator);
+            json_write_str(w, "null");
+            return 0;
+        },
+        else => {
+            // Anything else is a structural event where a value was expected. The
+            // position still needs one.
+            event.deinit(c_allocator);
+            json_write_str(w, "null");
+            return -1;
+        },
     }
-    if (event.type == sys.YAML_MAPPING_START_EVENT) {
-        sys.yaml_event_delete(event);
-        // Too deep to nest any further (see YAML_MAX_DEPTH): the position gets
-        // `null` and the walk unwinds.
-        if (yaml_at_max_depth(depth))
-            return json_write_yaml_truncate(w);
-        json_write(w, "{", 1);
-        var n: c_int = 0;
-        const ret = json_write_yaml_mapping(w, yp, &n, depth + 1);
-        json_write(w, "}", 1);
-        return ret;
-    }
-    if (event.type == sys.YAML_SEQUENCE_START_EVENT) {
-        sys.yaml_event_delete(event);
-        if (yaml_at_max_depth(depth))
-            return json_write_yaml_truncate(w);
-        return json_write_yaml_sequence(w, yp, depth + 1);
-    }
-    if (event.type == sys.YAML_ALIAS_EVENT) {
-        // libyaml's parser does not compose, so anchors are never resolved; an
-        // alias is a defined `null` rather than an error.
-        sys.yaml_event_delete(event);
-        json_write_str(w, "null");
-        return 0;
-    }
-
-    // Anything else is a structural event where a value was expected. The
-    // position still needs one.
-    sys.yaml_event_delete(event);
-    json_write_str(w, "null");
-    return -1;
 }
 
 // Write the next YAML value (scalar, mapping, or sequence) as JSON. `depth` is
 // the nesting depth of that value. Returns 0 on success, -1 on error; a value
 // is always emitted.
-fn json_write_yaml_value(w: *JsonWriter, yp: *sys.yaml_parser_t, depth: usize) c_int {
-    var event: sys.yaml_event_t = undefined;
+fn json_write_yaml_value(w: *JsonWriter, yp: *yaml.Parser, depth: usize) c_int {
+    var event: yaml.Event = .{};
 
-    if (sys.yaml_parser_parse(yp, &event) == 0) {
+    yaml.parse(yp, &event) catch {
         json_write_str(w, "null");
         return -1;
-    }
+    };
 
     return json_write_yaml_event(w, yp, &event, depth);
 }
 
-// Write parsed YAML frontmatter as JSON props using libyaml.
+// Write parsed YAML frontmatter as JSON props.
 // Returns the number of top-level props actually written to the output. A
 // malformed document still reports what it emitted (never 0 after writing
 // bytes) — callers use the count to decide whether a separating comma is
 // needed before whatever they append next.
 pub fn json_write_yaml_props(w: *JsonWriter, text: [*]const u8, size: c.MD_SIZE) c_int {
-    var yp: sys.yaml_parser_t = undefined;
-    var event: sys.yaml_event_t = undefined;
+    var event: yaml.Event = .{};
     var n_written: c_int = 0;
 
-    if (sys.yaml_parser_initialize(&yp) == 0)
+    // An allocation failure here is the C's `yaml_parser_initialize` returning
+    // 0: nothing has been written, so nothing is reported.
+    var yp = yaml.init(c_allocator) catch
         return 0;
 
-    sys.yaml_parser_set_input_string(&yp, @ptrCast(text), size);
+    yaml.setInputString(&yp, text[0..size]);
 
     // Consume STREAM_START.
-    if (sys.yaml_parser_parse(&yp, &event) == 0) {
-        sys.yaml_parser_delete(&yp);
+    yaml.parse(&yp, &event) catch {
+        yaml.deinit(&yp);
+        return n_written;
+    };
+    if (event.data != .stream_start) {
+        event.deinit(c_allocator);
+        yaml.deinit(&yp);
         return n_written;
     }
-    if (event.type != sys.YAML_STREAM_START_EVENT) {
-        sys.yaml_event_delete(&event);
-        sys.yaml_parser_delete(&yp);
-        return n_written;
-    }
-    sys.yaml_event_delete(&event);
+    event.deinit(c_allocator);
 
     // Consume DOCUMENT_START.
-    if (sys.yaml_parser_parse(&yp, &event) == 0) {
-        sys.yaml_parser_delete(&yp);
+    yaml.parse(&yp, &event) catch {
+        yaml.deinit(&yp);
+        return n_written;
+    };
+    if (event.data != .document_start) {
+        event.deinit(c_allocator);
+        yaml.deinit(&yp);
         return n_written;
     }
-    if (event.type != sys.YAML_DOCUMENT_START_EVENT) {
-        sys.yaml_event_delete(&event);
-        sys.yaml_parser_delete(&yp);
-        return n_written;
-    }
-    sys.yaml_event_delete(&event);
+    event.deinit(c_allocator);
 
     // Expect top-level MAPPING_START.
-    if (sys.yaml_parser_parse(&yp, &event) == 0) {
-        sys.yaml_parser_delete(&yp);
+    yaml.parse(&yp, &event) catch {
+        yaml.deinit(&yp);
+        return n_written;
+    };
+    if (event.data != .mapping_start) {
+        event.deinit(c_allocator);
+        yaml.deinit(&yp);
         return n_written;
     }
-    if (event.type != sys.YAML_MAPPING_START_EVENT) {
-        sys.yaml_event_delete(&event);
-        sys.yaml_parser_delete(&yp);
-        return n_written;
-    }
-    sys.yaml_event_delete(&event);
+    event.deinit(c_allocator);
 
     // A mid-mapping error is already repaired in the output stream, so the
     // status is not actionable here; `n_written` is what matters. The root
     // mapping consumed just above is depth 0, so its values sit at depth 1.
     _ = json_write_yaml_mapping(w, &yp, &n_written, 1);
 
-    sys.yaml_parser_delete(&yp);
+    yaml.deinit(&yp);
     return n_written;
 }
 
@@ -546,10 +560,10 @@ pub fn json_write_yaml_props(w: *JsonWriter, text: [*]const u8, size: c.MD_SIZE)
 
 /// Convert a YAML document to JSON.
 ///
-/// libyaml is already linked for frontmatter, and consumers had no way to reach
-/// it: parsing a plain `.yml` file meant wrapping it in `---` fences, running it
-/// through the *markdown* meta renderer, and stripping the heading list back off
-/// the result.
+/// The YAML parser is already there for frontmatter, and consumers had no way to
+/// reach it: parsing a plain `.yml` file meant wrapping it in `---` fences,
+/// running it through the *markdown* meta renderer, and stripping the heading
+/// list back off the result.
 ///
 /// Unlike `json_write_yaml_props`, this accepts any root node — a sequence or a
 /// bare scalar as readily as a mapping — and a stream with no document at all
@@ -568,37 +582,36 @@ pub fn md_yaml(
     _ = renderer_flags;
 
     var w: JsonWriter = .{ .process_output = process_output, .userdata = userdata };
-    var yp: sys.yaml_parser_t = undefined;
-    var event: sys.yaml_event_t = undefined;
+    var event: yaml.Event = .{};
 
-    if (sys.yaml_parser_initialize(&yp) == 0)
+    var yp = yaml.init(c_allocator) catch
         return -1;
-    defer sys.yaml_parser_delete(&yp);
+    defer yaml.deinit(&yp);
     // Every `return` below is a success path that has already written output.
     defer json_flush(&w);
 
-    sys.yaml_parser_set_input_string(&yp, @ptrCast(input), input_size);
+    yaml.setInputString(&yp, input[0..input_size]);
 
     // Walk to the root node of the first document. Anything other than the
     // expected event -- including a syntax error and including a stream that
     // ends immediately -- means there is no value to convert.
-    for ([_]c_uint{ sys.YAML_STREAM_START_EVENT, sys.YAML_DOCUMENT_START_EVENT }) |expected| {
-        if (sys.yaml_parser_parse(&yp, &event) == 0) {
+    for ([_]yaml.EventType{ .stream_start, .document_start }) |expected| {
+        yaml.parse(&yp, &event) catch {
             json_write_str(&w, "null\n");
             return 0;
-        }
-        const actual = event.type;
-        sys.yaml_event_delete(&event);
+        };
+        const actual = event.getType();
+        event.deinit(c_allocator);
         if (actual != expected) {
             json_write_str(&w, "null\n");
             return 0;
         }
     }
 
-    if (sys.yaml_parser_parse(&yp, &event) == 0) {
+    yaml.parse(&yp, &event) catch {
         json_write_str(&w, "null\n");
         return 0;
-    }
+    };
     // Emits a balanced value whatever the outcome (see the malformed-YAML
     // contract above), so a truncated document still yields parseable JSON.
     // The root node is depth 0 -- unlike json_write_yaml_props, no enclosing

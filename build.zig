@@ -30,7 +30,6 @@ const libyaml_c_flags: []const []const u8 = &.{
 const PkgBuildOptions = struct {
     optimize: std.builtin.OptimizeMode,
     strip: bool,
-    libyaml_src: std.Build.Module.AddCSourceFilesOptions,
     include_paths: []const std.Build.LazyPath,
     /// Shared "abi" module. It must be ONE module instance per artifact:
     /// creating it twice puts src/abi.zig in two modules, which Zig rejects
@@ -53,7 +52,9 @@ pub fn build(b: *std.Build) void {
         .flags = libyaml_c_flags,
     };
 
-    const include_paths: []const std.Build.LazyPath = &.{ b.path("src"), b.path("src/renderers"), libyaml.path("include") };
+    // libyaml's headers are NOT here: the only `@cInclude("yaml.h")` left is in
+    // src/yaml/parity.zig, and addYamlParity adds the path itself.
+    const include_paths: []const std.Build.LazyPath = &.{ b.path("src"), b.path("src/renderers") };
 
     // Shared ABI types module — created once and reused by every artifact (a
     // second instance would put src/abi.zig in two modules, which Zig rejects).
@@ -80,8 +81,6 @@ pub fn build(b: *std.Build) void {
     const cli_options = b.addOptions();
     cli_options.addOption([]const u8, "version", zon.version);
     exe.root_module.addOptions("build_options", cli_options);
-    // libyaml is compiled into the exe: the html/ast/meta renderers call into it.
-    exe.root_module.addCSourceFiles(libyaml_src);
     for (include_paths) |p| exe.root_module.addIncludePath(p);
     b.installArtifact(exe);
 
@@ -115,11 +114,11 @@ pub fn build(b: *std.Build) void {
 
     // --- Fuzzer target (Zig-native, coverage-instrumented) ---
 
-    addZigFuzzer(b, target, include_paths, libyaml_src, abi_mod);
+    addZigFuzzer(b, target, include_paths, abi_mod);
 
     // --- YAML port: differential harness against the vendored C libyaml ---
 
-    addYamlParity(b, target, include_paths, libyaml_src);
+    addYamlParity(b, target, include_paths, libyaml_src, libyaml.path("include"));
 
     // --- WASM & NAPI targets ---
 
@@ -127,7 +126,6 @@ pub fn build(b: *std.Build) void {
     const pkg_opts: PkgBuildOptions = .{
         .optimize = pkg_optimize,
         .strip = pkg_optimize != .Debug,
-        .libyaml_src = libyaml_src,
         .include_paths = include_paths,
         .abi = abi_mod,
     };
@@ -217,7 +215,6 @@ fn addWasm(b: *std.Build, opts: PkgBuildOptions, variant: WasmVariant) *std.Buil
     });
     md4x_wasm.rdynamic = true;
     md4x_wasm.root_module.addImport("abi", opts.abi);
-    md4x_wasm.root_module.addCSourceFiles(opts.libyaml_src);
     for (opts.include_paths) |p| md4x_wasm.root_module.addIncludePath(p);
     md4x_wasm.root_module.export_symbol_names = &.{
         "md4x_alloc",
@@ -293,7 +290,6 @@ fn addNapi(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
             }),
         });
         napi_lib.root_module.addImport("abi", opts.abi);
-        napi_lib.root_module.addCSourceFiles(opts.libyaml_src);
         for (opts.include_paths) |p| napi_lib.root_module.addIncludePath(p);
         // node_api.h lives outside the project tree (node_modules). Resolve to an
         // absolute path so the root Zig module's @cImport translate-c step finds
@@ -345,18 +341,47 @@ fn addNapi(b: *std.Build, opts: PkgBuildOptions) *std.Build.Step {
 ///
 ///   zig build yaml-parity           # corpus + inline cases
 ///   zig build yaml-parity --fuzz    # coverage-guided differential fuzzing
-fn addYamlParity(b: *std.Build, target: std.Build.ResolvedTarget, include_paths: []const std.Build.LazyPath, libyaml_src: std.Build.Module.AddCSourceFilesOptions) void {
+fn addYamlParity(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    include_paths: []const std.Build.LazyPath,
+    libyaml_src: std.Build.Module.AddCSourceFilesOptions,
+    libyaml_include: std.Build.LazyPath,
+) void {
+    // The oracle is linked as its own static library rather than compiled into
+    // the test module. Under `--fuzz` the test module is built with `-ffuzz`,
+    // and that instruments the C sources too — every libyaml object then
+    // references `__sanitizer_cov_trace_*`, which nothing defines for C, and the
+    // link fails. A separate library keeps the C uninstrumented, which is also
+    // what we want: coverage should steer on the PORT's branches, not the
+    // oracle's.
+    const yaml_oracle = b.addLibrary(.{
+        .name = "yaml-oracle",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = .ReleaseSafe,
+            .link_libc = true,
+        }),
+    });
+    yaml_oracle.root_module.addCSourceFiles(libyaml_src);
+    yaml_oracle.root_module.addIncludePath(libyaml_include);
+
     const parity_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/yaml/parity.zig"),
             .target = target,
             .optimize = .ReleaseSafe,
             .link_libc = true,
-            .single_threaded = true,
+            // NOT single-threaded: `--fuzz` spawns a concurrent input poller,
+            // and a single-threaded test runner aborts at startup with
+            // error.ConcurrencyUnavailable before a single input is tried.
+            .single_threaded = false,
         }),
     });
     for (include_paths) |p| parity_tests.root_module.addIncludePath(p);
-    parity_tests.root_module.addCSourceFiles(libyaml_src);
+    parity_tests.root_module.addIncludePath(libyaml_include);
+    parity_tests.root_module.linkLibrary(yaml_oracle);
     const run_parity_tests = b.addRunArtifact(parity_tests);
     const parity_step = b.step("yaml-parity", "Diff the Zig YAML port against the vendored C libyaml (add --fuzz)");
     parity_step.dependOn(&run_parity_tests.step);
@@ -371,7 +396,7 @@ fn addYamlParity(b: *std.Build, target: std.Build.ResolvedTarget, include_paths:
 /// overflow, unreachable, bad casts) are always armed during fuzzing; without
 /// them a miscompiled UB would pass silently. libyaml (C) is linked for the
 /// html/ast/meta paths but is not instrumented.
-fn addZigFuzzer(b: *std.Build, target: std.Build.ResolvedTarget, include_paths: []const std.Build.LazyPath, libyaml_src: std.Build.Module.AddCSourceFilesOptions, abi: *std.Build.Module) void {
+fn addZigFuzzer(b: *std.Build, target: std.Build.ResolvedTarget, include_paths: []const std.Build.LazyPath, abi: *std.Build.Module) void {
     const fuzz_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/fuzz.zig"),
@@ -383,7 +408,6 @@ fn addZigFuzzer(b: *std.Build, target: std.Build.ResolvedTarget, include_paths: 
     });
     for (include_paths) |p| fuzz_tests.root_module.addIncludePath(p);
     fuzz_tests.root_module.addImport("abi", abi);
-    fuzz_tests.root_module.addCSourceFiles(libyaml_src);
     const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
     const fuzz_zig_step = b.step("fuzz-zig", "Run the Zig-native fuzz harness (add --fuzz for coverage-guided fuzzing)");
     fuzz_zig_step.dependOn(&run_fuzz_tests.step);
