@@ -71,7 +71,7 @@ const VersionDirective = types.VersionDirective;
 ///
 /// The returned pointer is into `parser.tokens`' allocation: it must NOT be held
 /// across another `peekToken`, which can grow (and therefore move) the queue.
-fn peekToken(p: *Parser) Error!*Token {
+inline fn peekToken(p: *Parser) Error!*Token {
     if (!p.token_available) try scanner.fetchMoreTokens(p);
     return p.tokens.at(0);
 }

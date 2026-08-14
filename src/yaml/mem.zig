@@ -59,6 +59,14 @@ pub const String = struct {
     buf: []u8 = &.{},
     /// Write cursor — `string.pointer - string.start` in the C.
     len: usize = 0,
+    /// High-water mark: the largest `len` reached since the last `clear`.
+    ///
+    /// `clear` has to re-zero every byte that was ever written, not just the
+    /// live ones, because `join` rewinds its source WITHOUT zeroing and the
+    /// scanners then read byte 0 of the logically-empty result. The C gets this
+    /// for free by memsetting the whole allocation; doing that here would make
+    /// a pooled scratch buffer pay its own worst case on every later token.
+    hi: usize = 0,
 
     pub const empty: String = .{};
 
@@ -103,10 +111,16 @@ pub const String = struct {
         return self.grow(alloc);
     }
 
-    /// `CLEAR`: rewind the cursor and re-zero the whole allocation.
+    /// `CLEAR`: rewind the cursor and re-zero everything ever written.
+    ///
+    /// The C memsets the whole allocation. Zeroing `[0..max(len, hi)]` covers
+    /// the same bytes: nothing above the high-water mark was ever written, so
+    /// it is still zero from `init` or from `grow`'s tail memset.
     pub fn clear(self: *String) void {
+        const dirty = @max(self.len, self.hi);
+        @memset(self.buf[0..dirty], 0);
         self.len = 0;
-        @memset(self.buf, 0);
+        self.hi = 0;
     }
 
     /// The bytes written so far — `string.start .. string.pointer`.
@@ -134,6 +148,8 @@ pub const String = struct {
         while (self.buf.len -| self.len <= other.len) try self.grow(alloc);
         @memcpy(self.buf[self.len..][0..other.len], other.slice());
         self.len += other.len;
+        // The rewind leaves other.buf[0..len] stale on purpose (see `hi`).
+        other.hi = @max(other.hi, other.len);
         other.len = 0;
     }
 
@@ -404,6 +420,66 @@ test "String toOwned shrinks to len + 1 and stays NUL-terminated" {
     try testing.expectEqualStrings("abc", owned);
     try testing.expectEqual(@as(u8, 0), owned.ptr[3]);
     try testing.expectEqual(@as(usize, 0), s.len);
+}
+
+test "clear re-zeroes bytes a join rewound but did not zero" {
+    // The load-bearing case: the scanners read byte 0 of a logically-empty
+    // fold buffer, and `join` rewinds its source WITHOUT zeroing, so only
+    // `clear` can put the zero back. `clear` must therefore cover the
+    // high-water mark, not just the live length -- if it tracked `len` alone
+    // it would zero nothing here and byte 0 would stay stale.
+    const alloc = testing.allocator;
+    var dst = try String.init(alloc, INITIAL_STRING_SIZE);
+    defer dst.deinit(alloc);
+    var src = try String.init(alloc, INITIAL_STRING_SIZE);
+    defer src.deinit(alloc);
+
+    for ("\n\n\n") |c| {
+        try src.extend(alloc);
+        src.putAssumeCapacity(c);
+    }
+    try dst.join(alloc, &src);
+
+    // Exactly the C's state after JOIN: rewound, but still readable and stale.
+    try testing.expectEqual(@as(usize, 0), src.len);
+    try testing.expectEqual(@as(u8, '\n'), src.buf[0]);
+
+    src.clear();
+    try testing.expectEqual(@as(u8, 0), src.buf[0]);
+    for (src.buf) |b| try testing.expectEqual(@as(u8, 0), b);
+}
+
+test "clear does not walk past the high-water mark" {
+    // Deliberately white-box, and the ONLY deterministic guard on this: going
+    // back to the C's `memset(whole allocation)` stays correct, so no output
+    // test can see it -- it just makes every pooled scratch buffer re-zero its
+    // own worst case on every later token. Measured 68x on a 330 KB document
+    // (9 ms -> 629 ms) and it is quadratic, so a timing test would be the
+    // alternative and a flaky one.
+    //
+    // A canary above the mark is not a state the type can reach on its own
+    // (everything above it is zero by construction); it is planted precisely
+    // so that a `clear` which overwrites it fails here.
+    const alloc = testing.allocator;
+    var s = try String.init(alloc, INITIAL_STRING_SIZE);
+    defer s.deinit(alloc);
+
+    for (0..4096) |_| {
+        try s.extend(alloc);
+        s.putAssumeCapacity('x');
+    }
+    s.clear();
+    try testing.expect(s.buf.len >= 4096); // capacity is retained...
+    try testing.expectEqual(@as(usize, 0), s.hi);
+
+    // ...but after a short write, clear must touch only the short prefix.
+    try s.extend(alloc);
+    s.putAssumeCapacity('y');
+    const canary = s.buf.len - 1;
+    s.buf[canary] = 0xAA;
+    s.clear();
+    try testing.expectEqual(@as(u8, 0), s.buf[0]);
+    try testing.expectEqual(@as(u8, 0xAA), s.buf[canary]);
 }
 
 test "String join appends and rewinds the source" {

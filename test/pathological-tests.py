@@ -157,6 +157,29 @@ pathological = {
             re.compile(r'\["p",\{\},"a(\\na)+"\]'),
             ["--format=json"]),
 
+    # --format=json case. The YAML scanners' leading_break / trailing_breaks /
+    # whitespaces scratch is pooled on the Parser (src/yaml/types.zig) rather
+    # than malloced per token the way the C does it, which is what removes 3 of
+    # every 4 allocations a scalar makes. The catch is that CLEAR then costs
+    # the buffer's high-water mark instead of the current token's: a long run
+    # of line breaks early in a document would be re-zeroed once per later
+    # scalar, i.e. quadratic in (longest break run x scalar count). Frontmatter
+    # is attacker-supplied on any site that renders user markdown, so this is a
+    # DoS shape, not a benchmark curiosity -- the input below takes 629 ms
+    # against 9 ms (68x) without the bound, and worsens quadratically.
+    #
+    # mem.String.hi bounds the memset to what was actually written. The
+    # decisive guard is the canary test in mem.zig, because reverting to the
+    # C's whole-allocation memset stays CORRECT and so shows up in no output;
+    # this case covers the same trap end to end, where the printed time makes a
+    # regression visible even though this section enforces no budget.
+    "frontmatter with a long break run then many keys (json)":
+            ("---\nfirst: value\n" + "\n" * 60000
+             + "".join("k%d: v%d\n" % (k, k) for k in range(20000))
+             + "---\n\n# doc\n",
+            re.compile(r'"k19999":"v19999"\}'),
+            ["--format=json"]),
+
     # --format=heal cases. md_heal() does not use the parser, so none of the
     # limits above cover it; its helpers used to rescan the document once per
     # candidate marker, which made these inputs quadratic (50 000 asterisks took

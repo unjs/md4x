@@ -29,6 +29,9 @@ pub fn init(alloc: Allocator) Allocator.Error!Parser {
     p.states = try types.Stack(types.ParserState).init(alloc, mem.INITIAL_STACK_SIZE);
     p.marks = try types.Stack(types.Mark).init(alloc, mem.INITIAL_STACK_SIZE);
     p.tag_directives = try types.Stack(types.TagDirective).init(alloc, mem.INITIAL_STACK_SIZE);
+    p.scratch_leading_break = try mem.String.init(alloc, mem.INITIAL_STRING_SIZE);
+    p.scratch_trailing_breaks = try mem.String.init(alloc, mem.INITIAL_STRING_SIZE);
+    p.scratch_whitespaces = try mem.String.init(alloc, mem.INITIAL_STRING_SIZE);
 
     return p;
 }
@@ -56,6 +59,9 @@ pub fn deinit(p: *Parser) void {
         td.deinit(alloc);
     }
     p.tag_directives.deinit(alloc);
+    p.scratch_leading_break.deinit(alloc);
+    p.scratch_trailing_breaks.deinit(alloc);
+    p.scratch_whitespaces.deinit(alloc);
 
     p.* = .{ .alloc = alloc };
 }

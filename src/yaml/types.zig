@@ -352,6 +352,32 @@ pub const Parser = struct {
     marks: Stack(Mark) = .empty,
     tag_directives: Stack(TagDirective) = .empty,
 
+    /// Reusable scratch for the three scalar scanners, standing in for the
+    /// `leading_break` / `trailing_breaks` / `whitespaces` locals the C
+    /// `STRING_INIT`s and `STRING_DEL`s on every single token.
+    ///
+    /// Sharing one set across all three scanners is safe because they never
+    /// nest: `fetch_more_tokens` produces one token at a time, and none of
+    /// `scan_block_scalar` / `scan_flow_scalar` / `scan_plain_scalar` calls
+    /// another. Each clears the slots it uses on entry, so a scan abandoned
+    /// part-way through cannot leak state into the next one. `string` is NOT
+    /// pooled: `toOwned` hands its allocation to the token.
+    ///
+    /// This is the only deviation from the C's allocation pattern, and it is
+    /// invisible: it changes how often the buffers are malloced, not what ends
+    /// up in them. It removes 3 of every 4 allocations a scalar makes (84 ->
+    /// 36 for a typical frontmatter block) and, because each pooled slot is one
+    /// fewer owned local needing `defer`/`errdefer` cleanup at every
+    /// error-propagation site, ~7.8 KB of wasm.
+    ///
+    /// `String.hi` is load-bearing here — see the note there. Without it these
+    /// buffers would memset their own high-water mark on every later token,
+    /// which measured 12.7x SLOWER than the C on a long run of line breaks
+    /// followed by many short scalars.
+    scratch_leading_break: String = .{},
+    scratch_trailing_breaks: String = .{},
+    scratch_whitespaces: String = .{},
+
     /// Upstream's `MAX_NESTING_LEVEL` (default 1000), moved off the process
     /// global. Each nesting level costs a stack entry and one more entry for
     /// every per-token sweep over `simple_keys`, so this is what bounds

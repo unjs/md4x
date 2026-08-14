@@ -51,7 +51,7 @@ const Error = types.Error;
 
 /// `yaml_parser_fetch_more_tokens`: ensure the token queue holds at least one
 /// token that can be returned to the parser.
-pub fn fetchMoreTokens(p: *Parser) Error!void {
+pub noinline fn fetchMoreTokens(p: *Parser) Error!void {
     // While we need more tokens to fetch, do it.
     while (true) {
         var need_more_tokens = false;

@@ -43,10 +43,13 @@ pub fn scanBlockScalar(p: *Parser, token: *Token, literal: bool) Error!void {
 
     var string = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
     errdefer string.deinit(p.alloc);
-    var leading_break = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
-    defer leading_break.deinit(p.alloc);
-    var trailing_breaks = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
-    defer trailing_breaks.deinit(p.alloc);
+    // Pooled on the parser rather than malloced per token — see
+    // `Parser.scratch_leading_break`. `clear` on entry is what makes reuse
+    // equivalent to the C's fresh `STRING_INIT`.
+    const leading_break = &p.scratch_leading_break;
+    leading_break.clear();
+    const trailing_breaks = &p.scratch_trailing_breaks;
+    trailing_breaks.clear();
 
     // Eat the indicator '|' or '>'.
 
@@ -160,7 +163,7 @@ pub fn scanBlockScalar(p: *Parser, token: *Token, literal: bool) Error!void {
 
     // Scan the leading line breaks and determine the indentation level if needed.
 
-    try scanBlockScalarBreaks(p, &indent, &trailing_breaks, start_mark, &end_mark);
+    try scanBlockScalarBreaks(p, &indent, trailing_breaks, start_mark, &end_mark);
 
     // Scan the block scalar content.
 
@@ -193,13 +196,13 @@ pub fn scanBlockScalar(p: *Parser, token: *Token, literal: bool) Error!void {
 
             leading_break.clear();
         } else {
-            try string.join(p.alloc, &leading_break);
+            try string.join(p.alloc, leading_break);
             leading_break.clear();
         }
 
         // Append the remaining line breaks.
 
-        try string.join(p.alloc, &trailing_breaks);
+        try string.join(p.alloc, trailing_breaks);
         trailing_breaks.clear();
 
         // Is it a leading whitespace?
@@ -217,20 +220,20 @@ pub fn scanBlockScalar(p: *Parser, token: *Token, literal: bool) Error!void {
 
         try p.cache(2);
 
-        try p.readLine(&leading_break);
+        try p.readLine(leading_break);
 
         // Eat the following indentation spaces and line breaks.
 
-        try scanBlockScalarBreaks(p, &indent, &trailing_breaks, start_mark, &end_mark);
+        try scanBlockScalarBreaks(p, &indent, trailing_breaks, start_mark, &end_mark);
     }
 
     // Chomp the tail.
 
     if (chomping != -1) {
-        try string.join(p.alloc, &leading_break);
+        try string.join(p.alloc, leading_break);
     }
     if (chomping == 1) {
-        try string.join(p.alloc, &trailing_breaks);
+        try string.join(p.alloc, trailing_breaks);
     }
 
     // Create a token.
@@ -316,12 +319,15 @@ pub fn scanFlowScalar(p: *Parser, token: *Token, single: bool) Error!void {
 
     var string = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
     errdefer string.deinit(p.alloc);
-    var leading_break = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
-    defer leading_break.deinit(p.alloc);
-    var trailing_breaks = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
-    defer trailing_breaks.deinit(p.alloc);
-    var whitespaces = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
-    defer whitespaces.deinit(p.alloc);
+    // Pooled on the parser rather than malloced per token — see
+    // `Parser.scratch_leading_break`. `clear` on entry is what makes reuse
+    // equivalent to the C's fresh `STRING_INIT`.
+    const leading_break = &p.scratch_leading_break;
+    leading_break.clear();
+    const trailing_breaks = &p.scratch_trailing_breaks;
+    trailing_breaks.clear();
+    const whitespaces = &p.scratch_whitespaces;
+    whitespaces.clear();
 
     // Eat the left quote.
 
@@ -549,7 +555,7 @@ pub fn scanFlowScalar(p: *Parser, token: *Token, single: bool) Error!void {
                 // Consume a space or a tab character.
 
                 if (!leading_blanks) {
-                    try p.read(&whitespaces);
+                    try p.read(whitespaces);
                 } else {
                     p.skip();
                 }
@@ -560,10 +566,10 @@ pub fn scanFlowScalar(p: *Parser, token: *Token, single: bool) Error!void {
 
                 if (!leading_blanks) {
                     whitespaces.clear();
-                    try p.readLine(&leading_break);
+                    try p.readLine(leading_break);
                     leading_blanks = true;
                 } else {
-                    try p.readLine(&trailing_breaks);
+                    try p.readLine(trailing_breaks);
                 }
             }
             try p.cache(1);
@@ -579,18 +585,18 @@ pub fn scanFlowScalar(p: *Parser, token: *Token, single: bool) Error!void {
                     try string.extend(p.alloc);
                     string.putAssumeCapacity(' ');
                 } else {
-                    try string.join(p.alloc, &trailing_breaks);
+                    try string.join(p.alloc, trailing_breaks);
                     trailing_breaks.clear();
                 }
                 leading_break.clear();
             } else {
-                try string.join(p.alloc, &leading_break);
-                try string.join(p.alloc, &trailing_breaks);
+                try string.join(p.alloc, leading_break);
+                try string.join(p.alloc, trailing_breaks);
                 leading_break.clear();
                 trailing_breaks.clear();
             }
         } else {
-            try string.join(p.alloc, &whitespaces);
+            try string.join(p.alloc, whitespaces);
             whitespaces.clear();
         }
     }
@@ -622,12 +628,15 @@ pub fn scanPlainScalar(p: *Parser, token: *Token) Error!void {
 
     var string = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
     errdefer string.deinit(p.alloc);
-    var leading_break = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
-    defer leading_break.deinit(p.alloc);
-    var trailing_breaks = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
-    defer trailing_breaks.deinit(p.alloc);
-    var whitespaces = try String.init(p.alloc, mem.INITIAL_STRING_SIZE);
-    defer whitespaces.deinit(p.alloc);
+    // Pooled on the parser rather than malloced per token — see
+    // `Parser.scratch_leading_break`. `clear` on entry is what makes reuse
+    // equivalent to the C's fresh `STRING_INIT`.
+    const leading_break = &p.scratch_leading_break;
+    leading_break.clear();
+    const trailing_breaks = &p.scratch_trailing_breaks;
+    trailing_breaks.clear();
+    const whitespaces = &p.scratch_whitespaces;
+    whitespaces.clear();
 
     const start_mark = p.mark;
     var end_mark = p.mark;
@@ -691,20 +700,20 @@ pub fn scanPlainScalar(p: *Parser, token: *Token) Error!void {
                             try string.extend(p.alloc);
                             string.putAssumeCapacity(' ');
                         } else {
-                            try string.join(p.alloc, &trailing_breaks);
+                            try string.join(p.alloc, trailing_breaks);
                             trailing_breaks.clear();
                         }
                         leading_break.clear();
                     } else {
-                        try string.join(p.alloc, &leading_break);
-                        try string.join(p.alloc, &trailing_breaks);
+                        try string.join(p.alloc, leading_break);
+                        try string.join(p.alloc, trailing_breaks);
                         leading_break.clear();
                         trailing_breaks.clear();
                     }
 
                     leading_blanks = false;
                 } else {
-                    try string.join(p.alloc, &whitespaces);
+                    try string.join(p.alloc, whitespaces);
                     whitespaces.clear();
                 }
             }
@@ -742,7 +751,7 @@ pub fn scanPlainScalar(p: *Parser, token: *Token) Error!void {
                 // Consume a space or a tab character.
 
                 if (!leading_blanks) {
-                    try p.read(&whitespaces);
+                    try p.read(whitespaces);
                 } else {
                     p.skip();
                 }
@@ -753,10 +762,10 @@ pub fn scanPlainScalar(p: *Parser, token: *Token) Error!void {
 
                 if (!leading_blanks) {
                     whitespaces.clear();
-                    try p.readLine(&leading_break);
+                    try p.readLine(leading_break);
                     leading_blanks = true;
                 } else {
-                    try p.readLine(&trailing_breaks);
+                    try p.readLine(trailing_breaks);
                 }
             }
             try p.cache(1);
