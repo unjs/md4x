@@ -156,4 +156,11 @@ where throughput matters; WASM is the portable fallback.
 
 ```sh
 bun packages/md4x/bench/index.mjs     # mitata; compares napi/wasm/md4w/markdown-it
+bun packages/md4x/bench/bundle.mjs    # rolldown; ship size (js + wasm, gzip/brotli) vs the same set
 ```
+
+Bundle size is the other axis a browser user pays for, and it moves for different reasons than
+throughput: anything that grows the WASM binary (a new renderer, a table, a vendored library) shows
+up in `bundle.mjs` even when every timing is unchanged. Re-run it after adding code that lands in
+the wasm build, and rebuild the artifacts first (`bun run build:js`) or you are sizing yesterday's
+binary.

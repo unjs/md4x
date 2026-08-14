@@ -126,7 +126,7 @@ const html = renderToHtml("# Hello");
 
 #### Standalone (inlined WASM)
 
-A single, minified, dependency-free ES module (~126 KB) with the same API as `md4x/wasm` fully embeded into single chunk.
+A single, minified, dependency-free ES module (~137 KiB) with the same API as `md4x/wasm` fully embeded into single chunk.
 
 ```js
 import { init, renderToHtml } from "md4x/standalone";
@@ -188,6 +188,37 @@ Notes:
 - The `parseAST` trio at the top (satteri, md4x.napi, ox-content) sits within ~6% of each other, which is inside run-to-run noise on this machine — repeat runs reorder them. Treat them as tied; the clear gaps are further down the list.
 - The parsers do not all return the same thing: markdown-it yields a flat array of tokens where md4x returns a nested comark AST, satteri's mdast carries full `position` data on every node, and ox-content hands back the tree as a JSON string (the bench `JSON.parse`s it so every entry ends at a materialized tree).
 - ox-content ships with GFM off, so the bench passes `{ gfm: true }` to put it on the same fixture as the rest.
+
+</details>
+
+<details>
+<summary>Bundle size</summary>
+
+(source: [packages/md4x/bench/bundle.mjs](./packages/md4x/bench/bundle.mjs))
+
+Each library is bundled with rolldown from a markdown-to-HTML entry — minified, tree-shaken, browser platform — and every file a real deployment has to serve is counted, WASM payloads included. md4x parses YAML front matter in the binary, so libraries that do not get the cheapest JS YAML parser added to their entry, broken out in `yaml`.
+
+```
+bun packages/md4x/bench/bundle.mjs
+
+target                    js      yaml       wasm      total       gzip     brotli  vs best
+-----------------  ---------  --------  ---------  ---------  ---------  ---------  -------
+md4w                 2.4 KiB  40.6 KiB   59.0 KiB  102.0 KiB   39.4 KiB   35.3 KiB        —
+markdown-it        100.1 KiB  40.8 KiB          —  140.9 KiB   54.7 KiB   46.0 KiB    1.39x
+markdown-exit      106.4 KiB  40.8 KiB          —  147.1 KiB   56.0 KiB   50.2 KiB    1.42x
+md4x/wasm (small)    2.9 KiB         —  277.3 KiB  280.2 KiB  107.3 KiB   90.7 KiB    2.72x
+md4x/standalone    135.7 KiB         —          —  135.7 KiB  110.3 KiB  108.8 KiB    2.80x
+md4x/wasm            2.9 KiB         —  392.6 KiB  395.4 KiB  131.3 KiB  106.4 KiB    3.33x
+md4w (fast)          2.4 KiB  40.6 KiB  862.3 KiB  905.4 KiB  280.3 KiB  227.3 KiB    7.11x
+```
+
+Notes:
+
+- `total` is `js + yaml + wasm`; `gzip`/`brotli` compress each file separately, the way a CDN serves them. Ranked by gzip — what a first visit actually downloads.
+- The `yaml` column is the measured difference between bundling the library alone and bundling it with a YAML parser, so it credits any code the two already share. The bench picks the cheapest candidate by gzip — js-yaml (11.7 KiB gzip), ahead of confbox/yaml (12.8 KiB) and yaml (29.1 KiB). It is a floor: the front-matter block-splitting plugin those libraries also need is not counted.
+- `md4x/standalone` has no `wasm` column because its binary is embedded in the bundle (gzip + Z85). That payload is already compressed, so its gzip and brotli numbers barely move: the trade is one request and zero asset wiring against ~3 KiB more over the wire than `md4x/wasm (small)`.
+- md4x is still bigger than md4w, largely because it carries more: MDC/comark components and the AST/text/ANSI/markdown/meta renderers all live in the same binary.
+- satteri and `@ox-content/napi` are NAPI-only — they have no browser bundle to measure.
 
 </details>
 
