@@ -407,7 +407,16 @@ pub const Parser = struct {
 
     /// `CACHE(parser, length)`: make sure at least `length` characters are
     /// decoded and available at the cursor.
-    pub fn cache(self: *Parser, length: usize) Error!void {
+    ///
+    /// `inline` here is load-bearing, and is the one exception to the "let LLVM
+    /// decide" rule the rest of these wrappers follow. The C is a macro whose
+    /// hot half is a single compare; leaving this a call let LLVM inline the
+    /// COLD half — the whole of `updateBuffer` — into this function instead,
+    /// which made the result too big to inline into the ~11M call sites a parse
+    /// makes. `updateBuffer` is `noinline` for the same reason, from the other
+    /// side. Splitting them this way was worth 10% of a parse and cost 711
+    /// bytes of wasm; folding them back together undoes both.
+    pub inline fn cache(self: *Parser, length: usize) Error!void {
         if (self.unread >= length) return;
         return @import("reader.zig").updateBuffer(self, length);
     }

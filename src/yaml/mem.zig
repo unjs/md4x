@@ -78,7 +78,11 @@ pub const String = struct {
     /// Unconditional, exactly like the C function. `join` loops on THIS, not on
     /// `extend` — looping on the guarded form spins forever once the guard is
     /// satisfied but the requested room still is not.
-    pub fn grow(self: *String, alloc: Allocator) Allocator.Error!void {
+    ///
+    /// `noinline` so the guarded `extend` above stays small enough to inline at
+    /// its call sites — the same hot-check / cold-body split as
+    /// `Parser.cache` / `reader.updateBuffer`.
+    pub noinline fn grow(self: *String, alloc: Allocator) Allocator.Error!void {
         const old_len = self.buf.len;
         const new_len = if (old_len == 0) INITIAL_STRING_SIZE else old_len * 2;
         self.buf = try alloc.realloc(self.buf, new_len);
@@ -91,7 +95,10 @@ pub const String = struct {
     /// The `pointer + 5 < end` guard is kept verbatim — the widest single
     /// `COPY` / `READ_LINE` writes 4 bytes, and the spare fifth byte is the NUL
     /// terminator every consumer of a scalar value reads.
-    pub fn extend(self: *String, alloc: Allocator) Allocator.Error!void {
+    ///
+    /// `inline` because the C is a macro and the guard is two loads and a
+    /// compare; see `grow` below for the other half.
+    pub inline fn extend(self: *String, alloc: Allocator) Allocator.Error!void {
         if (self.len + 5 < self.buf.len) return;
         return self.grow(alloc);
     }

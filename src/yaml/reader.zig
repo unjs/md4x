@@ -108,11 +108,68 @@ fn updateRawBuffer(p: *Parser) Error!void {
     }
 }
 
+/// Consume the leading run of self-decoding characters in one memcpy.
+///
+/// This is the ONE place the port deliberately does not walk the C
+/// character-by-character, and it is a pure short-circuit, not a new rule. A
+/// byte in `#x9 | #xA | #xD | [#x20-#x7E]` is a complete UTF-8 sequence of
+/// width 1 whose `value` equals the octet, so every check the loop below would
+/// run on it passes, and the four state updates it would make (`raw_buffer.pos`,
+/// `offset`, `unread`, and one `put`) are each exactly +1. Doing n of them at
+/// once is the same end state.
+///
+/// It stops at the first byte that is NOT in that set — including 0x7F and the
+/// other C0 controls, which the range test above rejects — so anything that can
+/// produce a reader error, or that needs real decoding, still reaches the loop
+/// below at the same `offset`. That is what keeps the error marks identical.
+///
+/// This matters because `update_buffer` is ~30% of a parse in BOTH
+/// implementations: libyaml re-validates and re-encodes every byte of a UTF-8
+/// input into a byte-identical copy. md4x's inputs are UTF-8 markdown, so this
+/// path is the common case, not an optimisation for a special case.
+fn bulkAscii(p: *Parser) void {
+    const raw = p.raw_buffer.mem;
+    var i = p.raw_buffer.pos;
+    const end = p.raw_buffer.last;
+    const start = i;
+
+    // 16 at a time first, then a byte-wise tail. The vector test must accept
+    // the same set as the scalar one below, or a line break would end every
+    // block and the wide path would never re-engage on multi-line input.
+    const V = @Vector(16, u8);
+    while (i + 16 <= end) {
+        const v: V = raw[i..][0..16].*;
+        const ok = ((v >= @as(V, @splat(0x20))) & (v <= @as(V, @splat(0x7E)))) |
+            (v == @as(V, @splat(0x09))) | (v == @as(V, @splat(0x0A))) | (v == @as(V, @splat(0x0D)));
+        if (!@reduce(.And, ok)) break;
+        i += 16;
+    }
+    while (i < end) {
+        const c = raw[i];
+        if (!(c >= 0x20 and c <= 0x7E) and c != 0x09 and c != 0x0A and c != 0x0D) break;
+        i += 1;
+    }
+
+    const n = i - start;
+    if (n == 0) return;
+    // The same bound `put` asserts, checked once for the whole run: the caller
+    // decodes at most one raw buffer per call and `cap` is 3x that.
+    std.debug.assert(p.buffer.last + n <= p.buffer.cap);
+    @memcpy(p.buffer.mem[p.buffer.last..][0..n], raw[start..i]);
+    p.buffer.last += n;
+    p.raw_buffer.pos = i;
+    p.offset += n;
+    p.unread += n;
+}
+
 /// `yaml_parser_update_buffer`: ensure the buffer holds at least `length`
 /// characters at the cursor.
 ///
 /// The length is supposed to be significantly less than the buffer size.
-pub fn updateBuffer(p: *Parser, length: usize) Error!void {
+///
+/// `noinline` is deliberate: this is the cold half of `Parser.cache`, which is
+/// `inline`. See the note there.
+pub noinline fn updateBuffer(p: *Parser, length: usize) Error!void {
     var first = true;
 
     std.debug.assert(p.read_handler != null); // Read handler must be set.
@@ -158,6 +215,9 @@ pub fn updateBuffer(p: *Parser, length: usize) Error!void {
         // Decode the raw buffer.
 
         while (p.raw_buffer.pos != p.raw_buffer.last) {
+            if (p.encoding == .utf8) bulkAscii(p);
+            if (p.raw_buffer.pos == p.raw_buffer.last) break;
+
             var value: u32 = 0;
             var incomplete = false;
             var width: usize = 0;
@@ -509,4 +569,61 @@ test "input longer than one raw buffer decodes across refills" {
         seen += 1;
     }
     try testing.expectEqual(size, seen);
+}
+
+test "the bulk fast path leaves the same state as the per-character loop" {
+    // Every shape the fast path has to hand back to the decode loop, at
+    // several alignments relative to its 16-byte block. `problem` is what the
+    // C rejects the input with; null means the whole input is valid.
+    //
+    // The control-character rows are the ones that matter: the fast path's
+    // accepted set has to be a SUBSET of what the loop accepts, or a byte the
+    // C rejects gets copied through silently. Neither the corpus nor the
+    // yaml-test-suite contains a raw DEL or C0 byte, so nothing else pins it.
+    const cases = [_]struct { input: []const u8, problem: ?[]const u8 = null }{
+        .{ .input = "a: b\n" },
+        .{ .input = "key: a value comfortably longer than one vector block\n" },
+        .{ .input = "a\tb\r\nc\n" },
+        .{ .input = "\xc3\xa9: caf\xc3\xa9\n" }, // non-ASCII at the front and mid-run
+        .{ .input = "0123456789abcde\xc3\xa9rest\n" }, // breaks at the block boundary
+        .{ .input = "0123456789abcdef\xc3\xa9rest\n" }, // breaks one past it
+        .{ .input = "plain ascii then \xe2\x82\xac then more ascii\n" },
+        // 0x7F and the C0 controls sit inside no allowed range. Placed both
+        // inside the vectorised prefix and in the byte-wise tail.
+        .{ .input = "sixteen bytes!!!\x7f", .problem = "control characters are not allowed" },
+        .{ .input = "\x7fleading", .problem = "control characters are not allowed" },
+        // Inside a full 16-byte block, so the vectorised test is what has to
+        // reject it — the byte-wise tail below never sees these.
+        .{ .input = "0123456789abcde\x7fand more text", .problem = "control characters are not allowed" },
+        .{ .input = "0123456789abcde\x01and more text", .problem = "control characters are not allowed" },
+        .{ .input = "0123456789abcdefghij\x01", .problem = "control characters are not allowed" },
+        .{ .input = "a\x0bb", .problem = "control characters are not allowed" }, // vertical tab
+    };
+
+    for (cases) |case| {
+        var p = try api.init(testing.allocator);
+        defer api.deinit(&p);
+        api.setInputString(&p, case.input);
+
+        const result = updateBuffer(&p, case.input.len + 2);
+
+        if (case.problem) |want| {
+            try testing.expectError(error.Yaml, result);
+            try testing.expectEqual(types.ErrorType.reader, p.err);
+            try testing.expectEqualStrings(want, p.problem.?);
+            continue;
+        }
+
+        try result;
+        // The decoded window is a verbatim copy, NUL-terminated at EOF...
+        try testing.expectEqualStrings(case.input, p.buffer.mem[0 .. p.buffer.last - 1]);
+        try testing.expectEqual(@as(u8, 0), p.buffer.mem[p.buffer.last - 1]);
+        // ...`offset` counts bytes...
+        try testing.expectEqual(case.input.len, p.offset);
+        // ...and `unread` counts characters, plus that NUL.
+        try testing.expectEqual(
+            (std.unicode.utf8CountCodepoints(case.input) catch unreachable) + 1,
+            p.unread,
+        );
+    }
 }
