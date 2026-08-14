@@ -1,0 +1,3 @@
+# Fuzz corpora are byte-exact inputs: a CRLF seed that Git normalizes to LF on
+# checkout silently degenerates into the LF case and stops testing that path.
+test/fuzzers/** -text
