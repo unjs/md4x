@@ -13,6 +13,11 @@ const props = defineProps<{
 const containerEl = ref<HTMLElement | null>(null);
 let reactRoot: Root | null = null;
 
+const RawHtml = ({ __node: [, nodeProps, ...children] }: any) =>
+  createElement(nodeProps.block ? "div" : "span", {
+    dangerouslySetInnerHTML: { __html: children.join("") },
+  });
+
 function renderTree() {
   if (!containerEl.value) return;
   if (!reactRoot) reactRoot = createRoot(containerEl.value);
@@ -25,7 +30,7 @@ function renderTree() {
   reactRoot.render(
     createElement(ComarkRenderer, {
       tree: props.tree,
-      components: props.components,
+      components: { ...props.components, html: RawHtml },
     } as any),
   );
 }
