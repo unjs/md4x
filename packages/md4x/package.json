@@ -40,7 +40,7 @@
     "prepack": "cd ../.. && zig build --verbose && zig build wasm && zig build wasm-small && bun scripts/build-standalone.ts"
   },
   "devDependencies": {
-    "@ox-content/napi": "^2.81.0",
+    "@ox-content/napi": "^2.89.0",
     "confbox": "^0.2.4",
     "js-yaml": "^5.2.3",
     "markdown-it": "^14.1.1",
