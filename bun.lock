@@ -16,12 +16,12 @@
     },
     "packages/md4x": {
       "name": "md4x",
-      "version": "0.0.26",
+      "version": "0.0.29",
       "bin": {
         "md4x": "./lib/cli.mjs",
       },
       "devDependencies": {
-        "@ox-content/napi": "^2.81.0",
+        "@ox-content/napi": "^2.89.0",
         "confbox": "^0.2.4",
         "js-yaml": "^5.2.3",
         "markdown-it": "^14.1.1",
@@ -260,21 +260,21 @@
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.2.3", "", { "dependencies": { "@tybys/wasm-util": "^0.10.3" }, "peerDependencies": { "@emnapi/core": "^1.7.1 || ^2.0.0-alpha.4", "@emnapi/runtime": "^1.7.1 || ^2.0.0-alpha.4" } }, "sha512-UMduMbqO5s5zF2NkNacMT/yK5Y5QiKvWr2+50bzIIxFDwVJ2h49b+oyjaCGPhJxd2/gC2x39EHv/gHVuu36x2Q=="],
 
-    "@ox-content/binding-darwin-arm64": ["@ox-content/binding-darwin-arm64@2.81.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-XyvUuTvOSNiCC80hZHNcVx/8thpvnU2wW4aUoFhpX63JtvAoaOYmifXAlaqtmryf4GNM/BW7iE2ljzs8wHOpug=="],
+    "@ox-content/binding-darwin-arm64": ["@ox-content/binding-darwin-arm64@2.89.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-HPrpBgQn1cEXRJOk7yBd05X4MmdQzwoMXvQkK7kXXfpEVGLrv2HJ0vG4eIiA3DebyvOrTPdGbDJiKdbESITLrw=="],
 
-    "@ox-content/binding-darwin-x64": ["@ox-content/binding-darwin-x64@2.81.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-554zl99QPPtrmSXT3eDdO59BdX95IfXB6t1hu48NHEs6VBPXEwtupibW0Ykl1TVeKFWk3+mPM3r5fLLmZuZELA=="],
+    "@ox-content/binding-darwin-x64": ["@ox-content/binding-darwin-x64@2.89.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-7toCpdE6v65w/C2Cigx4X4Np9UN422/qfQs0T8fgF62qOczmRL+GdVTxJMaVi1IATXRbnUWYUytKJhIpPQe3Mg=="],
 
-    "@ox-content/binding-linux-arm64-gnu": ["@ox-content/binding-linux-arm64-gnu@2.81.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-ARaIkRDzIb1bHybfXyKS1jSoxvNbylgIInNou5dbw1YWykyHiiAo5t0OE5BpnmbCLNIijM1PEw1ilKQvrtfLLQ=="],
+    "@ox-content/binding-linux-arm64-gnu": ["@ox-content/binding-linux-arm64-gnu@2.89.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-15Y2/fVXBmrurLeXFSjzL1/YdMKVcwE12/aREEJG8U6ejmFGlRahVZRgR+muycLEa5MktzvoLxI/AD6AdOgZvA=="],
 
-    "@ox-content/binding-linux-arm64-musl": ["@ox-content/binding-linux-arm64-musl@2.81.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-hVcg8jb6Myjq4HAcB5OyAtKygFV9BFtL4Yg1JHDBGtsrAP7IJsh3IhSzxn3Qa24vZMYNavnWgEoZ8qipQ73SMQ=="],
+    "@ox-content/binding-linux-arm64-musl": ["@ox-content/binding-linux-arm64-musl@2.89.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-joljmljQTB7OOljTC5epaUWuHk5xAyIg4qsqYI9VJt5hnH+1wfBJTG1TFuy37yXkHMj39SceCmb9aX/26k8gug=="],
 
-    "@ox-content/binding-linux-x64-gnu": ["@ox-content/binding-linux-x64-gnu@2.81.0", "", { "os": "linux", "cpu": "x64" }, "sha512-sm6BcDiSLbIaoUQtlU526IAfhlcODHLOAfWjjdgrlYSFM1nJHFzlPXak+Pgvmsi4HtHR2WqLeOLdDERwwXPDdQ=="],
+    "@ox-content/binding-linux-x64-gnu": ["@ox-content/binding-linux-x64-gnu@2.89.0", "", { "os": "linux", "cpu": "x64" }, "sha512-fPAzgcMEpNEPjY8BXzkypfn9CJbnmviocSHsVkVzHIjG6uulk22E8VL9XWqRp9Wj4jsKv7z+Z57XNtmRwKy70g=="],
 
-    "@ox-content/binding-linux-x64-musl": ["@ox-content/binding-linux-x64-musl@2.81.0", "", { "os": "linux", "cpu": "x64" }, "sha512-PqK+GBMTefizzP6zWxErz1CSzZUpd2BuX+DTkRtpwgQdKYhiSj3Zucap76C3VSGSu4UUHNTBhwRN9Lb8ZNAfjg=="],
+    "@ox-content/binding-linux-x64-musl": ["@ox-content/binding-linux-x64-musl@2.89.0", "", { "os": "linux", "cpu": "x64" }, "sha512-1SZGX7S8l6/Fshda03xDpjvl0A/+8q78jhdMB6x19eI3iPJqZEWPPQiJ2Ao4tQ1AHdfxiQAuSrL8LZbuKN88ew=="],
 
-    "@ox-content/binding-win32-x64-msvc": ["@ox-content/binding-win32-x64-msvc@2.81.0", "", { "os": "win32", "cpu": "x64" }, "sha512-sybht/3kAjdPdwCMaOxeTDV6JVTA3NBqv0jHmlS28QIiPeb9hCZ2J8paE6+9KcDgHhd3ek66UaGNatTitb4p9Q=="],
+    "@ox-content/binding-win32-x64-msvc": ["@ox-content/binding-win32-x64-msvc@2.89.0", "", { "os": "win32", "cpu": "x64" }, "sha512-jZNw/mQE8Y4GKXlGqpGYWrQ8lgBpPL6LxxHvj2fjK+TKISZ9i8vwj7T3o4ytZlDxIHev8GSfk9KqbCfOENQmeg=="],
 
-    "@ox-content/napi": ["@ox-content/napi@2.81.0", "", { "optionalDependencies": { "@ox-content/binding-darwin-arm64": "2.81.0", "@ox-content/binding-darwin-x64": "2.81.0", "@ox-content/binding-linux-arm64-gnu": "2.81.0", "@ox-content/binding-linux-arm64-musl": "2.81.0", "@ox-content/binding-linux-x64-gnu": "2.81.0", "@ox-content/binding-linux-x64-musl": "2.81.0", "@ox-content/binding-win32-x64-msvc": "2.81.0" } }, "sha512-MScNMK7r4LiT62V9ny0YDcHIEb2Tyaip+L49JvVOIT8dPUEma/yJESP1G3wBXww+GBtaEUh1Ylfv7PLy1trSLg=="],
+    "@ox-content/napi": ["@ox-content/napi@2.89.0", "", { "optionalDependencies": { "@ox-content/binding-darwin-arm64": "2.89.0", "@ox-content/binding-darwin-x64": "2.89.0", "@ox-content/binding-linux-arm64-gnu": "2.89.0", "@ox-content/binding-linux-arm64-musl": "2.89.0", "@ox-content/binding-linux-x64-gnu": "2.89.0", "@ox-content/binding-linux-x64-musl": "2.89.0", "@ox-content/binding-win32-x64-msvc": "2.89.0" } }, "sha512-lyd/dXf2lP2btsRYOtsp3X981GB83PWVwrNArZHi398O+0WizjXd02DY629XVHPEg2HqnrlKbiKlFtQeH+UWxg=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.144.0", "", {}, "sha512-nuhZIOLuI6TFQ32I/WnUx+SCPY7SdSKwgnFHydAuoS1+Z4BRcaP+RRJmGzl9lw+0OFF7UmaESf7KQRXaNLHypg=="],
 
@@ -606,7 +606,7 @@
 
     "md4x": ["md4x@workspace:packages/md4x"],
 
-    "md4x-c": ["md4x@0.0.26", "", { "bin": { "md4x": "lib/cli.mjs" } }, "sha512-QilOtNnh6BX4LMHyw4qxZL+I9U5WwW1OFjM9l9a2bGH2s4wT3GUfILL8POcRBIrDxS3ElzFOowQ4WvBmoCPQnw=="],
+    "md4x-c": ["md4x@0.0.29", "", { "bin": { "md4x": "lib/cli.mjs" } }, "sha512-I4gPatCcXSkeI2BgsTwt6rv0dGSu6DpiIiO8bhdmL1xEKVbg6riLxoKzUmQxe3tLVNDcFtzE2smPqZlLkJJXsw=="],
 
     "md4x-demo": ["md4x-demo@workspace:website"],
 
