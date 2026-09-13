@@ -129,6 +129,7 @@ pub fn md_start_new_block(ctx: *MD_CTX, line: *const MD_LINE_ANALYSIS) c_int {
     if (block_raw == null)
         return -1;
     const block: *MD_BLOCK = @ptrCast(@alignCast(block_raw));
+    ctx.last_block_off = ctx.n_block_bytes - @sizeOf(MD_BLOCK);
 
     switch (line.type) {
         .hr => block.setType(c.BlockType.hr),
@@ -311,6 +312,7 @@ pub fn md_push_container_bytes(ctx: *MD_CTX, ty: c.BlockType, start: c_uint, dat
     if (block_raw == null)
         return -1;
     const block: *MD_BLOCK = @ptrCast(@alignCast(block_raw));
+    ctx.last_block_off = ctx.n_block_bytes - @sizeOf(MD_BLOCK);
 
     block.setType(ty);
     block.bits.flags = @truncate(flags);
@@ -1288,6 +1290,23 @@ pub fn md_line_indentation(ctx: *MD_CTX, total_indent: c_uint, beg: OFF, p_end: 
 
 pub const md_dummy_blank_line = MD_LINE_ANALYSIS{ .type = .blank, .data = 0, .enforce_new_block = false, .beg = 0, .end = 0, .indent = 0 };
 
+// True when the most recent push into `block_bytes` was an LI opener, i.e. the
+// innermost list item has no content yet. md4c peeks at the arena's last
+// `sizeof(MD_BLOCK)` bytes and tests `type == MD_BLOCK_LI` — but after a block
+// that closes itself (an ATX heading, a thematic break) those bytes are the
+// block's last `MD_LINE`, whose `beg` reads as the type byte: any line whose
+// content starts at `256k + 4` (`BlockType.li == 4`) passes as an empty item and
+// the next line gets ejected from the enclosing container. That is the source
+// of mity/md4c#413 (`-\n  ---\n\n  b`) and of unjs/md4x#28 (a heading inside a
+// `::component` at byte 256). The header offset check makes the peek exact.
+fn md_top_block_is_empty_li(ctx: *const MD_CTX) bool {
+    if (ctx.last_block_off + @sizeOf(MD_BLOCK) != ctx.n_block_bytes)
+        return false;
+    const top_block: *const MD_BLOCK = @ptrCast(@alignCast(@as([*]const u8, @ptrCast(ctx.block_bytes)) + ctx.last_block_off));
+    return top_block.getType() == c.BlockType.li and
+        (top_block.bits.flags & @as(u8, @truncate(MD_BLOCK_CONTAINER_OPENER))) != 0;
+}
+
 // Analyze type of the line and find some of its properties. Main input for
 // determining type and boundaries of a block (md4x.c ~7096).
 pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *const MD_LINE_ANALYSIS, line: *MD_LINE_ANALYSIS) c_int {
@@ -1581,42 +1600,31 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                 ctx.last_line_has_list_loosening_effect = false;
             } else {
                 line.type = .blank;
+                ctx.consecutive_blank_lines +|= 1;
                 ctx.last_line_has_list_loosening_effect = (n_parents > 0 and
                     n_brothers + n_children == 0 and
                     ctx.containers.items[@intCast(n_parents - 1)].ch != '>');
-
-                // See https://github.com/mity/md4c/issues/6 — empty list item
-                // not on its first line forces list end on next non-blank line.
-                if (n_parents > 0 and ctx.containers.items[@intCast(n_parents - 1)].ch != '>' and
-                    n_brothers + n_children == 0 and ctx.current_block == null and
-                    ctx.n_block_bytes > @sizeOf(MD_BLOCK))
-                {
-                    const top_block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + (ctx.n_block_bytes - @sizeOf(MD_BLOCK))));
-                    if (top_block.typeIsRaw(c.BlockType.li))
-                        ctx.last_list_item_starts_with_two_blank_lines = true;
-                }
             }
             break :classify;
         } else {
-            // 2nd half of the hack: 2nd blank line at list item start forces end.
-            if (ctx.last_list_item_starts_with_two_blank_lines) {
+            // CommonMark requires a list item cannot begin with two (or more)
+            // blank lines so we may need to forcefully end the list.
+            // (See https://github.com/mity/md4c/issues/6)
+            if (ctx.consecutive_blank_lines >= 2) {
                 if (n_parents > 0 and n_parents == ctx.nContainers() and
                     ctx.containers.items[@intCast(n_parents - 1)].ch != '>' and
                     n_brothers + n_children == 0 and ctx.current_block == null and
-                    ctx.n_block_bytes > @sizeOf(MD_BLOCK))
+                    md_top_block_is_empty_li(ctx))
                 {
-                    const top_block: *MD_BLOCK = @ptrCast(@alignCast(@as([*]u8, @ptrCast(ctx.block_bytes)) + (ctx.n_block_bytes - @sizeOf(MD_BLOCK))));
-                    if (top_block.typeIsRaw(c.BlockType.li)) {
-                        n_parents -= 1;
+                    n_parents -= 1;
 
-                        line.indent = total_indent;
-                        if (n_parents > 0)
-                            line.indent -= MIN_u(line.indent, ctx.containers.items[@intCast(n_parents - 1)].contents_indent);
-                    }
+                    line.indent = total_indent;
+                    if (n_parents > 0)
+                        line.indent -= MIN_u(line.indent, ctx.containers.items[@intCast(n_parents - 1)].contents_indent);
                 }
-
-                ctx.last_list_item_starts_with_two_blank_lines = false;
             }
+            ctx.consecutive_blank_lines = 0;
+
             ctx.last_line_has_list_loosening_effect = false;
         }
 

@@ -562,6 +562,17 @@ md4x-only follow-ups the sweep raised, with no upstream counterpart, that did no
 `.github/workflows/ci.yml` never runs `zig build fuzz-zig`, and `AGENTS.md` claims a
 Linux/Windows/coverage CI matrix that does not exist.
 
+## Landed ahead of the next sweep
+
+Commits newer than `last_reviewed` that were ported on their own, out of order, because a
+bug report forced the issue. `last_reviewed` does **not** move for these — the commits between
+it and them are still unreviewed — so the next sweep will print them again; classify them
+`ported` from this table rather than re-investigating.
+
+| md4x         | upstream  | subject                                                              | note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------ | --------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| unjs/md4x#28 | `f7f9c57` | md_analyze_line: Handle blank lines in a list item in less hacky way | `last_list_item_starts_with_two_blank_lines` → `consecutive_blank_lines`, as upstream. **Upstream's fix is incomplete**: it keeps the `top_block` peek at the arena's last 8 bytes, which after a self-closing block (heading, `---`) is an `MD_LINE`, so `beg == 256k + 4` still reads as `LI` — the actual cause of both mity/md4c#413 and unjs/md4x#28 (a heading inside `::note` at byte 256). md4x adds `MD_CTX.last_block_off` and `md_top_block_is_empty_li`, which only trust the peek when a header was the last push. Worth reporting upstream (item 6 below). `[blk]` |
+
 ## Worth reporting upstream
 
 1. `10e96ad` fixes a real bug (a code span's line ending owes a space even when the line had
@@ -579,6 +590,10 @@ Linux/Windows/coverage CI matrix that does not exist.
    which reproduce in md4c HEAD: `<textareaa` as a raw HTML block, `<!_` as one (and HTML
    block type 5 unreachable behind it), an indented `<div>` interrupting a paragraph, and a
    surviving tab rewritten as spaces in verbatim indentation.
+6. `f7f9c57` (the mity/md4c#413 fix) still misreads the arena top: with two blank lines,
+   `-\n  ---\n\n\n  b` ejects `b` from the item whenever the `---` content starts at byte
+   `256k + 4`, and the same holds for any ATX heading at such an offset. See
+   [Landed ahead of the next sweep](#landed-ahead-of-the-next-sweep).
 
 ## Ledger — 2026-08 sweep (fork point → `c4be862`)
 

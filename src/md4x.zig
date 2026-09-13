@@ -572,13 +572,13 @@ fn _test_run_analyze(parser: *const c.Parser, text: [*c]const CHAR, size: SZ, ou
         ret = md_analyze_line(&ctx, off, &off, pivot_line, line);
         if (ret < 0) break;
 
-        emit(&fbuf, "L type={d} data={d} enf={d} beg={d} end={d} indent={d} | nc={d} bcn={d} fm={d} llhle={d} llistwo={d} nblk={d} ncomp={d} nslot={d} nalert={d}\n", .{
+        emit(&fbuf, "L type={d} data={d} enf={d} beg={d} end={d} indent={d} | nc={d} bcn={d} fm={d} llhle={d} cbl={d} nblk={d} ncomp={d} nslot={d} nalert={d}\n", .{
             @intFromEnum(line.type),                                      line.data,
             @intFromBool(line.enforce_new_block),                         line.beg,
             line.end,                                                     line.indent,
             ctx.nContainers(),                                            ctx.block_component_nesting,
             ctx.frontmatter_state,                                        @intFromBool(ctx.last_line_has_list_loosening_effect),
-            @intFromBool(ctx.last_list_item_starts_with_two_blank_lines), ctx.n_block_bytes,
+            ctx.consecutive_blank_lines,                                  ctx.n_block_bytes,
             @as(c_int, @intCast(ctx.block_component_info.items.len)),     @as(c_int, @intCast(ctx.slot_info.items.len)),
             @as(c_int, @intCast(ctx.block_alert_info.items.len)),
         }, out_fn, out_ud);

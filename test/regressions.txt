@@ -2459,3 +2459,99 @@ an autolink at all and the whole thing stays literal text.
 .
 <p>&lt;a&amp;b@e.com&gt;</p>
 ````````````````````````````````
+
+
+## [Issue 413](https://github.com/mity/md4c/issues/413) / [md4x issue 28](https://github.com/unjs/md4x/issues/28)
+
+The "list item cannot begin with two blank lines" rule (md4c issue 6) peeked at
+the last `sizeof(MD_BLOCK)` bytes of the block arena and took them for a block
+header. After a self-closing block — a thematic break, an ATX heading — they are
+that block's last `MD_LINE`, whose `beg` reads as the type byte, so a line whose
+content starts at byte `256k + 4` (`LI == 4`) passed for an empty list item and
+the next line was ejected from the enclosing container.
+
+Upstream's case, the `---` content at byte 4:
+
+```````````````````````````````` example
+-
+  ---
+
+  foo bar
+.
+<ul>
+<li>
+<hr>
+<p>foo bar</p>
+</li>
+</ul>
+````````````````````````````````
+
+Two blank lines after content do not end the item either:
+
+```````````````````````````````` example
+-
+  ---
+
+
+  foo bar
+.
+<ul>
+<li>
+<hr>
+<p>foo bar</p>
+</li>
+</ul>
+````````````````````````````````
+
+A heading whose text lands at byte 260, inside a list item:
+
+```````````````````````````````` example
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+- ### b
+
+  c
+.
+<p>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</p>
+<ul>
+<li>
+<h3>b</h3>
+<p>c</p>
+</li>
+</ul>
+````````````````````````````````
+
+and inside a block component — the md4x report: the container closed after the
+heading and its real `::` closer became a paragraph.
+
+```````````````````````````````` example
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+::note
+
+### A
+
+text
+
+::
+.
+<p>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</p>
+<note>
+<h3>A</h3>
+<p>text</p>
+</note>
+````````````````````````````````
+
+The rule itself still holds — an item that begins with two blank lines ends the
+list:
+
+```````````````````````````````` example
+-
+
+  foo
+.
+<ul>
+<li></li>
+</ul>
+<p>foo</p>
+````````````````````````````````

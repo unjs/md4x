@@ -1358,6 +1358,7 @@ pub fn md_process_all_blocks(ctx: *MD_CTX) c_int {
     }
 
     ctx.n_block_bytes = 0;
+    ctx.last_block_off = 0;
 
     return ret;
 }

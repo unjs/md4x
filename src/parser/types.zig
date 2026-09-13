@@ -115,8 +115,9 @@ pub const MD_BLOCK = extern struct {
 
     // Only valid on a pointer that really is an MD_BLOCK header: `bits.type`
     // then holds a value written by `setType` (the zeroed default being
-    // `.doc`), so the ordinal is always in range. Use `typeIsRaw` where the
-    // pointer may instead land on an interleaved MD_LINE payload.
+    // `.doc`), so the ordinal is always in range. Never point this at the
+    // arena's top blindly — after a line push the top is an MD_LINE payload
+    // (see `MD_CTX.last_block_off`).
     pub inline fn getType(self: *const MD_BLOCK) c.BlockType {
         return @enumFromInt(self.bits.type);
     }
@@ -124,17 +125,6 @@ pub const MD_BLOCK = extern struct {
         self.bits.type = @intCast(@intFromEnum(t));
     }
 
-    /// Compare the raw type byte without decoding it into a `BlockType`.
-    ///
-    /// `md_analyze_line`'s two-blank-lines hack peeks at `block_bytes`'s last
-    /// `@sizeOf(MD_BLOCK)` bytes, which are a block header only if a header was
-    /// the most recent push — otherwise they are part of an `MD_LINE` /
-    /// `MD_VERBATIMLINE` and the byte is arbitrary line-offset data. md4c reads
-    /// it as a plain int and lets the comparison simply fail; `@enumFromInt`
-    /// would instead be illegal behavior there, so those sites use this.
-    pub inline fn typeIsRaw(self: *const MD_BLOCK, t: c.BlockType) bool {
-        return self.bits.type == @as(u8, @intCast(@intFromEnum(t)));
-    }
 };
 
 /// Hard cap on how many `::component` / `#slot` / `> [!ALERT]` records one
@@ -488,7 +478,13 @@ pub const MD_CTX = struct {
     html_block_type: c_int = 0, // For checking closing raw HTML condition.
     frontmatter_state: c_int = 0, // 0: looking for opener, 1: inside, 2: done/disabled
     last_line_has_list_loosening_effect: bool = false,
-    last_list_item_starts_with_two_blank_lines: bool = false,
+    // Blank lines since the last non-blank one (md4c `consecutive_blank_lines`).
+    consecutive_blank_lines: c_uint = 0,
+    // Arena offset of the most recently pushed MD_BLOCK header, written by
+    // md_start_new_block / md_push_container_bytes. The header is the arena's
+    // top only while `last_block_off + @sizeOf(MD_BLOCK) == n_block_bytes`;
+    // see blocks.md_top_block_is_empty_li.
+    last_block_off: usize = 0,
 
     // Block component info array. (PLAN 8.1: ArrayListUnmanaged.)
     block_component_info: std.ArrayListUnmanaged(MD_BLOCK_COMPONENT_INFO) = .empty,
