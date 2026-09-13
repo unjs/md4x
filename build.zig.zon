@@ -1,6 +1,6 @@
 .{
     .name = .md4x,
-    .version = "0.0.29",
+    .version = "0.0.30",
     .dependencies = .{
         // Pinned to an UNTAGGED master commit, not the 0.2.5 release tag (2020,
         // still the latest). It adds `MAX_NESTING_LEVEL = 1000` to the scanner,
