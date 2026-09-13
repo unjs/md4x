@@ -467,6 +467,38 @@ rendu's other syntaxes — `<? code ?>`, `<?= expr ?>` and `<script server>` —
 special handling: they are CommonMark raw HTML (a processing instruction and a `<script>`
 block) and pass through verbatim already.
 
+## Extension: JSX Component Tags
+
+Raw HTML is CommonMark's, with three extensions to the tag grammar so an Astro / MDX component tag
+passes through **verbatim** instead of being escaped as text (`test/spec-jsx.txt`):
+
+```
+<Card n={1 + 2} style={{color: "red"}} on={() => go()} />   → unchanged
+<Card {...props} />                                          → unchanged
+<Card.Item x={1} />                                          → unchanged
+```
+
+- **Brace value** — `key={…}` runs to the balanced `}`, skipping braces inside `"…"`, `'…'` and
+  `` `…` `` strings (`\` escapes the next byte), where CommonMark's unquoted value would stop at
+  the first blank. A value that does not balance, or is not followed by a blank, `>` or `/`, is read
+  the CommonMark way, so `<a b={x>` and `<a b={x}}>` are the tags they always were.
+- **Spread** — `{...expr}` where an attribute name is expected. Only that shape: `<Card {x} />`
+  stays text.
+- **Member-expression name** — a `.` inside a tag name that starts with an **uppercase** letter
+  (`<Card.Item>`, `<Motion.div>`). `<foo.bar.baz>` is CommonMark spec example 606 and stays text;
+  Astro requires a component name to be capitalized anyway.
+
+Everything else is CommonMark: a tag alone on its line is an HTML block (type 7) and a tag in
+running text is an inline raw-HTML span; a tag split across lines is an inline span (the block form
+needs the whole tag on one line). Children are parsed as markdown only when **blank lines** separate
+them from the opening and closing tags — without them the HTML block keeps the children verbatim,
+which is what MDX and Astro document too. `{expr}` in running text is covered under
+[inline attributes](#extension-inline-attributes): a run that is not a well-formed attribute list, or
+is bare keys after a blank, stays literal text. Not supported: `<>…</>` fragments, `import` /
+`export` lines, and a multi-line `{expression}` block at the top level.
+
+GitHub escapes all three shapes; recorded in `.agents/github-parity.md`.
+
 ## Code Block Metadata
 
 Fenced code blocks support filename and line highlighting metadata:

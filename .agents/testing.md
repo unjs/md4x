@@ -17,7 +17,7 @@ Suites: `spec.txt`, `spec-tables.txt`, `spec-strikethrough.txt`, `spec-tasklists
 `spec-latex-math.txt`, `spec-permissive-autolinks.txt`,
 `spec-soft-breaks.txt`, `spec-underline.txt`, `spec-frontmatter.txt`, `spec-components.txt`,
 `spec-attributes.txt`, `spec-alerts.txt`, `spec-highlight.txt`, `spec-footnotes.txt`,
-`spec-markdown.txt`,
+`spec-markdown.txt`, `spec-binding.txt`, `spec-jsx.txt`,
 `regressions.txt`, `coverage.txt`.
 
 Both `bun scripts/run-tests.ts` and `.github/workflows/ci.yml` run the Zig unit tests on every PR.

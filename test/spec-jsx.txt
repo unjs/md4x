@@ -1,0 +1,201 @@
+# JSX tags in raw HTML
+
+An Astro / MDX component tag is CommonMark raw HTML with three extensions to
+the tag grammar, so it passes through verbatim instead of being escaped as
+text: a brace-balanced attribute value (`n={1 + 2}`), where CommonMark's
+unquoted value would stop at the blank; a `{...spread}` where an attribute
+name is expected; and a `.` inside a **capitalized** tag name (`<Card.Item>`).
+Everything else is CommonMark's: the tag is an HTML block (type 7) when it is
+alone on its line, an inline raw-HTML span otherwise, and children are
+markdown only when blank lines separate them from the tags.
+
+A brace value skips braces inside `"…"`, `'…'` and `` `…` `` strings, with `\`
+escaping the next byte. A value that does not balance, or does not end the
+attribute, falls back to CommonMark's unquoted value, so nothing CommonMark
+already read as a tag changes. GitHub escapes all of these; see
+`.agents/github-parity.md`.
+
+## Expression values
+
+```````````````````````````````` example
+<Card title={title} />
+
+<Card n={1 + 2} />
+
+<Card items={[1, 2]} />
+
+<Card style={{color: "red"}} />
+
+<Card on={() => go()} />
+.
+<Card title={title} />
+<Card n={1 + 2} />
+<Card items={[1, 2]} />
+<Card style={{color: "red"}} />
+<Card on={() => go()} />
+````````````````````````````````
+
+## Strings inside a value may hold braces and quotes
+
+```````````````````````````````` example
+<Card on={() => go("}")} />
+
+<Card t={'}'} u={"\"}"} />
+
+<Card title={`t ${x}`} />
+.
+<Card on={() => go("}")} />
+<Card t={'}'} u={"\"}"} />
+<Card title={`t ${x}`} />
+````````````````````````````````
+
+## Spread attributes
+
+```````````````````````````````` example
+<Card {...props} />
+
+<Card a="1" {...props} b />
+
+<Card {...props}>
+.
+<Card {...props} />
+<Card a="1" {...props} b />
+<Card {...props}>
+````````````````````````````````
+
+## Only a spread may sit in attribute position
+
+```````````````````````````````` example
+<Card {x} />
+
+<Card {..x} />
+
+<Card {...x />
+.
+<p>&lt;Card {x} /&gt;</p>
+<p>&lt;Card {..x} /&gt;</p>
+<p>&lt;Card {...x /&gt;</p>
+````````````````````````````````
+
+## Member-expression tag names, capitalized only
+
+`<foo.bar.baz>` is CommonMark spec example 606 and stays text; Astro requires
+a component name to start with an uppercase letter.
+
+```````````````````````````````` example
+<Card.Item x={1} />
+
+<Motion.div />
+
+</Card.Item>
+
+<foo.bar.baz>
+
+<my.ns.Tag />
+
+<Card. x>
+.
+<Card.Item x={1} />
+<Motion.div />
+</Card.Item>
+<p>&lt;foo.bar.baz&gt;</p>
+<p>&lt;my.ns.Tag /&gt;</p>
+<p>&lt;Card. x&gt;</p>
+````````````````````````````````
+
+## Inline, the tag is a raw-HTML span
+
+```````````````````````````````` example
+a <Card n={1 + 2} /> b
+
+a <Chip on={x => y}>{label}</Chip> b
+.
+<p>a <Card n={1 + 2} /> b</p>
+<p>a <Chip on={x => y}>{label}</Chip> b</p>
+````````````````````````````````
+
+## A value may span lines inside a paragraph
+
+The tag is then an inline span, as any multi-line tag is; the block form
+(type 7) still needs the whole tag on one line.
+
+```````````````````````````````` example
+<Card
+  style={{
+    color: "red"
+  }}
+/>
+.
+<p><Card
+  style={{
+    color: "red"
+  }}
+/></p>
+````````````````````````````````
+
+## Children are markdown when blank lines separate them from the tags
+
+```````````````````````````````` example
+<Card n={1 + 2}>
+
+Some **md** {x}
+
+</Card>
+.
+<Card n={1 + 2}>
+<p>Some <strong>md</strong> {x}</p>
+</Card>
+````````````````````````````````
+
+## Without blank lines the HTML block keeps the children verbatim
+
+CommonMark's rule, and what MDX and Astro document too.
+
+```````````````````````````````` example
+<Card n={1 + 2}>
+Some **md** {x}
+</Card>
+.
+<Card n={1 + 2}>
+Some **md** {x}
+</Card>
+````````````````````````````````
+
+## CommonMark's reading of a value that does not balance, or does not end the attribute
+
+```````````````````````````````` example
+<a b={x>
+
+<a b={x y>
+
+<a b={x}}>
+
+<a b={x}c>
+.
+<a b={x>
+<a b={x y>
+<a b={x}}>
+<a b={x}c>
+````````````````````````````````
+
+## A value must still be followed by a blank, `>` or `/`
+
+```````````````````````````````` example
+<a b={x y}c>
+.
+<p>&lt;a b={x y}c&gt;</p>
+````````````````````````````````
+
+## Nothing inside a code span or fence is a tag
+
+```````````````````````````````` example
+`<Card n={1 + 2} />`
+
+```
+<Card {...props} />
+```
+.
+<p><code>&lt;Card n={1 + 2} /&gt;</code></p>
+<pre><code>&lt;Card {...props} /&gt;
+</code></pre>
+````````````````````````````````

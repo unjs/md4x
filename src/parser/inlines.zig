@@ -69,8 +69,65 @@ const md_lookup_footnote_def = refdefs.md_lookup_footnote_def;
 //  char helpers + md_ascii_eq + md_lookup_line, so they live here.
 // ============================================================================
 
+// A JSX brace value: `off` is at the `{`; returns the offset just past the
+// matching `}`, or null when the braces do not balance before `max_end` (or
+// before the line end, when `lines` is empty — the block-start probe). Braces
+// inside a `"…"`, `'…'` or `` `…` `` string are skipped, with `\` escaping the
+// next byte, so `on={() => go("}")}` and `` title={`t ${x}`} `` scan as one
+// value. On return `p_line_index` names the line the closer sits on.
+fn md_scan_jsx_braces(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: OFF, line_index_in: MD_SIZE, p_line_index: *MD_SIZE) ?OFF {
+    var off: OFF = beg;
+    var line_index: MD_SIZE = line_index_in;
+    var line_end: OFF = if (lines.len > 0) lines[line_index].end else ctx.size;
+    var depth: c_int = 0;
+    var quote: CHAR = 0;
+
+    while (true) {
+        while (off < line_end and !ctx.isNewline(off)) : (off += 1) {
+            const ch = ctx.ch(off);
+            if (quote != 0) {
+                if (ch == '\\') {
+                    off += 1;
+                } else if (ch == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            switch (ch) {
+                '"', '\'', '`' => quote = ch,
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if (depth == 0) {
+                        if (off >= max_end) return null;
+                        p_line_index.* = line_index;
+                        return off + 1;
+                    }
+                },
+                else => {},
+            }
+        }
+
+        if (lines.len == 0) return null;
+        line_index += 1;
+        if (line_index >= lines.len) return null;
+        off = lines[line_index].beg;
+        line_end = lines[line_index].end;
+        if (off >= max_end) return null;
+    }
+}
+
 // Faithful port of md_is_html_tag (md4x.c ~1131). n_lines == 0 => whole tag
 // must be on one line (block-start probe).
+//
+// Three JSX extensions over CommonMark's tag grammar, so an Astro / MDX
+// component passes through as raw HTML instead of being escaped as text:
+// a `.` inside a capitalized tag name (`<Card.Item>`), a brace-balanced attribute value
+// (`n={1 + 2}`, `style={{color: "red"}}`) where CommonMark would stop the
+// unquoted value at the blank, and a `{...spread}` where an attribute name is
+// expected. A brace value that does not balance, or does not end the
+// attribute, falls back to the CommonMark reading, so `<a b={x>` and
+// `<a b={x}}>` are the tags they always were.
 pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: OFF, p_end: *OFF) bool {
     var attr_state: c_int = undefined;
     var off: OFF = beg;
@@ -89,11 +146,40 @@ pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: O
 
     // Tag name.
     if (off >= line_end or !ctx.isAlpha(off)) return false;
+    // A member-expression name (`Card.Item`) only when capitalized: CommonMark
+    // (spec example 606) and GitHub keep `<foo.bar.baz>` as text, and Astro
+    // requires a component name to start with an uppercase letter anyway.
+    const dotted_name = ctx.ch(off) >= 'A' and ctx.ch(off) <= 'Z';
     off += 1;
-    while (off < line_end and (ctx.isAlnum(off) or ctx.ch(off) == '-')) off += 1;
+    while (off < line_end and (ctx.isAlnum(off) or ctx.ch(off) == '-' or
+        (dotted_name and ctx.ch(off) == '.' and off + 1 < line_end and ctx.isAlpha(off + 1)))) off += 1;
 
     while (true) {
         while (off < line_end and !ctx.isNewline(off)) {
+            // JSX: `={expr}` value, or `{...spread}` in attribute position.
+            if (ctx.ch(off) == '{' and (attr_state == 3 or
+                ((attr_state == 1 or attr_state == 2) and off + 3 < line_end and
+                    ctx.ch(off + 1) == '.' and ctx.ch(off + 2) == '.' and ctx.ch(off + 3) == '.')))
+            {
+                var li: MD_SIZE = line_index;
+                const brace_end = md_scan_jsx_braces(ctx, lines, off, max_end, line_index, &li);
+                // The value has to end the attribute, as a quoted one must:
+                // `<a b={x}}>` and `<a b={x}c>` keep CommonMark's reading.
+                const brace_line_end = if (brace_end != null and lines.len > 0) lines[li].end else line_end;
+                if (brace_end != null and (brace_end.? >= brace_line_end or ctx.isWhitespace(brace_end.?) or ctx.isAnyOf(brace_end.?, ">/"))) {
+                    off = brace_end.?;
+                    if (li != line_index) {
+                        line_index = li;
+                        line_end = lines[line_index].end;
+                    }
+                    attr_state = 0;
+                    continue;
+                }
+                if (attr_state != 3) return false;
+                // Unbalanced or not closing the attribute: CommonMark's
+                // unquoted value below.
+            }
+
             if (attr_state > 40) {
                 if (attr_state == 41 and (ctx.isBlank(off) or ctx.isAnyOf(off, "\"'=<>`"))) {
                     attr_state = 0;

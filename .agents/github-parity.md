@@ -147,7 +147,10 @@ Also in this bucket by construction, though no scored suite exercises it: `{{ ex
 interpolation (`test/spec-binding.txt`). GitHub renders `{{ a < b }}` as text and escapes
 it to `{{ a &lt; b }}`; md4x emits the run verbatim so a template engine run over the HTML
 sees the expression as written. `spec-binding.txt` is excluded from the harness like every
-other md4x-only suite.
+other md4x-only suite. So is `spec-jsx.txt`: a component tag with a brace value
+(`<Card n={1 + 2} />`), a `{...spread}` or a capitalized dotted name (`<Card.Item>`) is raw
+HTML to md4x and escaped text to GitHub, whose tag grammar is CommonMark's. Lowercase
+`<foo.bar.baz>` (spec example 606) stays text in both.
 
 Components, attributes, LaTeX math, `==highlight==`, frontmatter. GitHub
 leaves the syntax as literal text because it has no such feature. These are the reason

@@ -209,20 +209,21 @@ strikethrough, autolinks, footnotes. Off: HTML heading ids, emoji, `heal`.
 
 Gaps between the Comark spec and md4x:
 
-| Item                                      | Spec says                                                | md4x does                                            | Class                                                              |
-| ----------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------ |
-| `$`-prefixed component names              | "must start with a letter or `$`" (`spec-comark.txt:34`) | `:$slot` stays literal                               | **spec vs impl**, untested                                         |
-| `[span] {attr}` with a space              | `<span>` element (`attributes.md:329`)                   | `[span]` stays literal                               | documented divergence, **unpinned**                                |
-| Comments in output                        | "not rendered" (`markdown.md:422`)                       | HTML renderer emits them verbatim; AST is correct    | **spec vs impl**                                                   |
-| Heading ids                               | every heading gets one                                   | HTML omits, AST always includes                      | off by default — `renderToHtml` and `parseAST` disagree            |
-| Emoji `:wave:`                            | 👋                                                       | literal                                              | build-time `-Demoji=true` (~26 KB gz)                              |
-| `<ul class="contains-task-list">`         | present                                                  | absent                                               | documented not-goal                                                |
-| Non-Comark node types                     | —                                                        | `math`, `mark`, `footnote-ref`                       | superset by design, **not disableable from JS**                    |
-| `{{ expr }}` interpolation                | binding plugin, opt-in                                   | always verbatim text (`spec-binding.txt`)            | deliberate — the HTML renderer never escapes the run               |
-| Malformed `{…}` run                       | consumed; a non-`[a-z_][a-z0-9_-]*` key is dropped       | whole run stays literal (`{x.y}`, `{f()}`, `{...p}`) | deliberate — keeps JSX-style `{expr}` text (`spec-attributes.txt`) |
-| `Hello {title}` (bare keys after a blank) | boolean prop on the block                                | literal text; `**b**{title}` still binds             | deliberate — a spaced bare-key run is a JSX-style `{expr}`         |
-| `meta` shape                              | `{toc, summary}`                                         | `{headings}` (+`title`)                              | deliberate, declared                                               |
-| Lone inline component                     | inline                                                   | lifted to block                                      | deliberate — matches `markdown-it-mdc`                             |
+| Item                                                | Spec says                                                | md4x does                                            | Class                                                              |
+| --------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------ |
+| `$`-prefixed component names                        | "must start with a letter or `$`" (`spec-comark.txt:34`) | `:$slot` stays literal                               | **spec vs impl**, untested                                         |
+| `[span] {attr}` with a space                        | `<span>` element (`attributes.md:329`)                   | `[span]` stays literal                               | documented divergence, **unpinned**                                |
+| Comments in output                                  | "not rendered" (`markdown.md:422`)                       | HTML renderer emits them verbatim; AST is correct    | **spec vs impl**                                                   |
+| Heading ids                                         | every heading gets one                                   | HTML omits, AST always includes                      | off by default — `renderToHtml` and `parseAST` disagree            |
+| Emoji `:wave:`                                      | 👋                                                       | literal                                              | build-time `-Demoji=true` (~26 KB gz)                              |
+| `<ul class="contains-task-list">`                   | present                                                  | absent                                               | documented not-goal                                                |
+| Non-Comark node types                               | —                                                        | `math`, `mark`, `footnote-ref`                       | superset by design, **not disableable from JS**                    |
+| `{{ expr }}` interpolation                          | binding plugin, opt-in                                   | always verbatim text (`spec-binding.txt`)            | deliberate — the HTML renderer never escapes the run               |
+| Malformed `{…}` run                                 | consumed; a non-`[a-z_][a-z0-9_-]*` key is dropped       | whole run stays literal (`{x.y}`, `{f()}`, `{...p}`) | deliberate — keeps JSX-style `{expr}` text (`spec-attributes.txt`) |
+| `Hello {title}` (bare keys after a blank)           | boolean prop on the block                                | literal text; `**b**{title}` still binds             | deliberate — a spaced bare-key run is a JSX-style `{expr}`         |
+| JSX tags `<Card n={1 + 2} {...p} />`, `<Card.Item>` | escaped as text (CommonMark tag grammar)                 | raw HTML, verbatim (`spec-jsx.txt`)                  | deliberate — brace values, spread, capitalized dotted names        |
+| `meta` shape                                        | `{toc, summary}`                                         | `{headings}` (+`title`)                              | deliberate, declared                                               |
+| Lone inline component                               | inline                                                   | lifted to block                                      | deliberate — matches `markdown-it-mdc`                             |
 
 ## Known bugs
 
