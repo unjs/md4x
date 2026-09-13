@@ -9,10 +9,11 @@ Everything else is CommonMark's: the tag is an HTML block (type 7) when it is
 alone on its line, an inline raw-HTML span otherwise, and children are
 markdown only when blank lines separate them from the tags.
 
-A brace value skips braces inside `"…"`, `'…'` and `` `…` `` strings, with `\`
-escaping the next byte. A value that does not balance, or does not end the
-attribute, falls back to CommonMark's unquoted value, so nothing CommonMark
-already read as a tag changes. GitHub escapes all of these; see
+A brace value ends at the document's matched `}` (the same pairing inline
+attributes use — linear, so a line of `<a b={` cannot go quadratic); quotes
+inside it are not understood. A value that does not balance, or does not end
+the attribute, falls back to CommonMark's unquoted value, so nothing
+CommonMark already read as a tag changes. GitHub escapes all of these; see
 `.agents/github-parity.md`.
 
 ## Expression values
@@ -35,18 +36,22 @@ already read as a tag changes. GitHub escapes all of these; see
 <Card on={() => go()} />
 ````````````````````````````````
 
-## Strings inside a value may hold braces and quotes
+## Braces inside a value must balance — strings are not understood
+
+The value's closer is the document's matched brace pair, so a template
+literal with `${x}` balances, but a `}` inside a string ends the value early
+and the tag falls back to text.
 
 ```````````````````````````````` example
-<Card on={() => go("}")} />
-
-<Card t={'}'} u={"\"}"} />
-
 <Card title={`t ${x}`} />
+
+<Card q={"a"} r={'b'} />
+
+<Card on={() => go("}")} />
 .
-<Card on={() => go("}")} />
-<Card t={'}'} u={"\"}"} />
 <Card title={`t ${x}`} />
+<Card q={"a"} r={'b'} />
+<p>&lt;Card on={() =&gt; go(&quot;}&quot;)} /&gt;</p>
 ````````````````````````````````
 
 ## Spread attributes

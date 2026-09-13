@@ -357,21 +357,23 @@ Constraints:
 - Only applies to resolved inline elements (not plain text — `hello{.class}` is literal). A `{...}`
   run separated from the element by a space is not an inline attribute; it may instead be consumed
   as a **block attribute** (below).
-- A doubled brace never opens an attribute run, inline or block: `{{ expr }}` is interpolation
-  syntax (resolved by the render host) and is carried through as literal text, so
-  `Hello {{ site.name }}` renders `<p>Hello {{ site.name }}</p>`, not `<p { site.name>Hello</p>`.
+- A doubled brace never opens an attribute run, inline or block: `{{ expr }}` is
+  [interpolation](#extension-interpolation--expr--and-expressions-expr) syntax and is carried
+  through verbatim, so `Hello {{ site.name }}` renders `<p>Hello {{ site.name }}</p>`, not
+  `<p { site.name>Hello</p>`.
 - The content must be a well-formed list — blank-separated `#id`, `.class`, `key`, `:key`, or
   `key="…"` / `key='…'` / `key=value` items, where a key is `[A-Za-z_][A-Za-z0-9_-]*` (Comark's
   key grammar — `data-x` and `aria-label` are keys, `props.title` and `fn()` are not), an id or
   class does not start with another `.` or `#`, and names and unquoted values contain none of
   blank, control, `{`, `}`, `"`, `'`, `=`, `<`, `>`, `/`, `\`.
   Anything else (`{"}`, `{=b}`, `{a=}`, `{.a {b}}`, `{x.y}`, `{f()}`, `{...props}`, an unclosed
-  quote) leaves the **whole** run as literal text, so a JSX-style `{expr}` survives. An empty `{}`
-  is a no-op on inline elements (`[text]{}` is a bare `<span>`) and literal on a block.
+  quote) leaves the **whole** run alone — escaped text when it touches an inline element, a
+  verbatim expression run after a blank — so a JSX-style `{expr}` survives. An empty `{}` is a
+  no-op on inline elements (`[text]{}` is a bare `<span>`) and literal on a block.
 - A run of **bare keys only** is a boolean prop on the inline element it touches (`**b**{title}`
-  → `<strong title>`) but literal text after a blank (`Hello {title}`, `# H {title}`,
-  `- item {title}` all keep the braces): the blank marks it as a JSX-style expression in running
-  text rather than a prop on the block. One `#id`, `.class`, `:key` or `key=value` item makes the
+  → `<strong title>`) but an expression after a blank (`Hello {title}`, `# H {title}`,
+  `- item {title}` all keep the braces, verbatim): the blank marks it as a JSX-style expression
+  in running text rather than a prop on the block. One `#id`, `.class`, `:key` or `key=value` item makes the
   whole run a block attribute again (`Hello {title .cls}` → `<p title class="cls">`). Comark
   reads the spaced form as a prop too — see [compatibility.md](compatibility.md).
 - Spans: em/strong/code/del/u/mark pass `MD_SPAN_ATTRS_DETAIL*` (or `NULL` without attrs), links/images extend their detail structs with `raw_attrs`/`raw_attrs_size`
@@ -436,11 +438,12 @@ no trailing-brace slot of their own:
 
 Folding requires exactly one child and a matching tag; anything else nests normally.
 
-## Extension: Interpolation (`{{ expr }}`)
+## Extension: Interpolation (`{{ expr }}`) and Expressions (`{expr}`)
 
 A `{{ expr }}` or `{{{ expr }}}` run is a placeholder for a template engine run over
 md4x's output — [rendu](https://github.com/h3js/rendu), Nuxt Content / MDC, Comark's binding
-plugin. md4x passes it through **verbatim**:
+plugin — and a single-brace `{expr}` in running text is a JSX-style expression (Astro, MDX).
+md4x passes either through **verbatim**:
 
 - nothing inside is inline syntax — `{{ a*b*c }}`, ``{{ `x` }}``, `{{ $x }}`, `{{ [i] }}` stay as written;
 - no entity or backslash escape is resolved, and the HTML renderer does not escape it —
@@ -453,14 +456,31 @@ first `}}` when there is none), the content must be at least one byte, and a run
 within one paragraph. Code spans and code blocks win over it. A trailing run is never an
 attribute list (`Hi {{ x }}` is text, not `<p { x>`).
 
-The parser reports the run as `TextType.binding`; the AST, text, ANSI and markdown renderers
-treat it as ordinary text. GitHub escapes the operators instead — a deliberate divergence,
+The single-brace form (`test/spec-binding.txt`, second half) differs in three ways:
+
+- It is an expression only where it **cannot be an attribute list**: after a blank, at a line
+  start, after ordinary text, after another run. Right after a possible inline-element closer —
+  `*`, `_`, `~`, `=`, a backtick, `]` or `)` — the run belongs to the
+  [attribute machinery](#extension-inline-attributes), and a malformed one there is ordinary
+  escaped text (`**b**{a*b*c}` → `<strong>b</strong>{a<em>b</em>c}`). A trailing block attribute
+  run (`Hello {.cls}`) is cut off the line before inlines run, so it is never an expression.
+- Its closer is the document's **matched brace pair** — the same pairing inline attributes use,
+  linear over the whole document — so nested braces balance (`{fn({a: 1})}`, ``{`t ${x}`}``)
+  but quotes and escapes are not understood: `{fn("}")}` ends at the first `}`, `{a \} b}` is
+  the whole run, backslash included. `{}` and an unbalanced `{` are plain text.
+- It is **not** recognized in link destinations, titles or image alt text; only the doubled
+  form is.
+
+The parser reports both as `TextType.binding`; the AST, text, ANSI and markdown renderers
+treat them as ordinary text. GitHub escapes the operators instead — a deliberate divergence,
 see `.agents/github-parity.md`.
 
 ```
 Hello {{ user.name }}                → <p>Hello {{ user.name }}</p>
 [Profile]({{ user.url }})            → <p><a href="{{ user.url }}">Profile</a></p>
 {{{ rawHtml }}}                      → <p>{{{ rawHtml }}}</p>
+Hello {user.name}, {a < b && c}      → <p>Hello {user.name}, {a < b && c}</p>
+**b**{.cls} but **b** {a*b}          → <p><strong class="cls">b</strong> but <strong>b</strong> {a*b}</p>
 ```
 
 rendu's other syntaxes — `<? code ?>`, `<?= expr ?>` and `<script server>` — need no
@@ -492,10 +512,10 @@ Everything else is CommonMark: a tag alone on its line is an HTML block (type 7)
 running text is an inline raw-HTML span; a tag split across lines is an inline span (the block form
 needs the whole tag on one line). Children are parsed as markdown only when **blank lines** separate
 them from the opening and closing tags — without them the HTML block keeps the children verbatim,
-which is what MDX and Astro document too. `{expr}` in running text is covered under
-[inline attributes](#extension-inline-attributes): a run that is not a well-formed attribute list, or
-is bare keys after a blank, stays literal text. Not supported: `<>…</>` fragments, `import` /
-`export` lines, and a multi-line `{expression}` block at the top level.
+which is what MDX and Astro document too. `{expr}` in running text is its own
+[extension](#extension-interpolation--expr--and-expressions-expr): verbatim wherever it cannot be an
+attribute list. Not supported: `<>…</>` fragments, `import` / `export` lines, and a multi-line
+`{expression}` block at the top level.
 
 GitHub escapes all three shapes; recorded in `.agents/github-parity.md`.
 

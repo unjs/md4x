@@ -146,8 +146,9 @@ classifier now recognises the construct itself, which is what the cause actually
 Also in this bucket by construction, though no scored suite exercises it: `{{ expr }}`
 interpolation (`test/spec-binding.txt`). GitHub renders `{{ a < b }}` as text and escapes
 it to `{{ a &lt; b }}`; md4x emits the run verbatim so a template engine run over the HTML
-sees the expression as written. `spec-binding.txt` is excluded from the harness like every
-other md4x-only suite. So is `spec-jsx.txt`: a component tag with a brace value
+sees the expression as written; a single-brace `{expr}` in running text is the same run
+wherever it cannot be an attribute list, so `{a*b}` no longer grows an `<em>`.
+`spec-binding.txt` is excluded from the harness like every other md4x-only suite. So is `spec-jsx.txt`: a component tag with a brace value
 (`<Card n={1 + 2} />`), a `{...spread}` or a capitalized dotted name (`<Card.Item>`) is raw
 HTML to md4x and escaped text to GitHub, whose tag grammar is CommonMark's. Lowercase
 `<foo.bar.baz>` (spec example 606) stays text in both.

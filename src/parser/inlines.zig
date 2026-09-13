@@ -69,65 +69,21 @@ const md_lookup_footnote_def = refdefs.md_lookup_footnote_def;
 //  char helpers + md_ascii_eq + md_lookup_line, so they live here.
 // ============================================================================
 
-// A JSX brace value: `off` is at the `{`; returns the offset just past the
-// matching `}`, or null when the braces do not balance before `max_end` (or
-// before the line end, when `lines` is empty — the block-start probe). Braces
-// inside a `"…"`, `'…'` or `` `…` `` string are skipped, with `\` escaping the
-// next byte, so `on={() => go("}")}` and `` title={`t ${x}`} `` scan as one
-// value. On return `p_line_index` names the line the closer sits on.
-fn md_scan_jsx_braces(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: OFF, line_index_in: MD_SIZE, p_line_index: *MD_SIZE) ?OFF {
-    var off: OFF = beg;
-    var line_index: MD_SIZE = line_index_in;
-    var line_end: OFF = if (lines.len > 0) lines[line_index].end else ctx.size;
-    var depth: c_int = 0;
-    var quote: CHAR = 0;
-
-    while (true) {
-        while (off < line_end and !ctx.isNewline(off)) : (off += 1) {
-            const ch = ctx.ch(off);
-            if (quote != 0) {
-                if (ch == '\\') {
-                    off += 1;
-                } else if (ch == quote) {
-                    quote = 0;
-                }
-                continue;
-            }
-            switch (ch) {
-                '"', '\'', '`' => quote = ch,
-                '{' => depth += 1,
-                '}' => {
-                    depth -= 1;
-                    if (depth == 0) {
-                        if (off >= max_end) return null;
-                        p_line_index.* = line_index;
-                        return off + 1;
-                    }
-                },
-                else => {},
-            }
-        }
-
-        if (lines.len == 0) return null;
-        line_index += 1;
-        if (line_index >= lines.len) return null;
-        off = lines[line_index].beg;
-        line_end = lines[line_index].end;
-        if (off >= max_end) return null;
-    }
-}
-
 // Faithful port of md_is_html_tag (md4x.c ~1131). n_lines == 0 => whole tag
 // must be on one line (block-start probe).
 //
 // Three JSX extensions over CommonMark's tag grammar, so an Astro / MDX
 // component passes through as raw HTML instead of being escaped as text:
-// a `.` inside a capitalized tag name (`<Card.Item>`), a brace-balanced attribute value
-// (`n={1 + 2}`, `style={{color: "red"}}`) where CommonMark would stop the
-// unquoted value at the blank, and a `{...spread}` where an attribute name is
-// expected. A brace value that does not balance, or does not end the
-// attribute, falls back to the CommonMark reading, so `<a b={x>` and
-// `<a b={x}}>` are the tags they always were.
+// a `.` inside a capitalized tag name (`<Card.Item>`), a brace-balanced
+// attribute value (`n={1 + 2}`, `style={{color: "red"}}`) where CommonMark
+// would stop the unquoted value at the blank, and a `{...spread}` where an
+// attribute name is expected. The value's closer comes from the document's
+// precomputed brace pairs (md_match_brace) — O(log n) per query, so a line
+// of `<a b={` stays linear — which means quotes inside the value are not
+// understood: a `}` inside a string ends the value early. A value that does
+// not balance, does not end the attribute, or crosses a line the tag may
+// not, falls back to the CommonMark reading, so `<a b={x>` and `<a b={x}}>`
+// are the tags they always were.
 pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: OFF, p_end: *OFF) bool {
     var attr_state: c_int = undefined;
     var off: OFF = beg;
@@ -161,23 +117,14 @@ pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: O
                 ((attr_state == 1 or attr_state == 2) and off + 3 < line_end and
                     ctx.ch(off + 1) == '.' and ctx.ch(off + 2) == '.' and ctx.ch(off + 3) == '.')))
             {
-                var li: MD_SIZE = line_index;
-                const brace_end = md_scan_jsx_braces(ctx, lines, off, max_end, line_index, &li);
-                // The value has to end the attribute, as a quoted one must:
-                // `<a b={x}}>` and `<a b={x}c>` keep CommonMark's reading.
-                const brace_line_end = if (brace_end != null and lines.len > 0) lines[li].end else line_end;
-                if (brace_end != null and (brace_end.? >= brace_line_end or ctx.isWhitespace(brace_end.?) or ctx.isAnyOf(brace_end.?, ">/"))) {
-                    off = brace_end.?;
-                    if (li != line_index) {
-                        line_index = li;
-                        line_end = lines[line_index].end;
-                    }
+                if (md_jsx_value_end(ctx, lines, off, max_end, &line_index, &line_end)) |value_end| {
+                    off = value_end;
                     attr_state = 0;
                     continue;
                 }
                 if (attr_state != 3) return false;
-                // Unbalanced or not closing the attribute: CommonMark's
-                // unquoted value below.
+                // Unbalanced, not closing the attribute, or crossing a
+                // line: CommonMark's unquoted value below.
             }
 
             if (attr_state > 40) {
@@ -240,6 +187,38 @@ pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: O
 
         if (off >= max_end) return false;
     }
+}
+
+// The offset just past the `}` matching the `{` at `off`, when that run can
+// be a JSX attribute value of the tag being scanned: the closer is before
+// `max_end`, on a line of the tag (any line of `lines`; the same line when
+// `lines` is empty — the block-start probe, where the tag must fit on one
+// line), and is followed by a blank, `>`, `/` or the line end, as a quoted
+// value must be. `p_line_index` / `p_line_end` are moved to the closer's
+// line. Null falls back to CommonMark's unquoted-value reading.
+fn md_jsx_value_end(ctx: *MD_CTX, lines: []const MD_LINE, off: OFF, max_end: OFF, p_line_index: *MD_SIZE, p_line_end: *OFF) ?OFF {
+    const close = (md_match_brace(ctx, off) catch return null) orelse return null;
+    if (close >= max_end) return null;
+
+    var line_end: OFF = p_line_end.*;
+    if (lines.len == 0) {
+        // The probe has no line table: a `}` past the newline is not ours.
+        var i: OFF = off;
+        while (i < close) : (i += 1) {
+            if (ctx.isNewline(i)) return null;
+        }
+    } else if (close > lines[p_line_index.*].end) {
+        var li: MD_SIZE = p_line_index.*;
+        const line = md_lookup_line(close, lines, &li);
+        if (close < line.beg or close > line.end) return null;
+        p_line_index.* = li;
+        line_end = line.end;
+    }
+
+    const value_end = close + 1;
+    if (value_end < line_end and !ctx.isWhitespace(value_end) and !ctx.isAnyOf(value_end, ">/")) return null;
+    p_line_end.* = line_end;
+    return value_end;
 }
 
 // Faithful port of md_scan_for_html_closer (md4x.c ~1249).
@@ -840,15 +819,44 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                 continue :scan;
             }
 
-            // `{{ expr }}` / `{{{ expr }}}` interpolation run. Like raw HTML
-            // it is one resolved opener/closer pair whose interior collects
-            // no marks, so nothing inside it is inline syntax; unlike raw
-            // HTML it is emitted as TextType.binding, which only the HTML
-            // renderer treats specially. May span lines within the block.
+            // `{{ expr }}` / `{{{ expr }}}` interpolation run, or a JSX-style
+            // `{expr}`. Like raw HTML it is one resolved opener/closer pair
+            // whose interior collects no marks, so nothing inside it is
+            // inline syntax; unlike raw HTML it is emitted as
+            // TextType.binding, which only the HTML renderer treats
+            // specially. May span lines within the block.
+            //
+            // A single `{` right after a possible inline-element closer is
+            // left to the attribute machinery — `**b**{.cls}`, `[t]{#i}`,
+            // `[x](u){a=1}`, `` `c`{.x} ``; anywhere else (`Hello {a*b}`,
+            // `{x}` at a line start, `{a}{b}`) it is an expression, and its
+            // closer is the document's matched pair (md_match_brace): no
+            // quote or escape inside is understood, and the content must be
+            // at least one byte (`{}` is text). A block attribute run
+            // (`Hello {.cls}`) was cut off the line before inlines ran, so it
+            // never gets here.
             if (ch == '{') {
                 const block_end = lines[lines.len - 1].end;
-                if (util.md_scan_binding(ctx.str(0)[0..block_end], off, true)) |bind_end_u| {
-                    const bind_end: OFF = @intCast(bind_end_u);
+                var bind_end: OFF = 0;
+                if (off + 1 < block_end and ctx.ch(off + 1) == '{') {
+                    // A failed closer search from an earlier `{{` in this
+                    // block already proved there is none.
+                    if (!(off < ctx.binding_horizon and ctx.binding_horizon >= block_end)) {
+                        if (util.md_scan_binding(ctx.str(0)[0..block_end], off, true)) |bind_end_u| {
+                            bind_end = @intCast(bind_end_u);
+                        } else {
+                            ctx.binding_horizon = block_end;
+                        }
+                    }
+                } else if (off == line.*.beg or !ISANYOF_(ctx.ch(off - 1), "*_~=`])")) {
+                    if (md_match_brace(ctx, off) catch {
+                        ret = -1;
+                        return ret;
+                    }) |close| {
+                        if (close < block_end and close > off + 1) bind_end = close + 1;
+                    }
+                }
+                if (bind_end != 0) {
                     if (addMark(ctx, '{', off, off, MarkFlags.opener | MarkFlags.resolved) == null) {
                         ret = -1;
                         return ret;

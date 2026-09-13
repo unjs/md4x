@@ -454,6 +454,10 @@ pub const MD_CTX = struct {
     html_proc_instr_horizon: OFF = 0,
     html_decl_horizon: OFF = 0,
     html_cdata_horizon: OFF = 0,
+    // For `{{ expr }}` runs: the block end a failed closer search reached. A
+    // later `{{` in the same block cannot find one either, so it is not
+    // searched again (a line of `{` was quadratic without this).
+    binding_horizon: OFF = 0,
 
     // For block analysis. Holds MD_BLOCK as well as MD_LINE structures.
     block_bytes: ?*anyopaque = null,

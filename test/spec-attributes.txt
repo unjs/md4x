@@ -775,6 +775,12 @@ a bare attribute name (`<p &quot;>`, issue #29). Empty and blank-only runs are
 well-formed on inline elements (`[t]{}` is a bare span, `**b**{}` a no-op) and
 literal on blocks.
 
+What "literal" means depends on where the run sits. Touching an inline element
+(`**b**{"}`) it is ordinary text, escaped as text is. After a blank, or with
+nothing before it, a balanced run is a JSX-style expression and is emitted
+**verbatim** — `Hello {"}` renders `{"}`, not `{&quot;}` — exactly as a
+`{{ expr }}` run is; see `spec-binding.txt`.
+
 ## A bare quote is not an attribute
 
 ```````````````````````````````` example
@@ -786,7 +792,7 @@ Hello {"}
 
 [t](u){"}
 .
-<p>Hello {&quot;}</p>
+<p>Hello {"}</p>
 <p><strong>b</strong>{&quot;}</p>
 <p>[t]{&quot;}</p>
 <p><a href="u">t</a>{&quot;}</p>
@@ -839,8 +845,8 @@ Hello {a=b<c}
 .
 <p>Hello {a/b=c}</p>
 <p><strong>b</strong>{a/b=c}</p>
-<p>Hello {a=b&quot;c}</p>
-<p>Hello {a=b&lt;c}</p>
+<p>Hello {a=b"c}</p>
+<p>Hello {a=b<c}</p>
 ````````````````````````````````
 
 ## Bare keys after a blank are an expression, not a block attribute
@@ -977,8 +983,10 @@ Hello {.a.b}
 
 ## A backslash never reaches the tag
 
-`\}` is an escaped brace, so the run has no closer and the paragraph text keeps
-the (unescaped) `}`; `\` inside a class or value is not a name byte either.
+`\` is not a name or value byte, so none of these is an attribute list. After
+a blank the run is then an expression and comes out verbatim, backslash
+included (its pairing ignores escapes — see `spec-binding.txt`); touching an
+element it is text, and `\}` resolves to `}`.
 
 ```````````````````````````````` example
 Hello {title\}
@@ -989,9 +997,9 @@ Hello {a=b\}
 
 **b**{x\}
 .
-<p>Hello {title}</p>
-<p>Hello {.a}</p>
-<p>Hello {a=b}</p>
+<p>Hello {title\}</p>
+<p>Hello {.a\}</p>
+<p>Hello {a=b\}</p>
 <p><strong>b</strong>{x}</p>
 ````````````````````````````````
 
@@ -1003,7 +1011,7 @@ Hello {.a {b}}
 Hello {a="b}
 .
 <p>Hello {.a {b}}</p>
-<p>Hello {a=&quot;b}</p>
+<p>Hello {a="b}</p>
 ````````````````````````````````
 
 ## A run that spans lines is not an attribute list
@@ -1023,7 +1031,7 @@ Hello {.ok "}
 
 **b**{.ok "}
 .
-<p>Hello {.ok &quot;}</p>
+<p>Hello {.ok "}</p>
 <p><strong>b</strong>{.ok &quot;}</p>
 ````````````````````````````````
 

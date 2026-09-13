@@ -180,6 +180,25 @@ pathological = {
             re.compile(r'"k19999":"v19999"\}'),
             ["--format=json"]),
 
+    # Brace runs. A `{{ expr }}` opener used to search the whole block for its
+    # closer once per `{` (200 000 braces took ~22 s), and a JSX attribute value
+    # `<a b={` scanned the line once per tag (100 000 tags took ~46 s). The
+    # interpolation search now records the block end it failed at, and both
+    # the JSX value and the single-brace `{expr}` run use the document's
+    # precomputed brace pairs.
+    "many open braces":
+            ("{" * 200000,
+            re.compile(r"<p>\{{200000}</p>")),
+    "many open braces then one closer":
+            ("{" * 100000 + "a}",
+            re.compile(r"<p>\{{99999}\{a\}</p>")),
+    "many JSX tags with an unclosed brace value":
+            ("<a b={" * 100000,
+            re.compile(r"<p>(&lt;a b=\{){100000}</p>")),
+    "many JSX tags then many closers":
+            ("<a b={" * 50000 + "}" * 50000,
+            re.compile(r"<p>(&lt;a b=\{){50000}\}{50000}</p>")),
+
     # --format=heal cases. md_heal() does not use the parser, so none of the
     # limits above cover it; its helpers used to rescan the document once per
     # candidate marker, which made these inputs quadratic (50 000 asterisks took

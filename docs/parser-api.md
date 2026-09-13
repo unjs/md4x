@@ -213,17 +213,17 @@ means "no attributes". No consumer ever told the two apart (every guard was
 
 ## Text Types (`TextType`)
 
-| Type         | Description                                                                                                                                                                              |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.normal`    | Normal text                                                                                                                                                                              |
-| `.nullchar`  | NULL character (replace with U+FFFD)                                                                                                                                                     |
-| `.br`        | Hard line break (`<br>`)                                                                                                                                                                 |
-| `.softbr`    | Soft line break                                                                                                                                                                          |
-| `.entity`    | HTML entity (`&nbsp;`, `&#1234;`, `&#x12AB;`)                                                                                                                                            |
-| `.code`      | Text inside code block/span (`\n` for newlines, no BR events)                                                                                                                            |
-| `.html`      | Raw HTML text (`\n` for newlines in block-level HTML)                                                                                                                                    |
-| `.latexmath` | Text inside LaTeX equation (processed like code spans)                                                                                                                                   |
-| `.binding`   | `{{ expr }}` / `{{{ expr }}}` interpolation run, braces included, verbatim source bytes (may contain `\n`); also an `Attribute` substring type inside link/image destinations and titles |
+| Type         | Description                                                                                                                                                                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `.normal`    | Normal text                                                                                                                                                                                                                                      |
+| `.nullchar`  | NULL character (replace with U+FFFD)                                                                                                                                                                                                             |
+| `.br`        | Hard line break (`<br>`)                                                                                                                                                                                                                         |
+| `.softbr`    | Soft line break                                                                                                                                                                                                                                  |
+| `.entity`    | HTML entity (`&nbsp;`, `&#1234;`, `&#x12AB;`)                                                                                                                                                                                                    |
+| `.code`      | Text inside code block/span (`\n` for newlines, no BR events)                                                                                                                                                                                    |
+| `.html`      | Raw HTML text (`\n` for newlines in block-level HTML)                                                                                                                                                                                            |
+| `.latexmath` | Text inside LaTeX equation (processed like code spans)                                                                                                                                                                                           |
+| `.binding`   | `{{ expr }}` / `{{{ expr }}}` interpolation run or single-brace `{expr}` expression, braces included, verbatim source bytes (may contain `\n`); also an `Attribute` substring type inside link/image destinations and titles (doubled form only) |
 
 ## Alignment (`Align`)
 

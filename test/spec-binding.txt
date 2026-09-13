@@ -1,11 +1,16 @@
-# Interpolation (`{{ expr }}`)
+# Interpolation (`{{ expr }}`) and expressions (`{expr}`)
 
 A `{{ expr }}` or `{{{ expr }}}` run is an interpolation placeholder for a
 template engine run over md4x's output — rendu, Nuxt Content / MDC, Comark's
-binding plugin. md4x passes the run through **verbatim**: nothing inside it is
-inline syntax, no entity or backslash escape is resolved, and the HTML renderer
-emits it unescaped, so the engine sees exactly the expression that was written.
-Every other renderer treats it as ordinary text.
+binding plugin — and a single-brace `{expr}` in running text is a JSX-style
+expression (Astro, MDX). md4x passes either run through **verbatim**: nothing
+inside it is inline syntax, no entity or backslash escape is resolved, and the
+HTML renderer emits it unescaped, so the engine sees exactly the expression
+that was written. Every other renderer treats it as ordinary text.
+
+The single-brace form has its own rules, at the end of this file: it is only
+an expression where it cannot be an attribute list, its closer is the
+document's matched brace pair, and its content is at least one byte.
 
 The rule is rendu's (`src/parser.ts`): a `{{{` opener ends at the first `}}}`,
 and if there is none the same `{{` is tried as a double opener ending at the
@@ -223,4 +228,151 @@ Hello {{ a < b }}
 Hello {{ a < b }}
 .
 --format=text
+````````````````````````````````
+
+# Single-brace expressions (`{expr}`)
+
+## Nothing inside is inline syntax, and nothing is escaped
+
+```````````````````````````````` example
+{a*b*c} {`x`} {[a](b)} {a $b$ c} {`tpl ${x}`} {a < b && c} {"a & b"} {a\*b}
+.
+<p>{a*b*c} {`x`} {[a](b)} {a $b$ c} {`tpl ${x}`} {a < b && c} {"a & b"} {a\*b}</p>
+````````````````````````````````
+
+## Anywhere it cannot be an attribute list
+
+After a blank, at a line start, after ordinary text, after another run.
+
+```````````````````````````````` example
+Hello {a*b} Hello{a*b} {a*b}{c*d}
+
+# H {a*b}
+
+- {a*b}
+
+> {a*b}
+
+*a {b*c} d* [{x*y}](u)
+.
+<p>Hello {a*b} Hello{a*b} {a*b}{c*d}</p>
+<h1>H {a*b}</h1>
+<ul>
+<li>{a*b}</li>
+</ul>
+<blockquote>
+<p>{a*b}</p>
+</blockquote>
+<p><em>a {b*c} d</em> <a href="u">{x*y}</a></p>
+````````````````````````````````
+
+## Touching an inline element it is an attribute list, or plain text
+
+The byte before the brace decides: after `*`, `_`, `~`, `=`, a backtick, `]`
+or `)` the run belongs to the attribute machinery, and when it is not a
+well-formed list it is ordinary escaped text with inline syntax live inside.
+
+```````````````````````````````` example
+**b**{.cls} [t]{#i} [x](u){a=1} `c`{.x}
+
+**b**{a*b*c} [t]{"} **b** {a*b*c}
+.
+<p><strong class="cls">b</strong> <span id="i">t</span> <a href="u" a="1">x</a> <code class="x">c</code></p>
+<p><strong>b</strong>{a<em>b</em>c} [t]{&quot;} <strong>b</strong> {a*b*c}</p>
+````````````````````````````````
+
+## A block attribute run is cut off before inlines run
+
+```````````````````````````````` example
+Hello {.cls}
+
+Hello {title}
+.
+<p class="cls">Hello</p>
+<p>Hello {title}</p>
+````````````````````````````````
+
+## The closer is the matched pair; quotes and escapes are not understood
+
+```````````````````````````````` example
+{fn({a: 1})} {don't} {it's "x"}
+
+{fn("}")}
+
+{a \} b}
+.
+<p>{fn({a: 1})} {don't} {it's "x"}</p>
+<p>{fn("}&quot;)}</p>
+<p>{a \} b}</p>
+````````````````````````````````
+
+## Empty, unbalanced and escaped braces are plain text
+
+```````````````````````````````` example
+{} a {x b} c
+
+\{x} {x\}
+.
+<p>{} a {x b} c</p>
+<p>{x} {x\}</p>
+````````````````````````````````
+
+## A run may span lines within a paragraph
+
+```````````````````````````````` example
+{items.map(i =>
+  i.name)} done
+.
+<p>{items.map(i =>
+i.name)} done</p>
+````````````````````````````````
+
+## Code spans and code blocks win
+
+```````````````````````````````` example
+`{a*b}` and {a `}` b}
+
+```
+{a*b}
+```
+.
+<p><code>{a*b}</code> and {a `}` b}</p>
+<pre><code>{a*b}
+</code></pre>
+````````````````````````````````
+
+## Not in link destinations, titles or image alt text
+
+Unlike the doubled form, a single-brace run is markdown there.
+
+```````````````````````````````` example
+[a]({url}) ![{alt}](p "{t}")
+.
+<p><a href="%7Burl%7D">a</a> <img src="p" alt="{alt}" title="{t}"></p>
+````````````````````````````````
+
+## The AST, markdown and text renderers carry the run as text
+
+```````````````````````````````` example [no-normalize]
+Hello {a < b}
+.
+{"nodes":[["p",{},"Hello {a < b}"]],"frontmatter":{},"meta":{"headings":[]}}
+.
+--format=json
+````````````````````````````````
+
+```````````````````````````````` example
+Hello {a*b} **x**
+.
+Hello {a*b} **x**
+.
+--format=markdown
+````````````````````````````````
+
+## A line of braces is linear
+
+```````````````````````````````` example
+{{{{{{{{{{{{{{{{ {a} {{{{{{{{
+.
+<p>{{{{{{{{{{{{{{{{ {a} {{{{{{{{</p>
 ````````````````````````````````
