@@ -41,3 +41,14 @@ Interpolation {{ site.name }}
 Template ${amount}
 
 Hello {{ site.name }} {.greeting}
+
+Malformed {"} {=b} {a=} {.a {b}} {a="b} {1x} {a/b=c} {a=b"c}
+
+**b**{"} [t]{=} [t]{=foo} `c`{.} ![a](p){#} [l](u){a=b<c}
+
+*a*{x
+y}
+
+Mixed {.ok "}
+
+Valid {#i .a.b data-x aria-label="y" k='v w' u=v :b="e" _p}

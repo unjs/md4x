@@ -383,9 +383,11 @@ inject sibling keys into the props object.
 
 # Zero-Prop `{attrs}` in JSON Output
 
-`{ }`, `{=}`, `{.}` and `{#}` parse to no props at all. The trailing-`{attrs}`
-path must not emit a separating comma for them, whether or not the node already
-wrote props of its own.
+`{}` and `{ }` are well-formed and parse to no props at all. The
+trailing-`{attrs}` path must not emit a separating comma for them, whether or
+not the node already wrote props of its own. (`{=}`, `{.}` and `{#}` used to
+reach this path too; they are malformed and now stay literal — see "Malformed
+Attribute Runs" below.)
 
 ## Whitespace-only attrs on a span with no other props
 
@@ -397,10 +399,10 @@ wrote props of its own.
 --format=json
 ````````````````````````````````
 
-## Malformed attrs on an attribute span
+## Empty attrs on an attribute span make a bare span
 
 ```````````````````````````````` example [no-normalize]
-[t]{=}
+[t]{}
 .
 {"nodes":[["p",{},["span",{},"t"]]],"frontmatter":{},"meta":{"headings":[]}}
 .
@@ -417,10 +419,10 @@ wrote props of its own.
 --format=json
 ````````````````````````````````
 
-## Empty class shorthand on an image that already has props
+## Empty attrs on an image that already has props
 
 ```````````````````````````````` example [no-normalize]
-![a](p "ti"){.}
+![a](p "ti"){}
 .
 {"nodes":[["p",{},["img",{"src":"p","alt":"a","title":"ti"}]]],"frontmatter":{},"meta":{"headings":[]}}
 .
@@ -758,6 +760,134 @@ Hello {{ site.name }}
 {"nodes":[["p",{},"Hello {{ site.name }}"]],"frontmatter":{},"meta":{"headings":[]}}
 .
 --format=json
+````````````````````````````````
+
+# Malformed Attribute Runs
+
+A `{...}` run is an attribute list only when its content is well-formed: blank-
+separated items, each `#id`, `.class`, `key`, `:key`, or one of those with a
+`="…"`, `='…'` or unquoted value; a key starts with an ASCII letter or `_`, and
+names and unquoted values contain no blanks, controls or `{}"'=<>/`. Anything
+else leaves the whole run as literal text — all-or-nothing, the way `{}` on a
+block already stays literal — instead of leaking a stray byte into the tag as
+a bare attribute name (`<p &quot;>`, issue #29). Empty and blank-only runs are
+well-formed on inline elements (`[t]{}` is a bare span, `**b**{}` a no-op) and
+literal on blocks.
+
+## A bare quote is not an attribute
+
+```````````````````````````````` example
+Hello {"}
+
+**b**{"}
+
+[t]{"}
+
+[t](u){"}
+.
+<p>Hello {&quot;}</p>
+<p><strong>b</strong>{&quot;}</p>
+<p>[t]{&quot;}</p>
+<p><a href="u">t</a>{&quot;}</p>
+````````````````````````````````
+
+## A value without a key, or a key without a value
+
+```````````````````````````````` example
+Hello {=b}
+
+Hello {a=}
+
+[t]{=}
+
+[t]{=foo}
+.
+<p>Hello {=b}</p>
+<p>Hello {a=}</p>
+<p>[t]{=}</p>
+<p>[t]{=foo}</p>
+````````````````````````````````
+
+## Empty shorthands and a key that starts with a digit
+
+```````````````````````````````` example
+Hello {.}
+
+Hello {#}
+
+Hello {1x}
+
+![a](p "ti"){.}
+.
+<p>Hello {.}</p>
+<p>Hello {#}</p>
+<p>Hello {1x}</p>
+<p><img src="p" alt="a" title="ti">{.}</p>
+````````````````````````````````
+
+## Tag-syntax bytes in a name or an unquoted value
+
+```````````````````````````````` example
+Hello {a/b=c}
+
+**b**{a/b=c}
+
+Hello {a=b"c}
+
+Hello {a=b<c}
+.
+<p>Hello {a/b=c}</p>
+<p><strong>b</strong>{a/b=c}</p>
+<p>Hello {a=b&quot;c}</p>
+<p>Hello {a=b&lt;c}</p>
+````````````````````````````````
+
+## Nested braces and an unclosed quote
+
+```````````````````````````````` example
+Hello {.a {b}}
+
+Hello {a="b}
+.
+<p>Hello {.a {b}}</p>
+<p>Hello {a=&quot;b}</p>
+````````````````````````````````
+
+## A run that spans lines is not an attribute list
+
+```````````````````````````````` example
+*a*{x
+y}
+.
+<p><em>a</em>{x
+y}</p>
+````````````````````````````````
+
+## One bad item makes the whole run literal
+
+```````````````````````````````` example
+Hello {.ok "}
+
+**b**{.ok "}
+.
+<p>Hello {.ok &quot;}</p>
+<p><strong>b</strong>{.ok &quot;}</p>
+````````````````````````````````
+
+## Every well-formed item shape still binds
+
+```````````````````````````````` example
+Hello {#i .a.b data-x aria-label="y" k='v w' u=v :b="e" _p}
+.
+<p id="i" class="a b" data-x aria-label="y" k="v w" u="v" b="e" _p>Hello</p>
+````````````````````````````````
+
+## A blank-only run on a block stays literal
+
+```````````````````````````````` example
+Hello { }
+.
+<p>Hello { }</p>
 ````````````````````````````````
 
 # Wrapper Folding

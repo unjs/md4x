@@ -360,6 +360,12 @@ Constraints:
 - A doubled brace never opens an attribute run, inline or block: `{{ expr }}` is interpolation
   syntax (resolved by the render host) and is carried through as literal text, so
   `Hello {{ site.name }}` renders `<p>Hello {{ site.name }}</p>`, not `<p { site.name>Hello</p>`.
+- The content must be a well-formed list — blank-separated `#id`, `.class`, `key`, `:key`, or
+  `key="…"` / `key='…'` / `key=value` items, where a key starts with an ASCII letter or `_` and
+  names and unquoted values contain none of blank, control, `{`, `}`, `"`, `'`, `=`, `<`, `>`, `/`.
+  Anything else (`{"}`, `{=b}`, `{a=}`, `{.a {b}}`, an unclosed quote) leaves the **whole** run as
+  literal text. An empty `{}` is a no-op on inline elements (`[text]{}` is a bare `<span>`) and
+  literal on a block.
 - Spans: em/strong/code/del/u/mark pass `MD_SPAN_ATTRS_DETAIL*` (or `NULL` without attrs), links/images extend their detail structs with `raw_attrs`/`raw_attrs_size`
 - `MD_SPAN_SPAN` is emitted for `[text]{attrs}` with `MD_SPAN_SPAN_DETAIL`
 

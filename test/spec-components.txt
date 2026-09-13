@@ -1800,21 +1800,28 @@ body
 </card>
 ````````````````````````````````
 
-## The same holds for inline components, spans, links and images
+## The same holds for inline components
 
 ```````````````````````````````` example [no-normalize]
 :badge[N]{a/b=c}
+.
+<p><badge a%2Fb="c">N</badge></p>
+````````````````````````````````
 
+Spans, links and images never see such a key: their `{attrs}` run is validated
+by the parser first, and a `/` in a name makes the whole run literal text (see
+`spec-attributes.txt`, "Malformed Attribute Runs").
+
+```````````````````````````````` example [no-normalize]
 **b**{a/b=c}
 
 [t](u){a/b=c}
 
 ![i](p){a/b=c}
 .
-<p><badge a%2Fb="c">N</badge></p>
-<p><strong a%2Fb="c">b</strong></p>
-<p><a href="u" a%2Fb="c">t</a></p>
-<p><img src="p" alt="i" a%2Fb="c"></p>
+<p><strong>b</strong>{a/b=c}</p>
+<p><a href="u">t</a>{a/b=c}</p>
+<p><img src="p" alt="i">{a/b=c}</p>
 ````````````````````````````````
 
 ## The AST renderer keeps the same key verbatim

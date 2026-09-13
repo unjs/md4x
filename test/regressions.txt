@@ -759,12 +759,13 @@ bar</p>
 <p><span class="class">text</span>=}</p>
 ````````````````````````````````
 
-Bare `=` at start of attrs:
+Bare `=` at start of attrs (malformed, so the run now stays literal — the
+regression is the hang, not the output):
 
 ```````````````````````````````` example
 [text]{=foo}
 .
-<p><span foo>text</span></p>
+<p>[text]{=foo}</p>
 ````````````````````````````````
 
 

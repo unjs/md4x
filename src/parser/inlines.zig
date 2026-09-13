@@ -43,6 +43,9 @@ const CODESPAN_MARK_MAXLEN = types.CODESPAN_MARK_MAXLEN;
 const MarkFlags = types.MarkFlags;
 
 const ISANYOF_ = util.ISANYOF_;
+const ISALPHA_ = util.ISALPHA_;
+const ISBLANK_ = util.ISBLANK_;
+const ISCNTRL_ = util.ISCNTRL_;
 const ISWHITESPACE_ = util.ISWHITESPACE_;
 const MD_ATTRIBUTE_BUILD = util.MD_ATTRIBUTE_BUILD;
 const MD_BUILD_ATTR_NO_ESCAPES = util.MD_BUILD_ATTR_NO_ESCAPES;
@@ -1350,6 +1353,75 @@ pub fn md_is_attr_opener(ctx: *MD_CTX, off: OFF) bool {
     return !(off + 1 < ctx.size and ctx.ch(off + 1) == '{');
 }
 
+// A byte that may appear in an attribute name — HTML's rule (anything but
+// blanks, controls and the tag-syntax characters), so `data-x`, `aria-label`
+// and `x.y` are all names — plus the brace pair itself.
+inline fn md_is_attr_name_char(ch: CHAR) bool {
+    return !ISBLANK_(ch) and !ISCNTRL_(ch) and !ISANYOF_(ch, "{}\"'=<>/");
+}
+
+// Is `[beg, end)` — the bytes between a matched `{` and `}` — a well-formed
+// attribute list? Blank-separated items, each one of
+//
+//     #id   .class   [:]key   [:]key="v"   [:]key='v'   [:]key=v
+//
+// where an id/class is one or more name bytes, a key starts with an ASCII
+// letter or `_` and continues with name bytes, and an unquoted value is one or
+// more name bytes. Anything else (`{"}`, `{=b}`, `{a=}`, `{.a {b}}`, an unclosed
+// quote, a newline) makes the whole run literal text: an all-or-nothing
+// fallback rather than `md_parse_props`'s lenient reading, which leaks `{` or
+// `"` into the tag as a bare attribute name. The grammar here is a strict
+// subset of what `md_parse_props` accepts, so every run that passes is parsed
+// the same way.
+//
+// An empty or blank-only list is well-formed: `[text]{}` is Comark's bare
+// `<span>` and `**b**{}` a no-op. Only the block form refuses it — a trailing
+// `{}` on a paragraph carries nothing, so `md_find_block_attrs` leaves it as
+// text.
+pub fn md_is_attr_content(ctx: *MD_CTX, beg: OFF, end: OFF) bool {
+    var i: OFF = beg;
+
+    while (i < end) {
+        while (i < end and ISBLANK_(ctx.ch(i))) i += 1;
+        if (i >= end) break;
+
+        if (ctx.ch(i) == '#' or ctx.ch(i) == '.') {
+            i += 1;
+            const start = i;
+            while (i < end and md_is_attr_name_char(ctx.ch(i))) i += 1;
+            if (i == start) return false;
+        } else {
+            if (ctx.ch(i) == ':') i += 1;
+            if (i >= end or !(ISALPHA_(ctx.ch(i)) or ctx.ch(i) == '_')) return false;
+            i += 1;
+            while (i < end and md_is_attr_name_char(ctx.ch(i))) i += 1;
+
+            if (i < end and ctx.ch(i) == '=') {
+                i += 1;
+                if (i >= end) return false;
+                const q = ctx.ch(i);
+                if (q == '"' or q == '\'') {
+                    i += 1;
+                    while (i < end and ctx.ch(i) != q) : (i += 1) {
+                        if (ctx.isNewline(i)) return false;
+                    }
+                    if (i >= end) return false;
+                    i += 1;
+                } else {
+                    const start = i;
+                    while (i < end and md_is_attr_name_char(ctx.ch(i))) i += 1;
+                    if (i == start) return false;
+                }
+            }
+        }
+
+        // Items are blank-separated: `a"b"`, `a=b"c"` and the like are junk.
+        if (i < end and !ISBLANK_(ctx.ch(i))) return false;
+    }
+
+    return true;
+}
+
 // Offset of the `}` matching the `{` at `open_off`, or null when it has none.
 fn md_match_brace(ctx: *MD_CTX, open_off: OFF) error{OutOfMemory}!?OFF {
     if (!ctx.brace_pairs_built) try md_build_brace_pairs(ctx);
@@ -1478,11 +1550,13 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 // Might be a [text]{attrs} span.
                 if (closer.end < ctx.size and ctx.ch(closer.end) == '{' and md_is_attr_opener(ctx, closer.end)) {
                     if (md_match_brace(ctx, closer.end) catch return -1) |brace_end| {
-                        is_link = 1;
-                        ctx.marks.items[@intCast(opener_index + 1)].ch = 'S';
-                        ctx.marks.items[@intCast(opener_index + 1)].beg = closer.end + 1;
-                        ctx.marks.items[@intCast(opener_index + 1)].end = brace_end;
-                        closer.end = brace_end + 1;
+                        if (md_is_attr_content(ctx, closer.end + 1, brace_end)) {
+                            is_link = 1;
+                            ctx.marks.items[@intCast(opener_index + 1)].ch = 'S';
+                            ctx.marks.items[@intCast(opener_index + 1)].beg = closer.end + 1;
+                            ctx.marks.items[@intCast(opener_index + 1)].end = brace_end;
+                            closer.end = brace_end + 1;
+                        }
                     }
                 }
             }
@@ -2089,6 +2163,7 @@ pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
         const brace_end = (md_match_brace(ctx, mark.end) catch return -1) orelse continue;
 
         const attrs_beg = mark.end + 1;
+        if (!md_is_attr_content(ctx, attrs_beg, brace_end)) continue;
         md_push_inline_attr(ctx, i, attrs_beg, brace_end) catch return -1;
 
         if (mark.ch != '*' and mark.ch != '_') mark.end = brace_end + 1;

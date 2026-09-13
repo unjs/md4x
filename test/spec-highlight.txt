@@ -410,20 +410,21 @@ Braces inside the span are ordinary text:
 <p><mark>a{.b}</mark></p>
 ````````````````````````````````
 
-An attribute value may itself contain the delimiter; the attribute parser wins
-because the closer's `{...}` is consumed with the span:
+A `==` right after the closer's `{...}` opener is not a highlight delimiter.
+The run is malformed (`=` cannot start an unquoted value), so it stays literal
+text — but the `==` inside it still does not open a second mark:
 
 ```````````````````````````````` example
 ==a=={b==c}
 .
-<p><mark b="=c">a</mark></p>
+<p><mark>a</mark>{b==c}</p>
 ````````````````````````````````
 
-A `==` inside another span's attributes is not a highlight delimiter — it is
-part of the property value, exactly as before this extension existed:
+Likewise a `==` inside another span's attribute run, exactly as before this
+extension existed:
 
 ```````````````````````````````` example
 **b**{data=="x"}
 .
-<p><strong data="=&quot;x&quot;">b</strong></p>
+<p><strong>b</strong>{data==&quot;x&quot;}</p>
 ````````````````````````````````

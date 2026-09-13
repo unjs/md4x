@@ -747,8 +747,17 @@ fn md_find_block_attrs(ctx: *MD_CTX, beg: OFF, end: OFF) ?OFF {
     if (i != end - 1)
         return null;
 
-    // `{}` carries nothing; leave it as literal text rather than eating it.
-    if (open + 1 >= end - 1)
+    // `{}` carries nothing and `{"}` is not an attribute list; leave either as
+    // literal text rather than eating it.
+    var blank = true;
+    i = open + 1;
+    while (i < end - 1) : (i += 1) {
+        if (!ISBLANK_(ctx.ch(i))) {
+            blank = false;
+            break;
+        }
+    }
+    if (blank or !inlines.md_is_attr_content(ctx, open + 1, end - 1))
         return null;
 
     var text_end: OFF = open;
