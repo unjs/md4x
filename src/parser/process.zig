@@ -730,6 +730,8 @@ fn md_find_block_attrs(ctx: *MD_CTX, beg: OFF, end: OFF) ?OFF {
     // bound to whatever ends right before the brace.
     if (open <= beg or !ISBLANK_(ctx.ch(open - 1)))
         return null;
+    if (!inlines.md_is_attr_opener(ctx, open))
+        return null;
 
     // ... and the run has to be the one closing the line.
     var d: c_int = 0;

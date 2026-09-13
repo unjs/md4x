@@ -671,6 +671,95 @@ A paragraph [span]{attr="value"}
 <p>A paragraph <span attr="value">span</span></p>
 ````````````````````````````````
 
+# Interpolation Braces Are Not Attributes
+
+`{{ expr }}` is interpolation syntax, resolved by the render host and carried
+through verbatim (see the data binding section of `spec-comark.txt`). A `{`
+that is doubled, or that follows a `{` or a `$`, therefore never opens an
+attribute run — the same rule Comark applies — instead of leaking a `{` into
+the tag as a bare attribute name (`<p { site.name>`, issue #29).
+
+## Trailing interpolation on a paragraph stays literal
+
+```````````````````````````````` example
+Hello {{ site.name }}
+.
+<p>Hello {{ site.name }}</p>
+````````````````````````````````
+
+## Trailing interpolation on a heading stays literal
+
+```````````````````````````````` example
+# Title {{ site.name }}
+.
+<h1>Title {{ site.name }}</h1>
+````````````````````````````````
+
+## Trailing interpolation on a list item and a blockquote stays literal
+
+```````````````````````````````` example
+- item {{ x }}
+
+> quote {{ x }}
+.
+<ul>
+<li>item {{ x }}</li>
+</ul>
+<blockquote>
+<p>quote {{ x }}</p>
+</blockquote>
+````````````````````````````````
+
+## Interpolation right after an inline element stays literal
+
+```````````````````````````````` example
+*a*{{ x }} **b**{{ y }} `c`{{ z }} ~~d~~{{ w }}
+.
+<p><em>a</em>{{ x }} <strong>b</strong>{{ y }} <code>c</code>{{ z }} <del>d</del>{{ w }}</p>
+````````````````````````````````
+
+## Interpolation after a bracketed span does not make it a span
+
+```````````````````````````````` example
+[text]{{ x }}
+.
+<p>[text]{{ x }}</p>
+````````````````````````````````
+
+## Interpolation shorthand that looks like attributes stays literal
+
+```````````````````````````````` example
+Hello {{.foo}}
+.
+<p>Hello {{.foo}}</p>
+````````````````````````````````
+
+## A template literal placeholder stays literal
+
+```````````````````````````````` example
+Price: ${amount}
+.
+<p>Price: ${amount}</p>
+````````````````````````````````
+
+## A real attribute run after an interpolation still binds
+
+```````````````````````````````` example
+Hello {{ site.name }} {.greeting}
+.
+<p class="greeting">Hello {{ site.name }}</p>
+````````````````````````````````
+
+## Interpolation stays literal in the AST
+
+```````````````````````````````` example [no-normalize]
+Hello {{ site.name }}
+.
+{"nodes":[["p",{},"Hello {{ site.name }}"]],"frontmatter":{},"meta":{"headings":[]}}
+.
+--format=json
+````````````````````````````````
+
 # Wrapper Folding
 
 `::ul`, `::ol`, `::table`, `::blockquote` and `::pre` are the documented way to

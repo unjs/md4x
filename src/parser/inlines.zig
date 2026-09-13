@@ -1338,6 +1338,18 @@ fn md_build_brace_pairs(ctx: *MD_CTX) error{OutOfMemory}!void {
     ctx.brace_pairs_built = true;
 }
 
+// Can the `{` at `off` open an attribute run? `{{` is reserved for
+// interpolation (`{{ expr }}`, resolved by the render host — see the data
+// binding section of test/spec-comark.txt), so a doubled brace stays literal
+// text instead of leaking `{` into the tag as a bare attribute name. This is
+// Comark's `comark_inline_props` rule (plugins/attributes.js); its other two
+// exclusions — a `{` right after `{` or `$` — are already implied by every
+// caller, which only gets here with a span closer or a blank before the brace.
+// Component props (`:badge{...}`) are a different production and not gated.
+pub fn md_is_attr_opener(ctx: *MD_CTX, off: OFF) bool {
+    return !(off + 1 < ctx.size and ctx.ch(off + 1) == '{');
+}
+
 // Offset of the `}` matching the `{` at `open_off`, or null when it has none.
 fn md_match_brace(ctx: *MD_CTX, open_off: OFF) error{OutOfMemory}!?OFF {
     if (!ctx.brace_pairs_built) try md_build_brace_pairs(ctx);
@@ -1464,7 +1476,7 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
 
             if (is_link == 0 and opener.ch == '[') {
                 // Might be a [text]{attrs} span.
-                if (closer.end < ctx.size and ctx.ch(closer.end) == '{') {
+                if (closer.end < ctx.size and ctx.ch(closer.end) == '{' and md_is_attr_opener(ctx, closer.end)) {
                     if (md_match_brace(ctx, closer.end) catch return -1) |brace_end| {
                         is_link = 1;
                         ctx.marks.items[@intCast(opener_index + 1)].ch = 'S';
@@ -2072,6 +2084,7 @@ pub fn md_resolve_attrs(ctx: *MD_CTX) c_int {
         }
 
         if (mark.end >= ctx.size or ctx.ch(mark.end) != '{') continue;
+        if (!md_is_attr_opener(ctx, mark.end)) continue;
 
         const brace_end = (md_match_brace(ctx, mark.end) catch return -1) orelse continue;
 

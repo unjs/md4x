@@ -31,3 +31,13 @@ _underline_{.accent}
 ![image](pic.png "Title"){.}
 
 `code`{#}
+
+Interpolation {{ site.name }}
+
+# Heading {{ title }}
+
+*em*{{ x }} [span]{{ y }} `code`{{ z }}
+
+Template ${amount}
+
+Hello {{ site.name }} {.greeting}

@@ -357,6 +357,9 @@ Constraints:
 - Only applies to resolved inline elements (not plain text — `hello{.class}` is literal). A `{...}`
   run separated from the element by a space is not an inline attribute; it may instead be consumed
   as a **block attribute** (below).
+- A doubled brace never opens an attribute run, inline or block: `{{ expr }}` is interpolation
+  syntax (resolved by the render host) and is carried through as literal text, so
+  `Hello {{ site.name }}` renders `<p>Hello {{ site.name }}</p>`, not `<p { site.name>Hello</p>`.
 - Spans: em/strong/code/del/u/mark pass `MD_SPAN_ATTRS_DETAIL*` (or `NULL` without attrs), links/images extend their detail structs with `raw_attrs`/`raw_attrs_size`
 - `MD_SPAN_SPAN` is emitted for `[text]{attrs}` with `MD_SPAN_SPAN_DETAIL`
 
