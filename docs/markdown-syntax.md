@@ -361,11 +361,19 @@ Constraints:
   syntax (resolved by the render host) and is carried through as literal text, so
   `Hello {{ site.name }}` renders `<p>Hello {{ site.name }}</p>`, not `<p { site.name>Hello</p>`.
 - The content must be a well-formed list — blank-separated `#id`, `.class`, `key`, `:key`, or
-  `key="…"` / `key='…'` / `key=value` items, where a key starts with an ASCII letter or `_` and
-  names and unquoted values contain none of blank, control, `{`, `}`, `"`, `'`, `=`, `<`, `>`, `/`.
-  Anything else (`{"}`, `{=b}`, `{a=}`, `{.a {b}}`, an unclosed quote) leaves the **whole** run as
-  literal text. An empty `{}` is a no-op on inline elements (`[text]{}` is a bare `<span>`) and
-  literal on a block.
+  `key="…"` / `key='…'` / `key=value` items, where a key is `[A-Za-z_][A-Za-z0-9_-]*` (Comark's
+  key grammar — `data-x` and `aria-label` are keys, `props.title` and `fn()` are not), an id or
+  class does not start with another `.` or `#`, and names and unquoted values contain none of
+  blank, control, `{`, `}`, `"`, `'`, `=`, `<`, `>`, `/`, `\`.
+  Anything else (`{"}`, `{=b}`, `{a=}`, `{.a {b}}`, `{x.y}`, `{f()}`, `{...props}`, an unclosed
+  quote) leaves the **whole** run as literal text, so a JSX-style `{expr}` survives. An empty `{}`
+  is a no-op on inline elements (`[text]{}` is a bare `<span>`) and literal on a block.
+- A run of **bare keys only** is a boolean prop on the inline element it touches (`**b**{title}`
+  → `<strong title>`) but literal text after a blank (`Hello {title}`, `# H {title}`,
+  `- item {title}` all keep the braces): the blank marks it as a JSX-style expression in running
+  text rather than a prop on the block. One `#id`, `.class`, `:key` or `key=value` item makes the
+  whole run a block attribute again (`Hello {title .cls}` → `<p title class="cls">`). Comark
+  reads the spaced form as a prop too — see [compatibility.md](compatibility.md).
 - Spans: em/strong/code/del/u/mark pass `MD_SPAN_ATTRS_DETAIL*` (or `NULL` without attrs), links/images extend their detail structs with `raw_attrs`/`raw_attrs_size`
 - `MD_SPAN_SPAN` is emitted for `[text]{attrs}` with `MD_SPAN_SPAN_DETAIL`
 

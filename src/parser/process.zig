@@ -748,7 +748,9 @@ fn md_find_block_attrs(ctx: *MD_CTX, beg: OFF, end: OFF) ?OFF {
         return null;
 
     // `{}` carries nothing and `{"}` is not an attribute list; leave either as
-    // literal text rather than eating it.
+    // literal text rather than eating it. So is a run of bare keys alone
+    // (`Hello {title}`): after a blank that is a JSX-style expression, not a
+    // boolean prop on the paragraph — see md_is_bare_attr_content.
     var blank = true;
     i = open + 1;
     while (i < end - 1) : (i += 1) {
@@ -758,6 +760,8 @@ fn md_find_block_attrs(ctx: *MD_CTX, beg: OFF, end: OFF) ?OFF {
         }
     }
     if (blank or !inlines.md_is_attr_content(ctx, open + 1, end - 1))
+        return null;
+    if (inlines.md_is_bare_attr_content(ctx, open + 1, end - 1))
         return null;
 
     var text_end: OFF = open;

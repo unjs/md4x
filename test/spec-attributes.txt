@@ -766,8 +766,9 @@ Hello {{ site.name }}
 
 A `{...}` run is an attribute list only when its content is well-formed: blank-
 separated items, each `#id`, `.class`, `key`, `:key`, or one of those with a
-`="…"`, `='…'` or unquoted value; a key starts with an ASCII letter or `_`, and
-names and unquoted values contain no blanks, controls or `{}"'=<>/`. Anything
+`="…"`, `='…'` or unquoted value; a key is `[A-Za-z_][A-Za-z0-9_-]*` (Comark's
+key grammar), an id or class does not start with another `.` or `#`, and names
+and unquoted values contain no blanks, controls or `{}"'=<>/\`. Anything
 else leaves the whole run as literal text — all-or-nothing, the way `{}` on a
 block already stays literal — instead of leaking a stray byte into the tag as
 a bare attribute name (`<p &quot;>`, issue #29). Empty and blank-only runs are
@@ -840,6 +841,158 @@ Hello {a=b<c}
 <p><strong>b</strong>{a/b=c}</p>
 <p>Hello {a=b&quot;c}</p>
 <p>Hello {a=b&lt;c}</p>
+````````````````````````````````
+
+## Bare keys after a blank are an expression, not a block attribute
+
+A run made only of bare keys is the one shape a boolean prop shares with a
+JSX-style `{expr}`. The blank before the brace settles it: touching an inline
+element it is a prop, after a blank it is text on the block. One `#id`,
+`.class`, `:key` or `key=value` item makes the run a block attribute again.
+(Comark reads the spaced form as a prop on the block.)
+
+```````````````````````````````` example
+Hello {title}
+
+Hello { title }
+
+Hello {a b c}
+
+# H {title}
+
+- item {title}
+
+> q {title}
+
+**b** {title}
+
+Hello {title} {.cls}
+.
+<p>Hello {title}</p>
+<p>Hello { title }</p>
+<p>Hello {a b c}</p>
+<h1>H {title}</h1>
+<ul>
+<li>item {title}</li>
+</ul>
+<blockquote>
+<p>q {title}</p>
+</blockquote>
+<p><strong>b</strong> {title}</p>
+<p class="cls">Hello {title}</p>
+````````````````````````````````
+
+## Bare keys on the element they touch, or beside another item, still bind
+
+```````````````````````````````` example
+**b**{title}
+
+[t]{title}
+
+[t](u){title}
+
+Hello {:title}
+
+Hello {title .cls}
+
+Hello {title a=1}
+
+Hello {#i title}
+.
+<p><strong title>b</strong></p>
+<p><span title>t</span></p>
+<p><a href="u" title>t</a></p>
+<p title>Hello</p>
+<p title class="cls">Hello</p>
+<p title a="1">Hello</p>
+<p id="i" title>Hello</p>
+````````````````````````````````
+
+## A key with a dot, a call or a bracket is an expression, not an attribute
+
+Comark's key grammar is `[a-z_][a-z0-9_-]*`; a JSX-style `{props.title}`,
+`{fn()}` or `{items[0]}` matches none of it and stays text (Comark consumes
+the run and drops the key; md4x keeps the author's bytes, as it does for every
+other malformed run).
+
+```````````````````````````````` example
+Hello {props.title}
+
+Hello {Astro.props.x}
+
+Hello {fn()}
+
+Hello {items[0]}
+
+# H {x.y}
+
+- item {x.y}
+
+**b**{x.y}
+
+[t]{x.y}
+
+[t](u){x.y}
+.
+<p>Hello {props.title}</p>
+<p>Hello {Astro.props.x}</p>
+<p>Hello {fn()}</p>
+<p>Hello {items[0]}</p>
+<h1>H {x.y}</h1>
+<ul>
+<li>item {x.y}</li>
+</ul>
+<p><strong>b</strong>{x.y}</p>
+<p>[t]{x.y}</p>
+<p><a href="u">t</a>{x.y}</p>
+````````````````````````````````
+
+## `data-*` and `aria-*` keys still bind
+
+```````````````````````````````` example
+Hello {data-x aria-label="y" _p :b="e" k-1}
+.
+<p data-x aria-label="y" _p b="e" k-1>Hello</p>
+````````````````````````````````
+
+## A spread is not a list of classes
+
+```````````````````````````````` example
+Hello {...props}
+
+Hello {..a}
+
+Hello {.#a}
+
+Hello {#.a}
+
+Hello {.a.b}
+.
+<p>Hello {...props}</p>
+<p>Hello {..a}</p>
+<p>Hello {.#a}</p>
+<p>Hello {#.a}</p>
+<p class="a b">Hello</p>
+````````````````````````````````
+
+## A backslash never reaches the tag
+
+`\}` is an escaped brace, so the run has no closer and the paragraph text keeps
+the (unescaped) `}`; `\` inside a class or value is not a name byte either.
+
+```````````````````````````````` example
+Hello {title\}
+
+Hello {.a\}
+
+Hello {a=b\}
+
+**b**{x\}
+.
+<p>Hello {title}</p>
+<p>Hello {.a}</p>
+<p>Hello {a=b}</p>
+<p><strong>b</strong>{x}</p>
 ````````````````````````````````
 
 ## Nested braces and an unclosed quote

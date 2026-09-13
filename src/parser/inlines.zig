@@ -44,6 +44,7 @@ const MarkFlags = types.MarkFlags;
 
 const ISANYOF_ = util.ISANYOF_;
 const ISALPHA_ = util.ISALPHA_;
+const ISALNUM_ = util.ISALNUM_;
 const ISBLANK_ = util.ISBLANK_;
 const ISCNTRL_ = util.ISCNTRL_;
 const ISWHITESPACE_ = util.ISWHITESPACE_;
@@ -1384,11 +1385,24 @@ pub fn md_is_attr_opener(ctx: *MD_CTX, off: OFF) bool {
     return !(off + 1 < ctx.size and ctx.ch(off + 1) == '{');
 }
 
-// A byte that may appear in an attribute name — HTML's rule (anything but
-// blanks, controls and the tag-syntax characters), so `data-x`, `aria-label`
-// and `x.y` are all names — plus the brace pair itself.
+// A byte that may appear in an id, a class or an unquoted value — HTML's
+// attribute-name rule (anything but blanks, controls and the tag-syntax
+// characters) minus the backslash, so `\}` stays the escape it is in every
+// other inline context instead of leaking a raw `\` into the tag.
 inline fn md_is_attr_name_char(ch: CHAR) bool {
-    return !ISBLANK_(ch) and !ISCNTRL_(ch) and !ISANYOF_(ch, "{}\"'=<>/");
+    return !ISBLANK_(ch) and !ISCNTRL_(ch) and !ISANYOF_(ch, "{}\"'=<>/\\");
+}
+
+// A byte that may follow the first character of a key — Comark's key grammar
+// (`[a-z_][a-z0-9_-]*`, case-insensitive; internal/parse/syntax/props.js), so
+// `data-x` and `aria-label` are keys but `props.title` and `fn()` are not.
+// Comark drops a non-matching key and keeps the run; md4x's all-or-nothing
+// rule instead leaves the run as text, which is what a JSX-style `{expr}`
+// wants. A bare identifier (`{title}`) is the one shape left ambiguous with a
+// boolean prop; md_is_bare_attr_content settles it by the blank before the
+// brace.
+inline fn md_is_attr_key_char(ch: CHAR) bool {
+    return ISALNUM_(ch) or ch == '_' or ch == '-';
 }
 
 // Is `[beg, end)` — the bytes between a matched `{` and `}` — a well-formed
@@ -1396,10 +1410,11 @@ inline fn md_is_attr_name_char(ch: CHAR) bool {
 //
 //     #id   .class   [:]key   [:]key="v"   [:]key='v'   [:]key=v
 //
-// where an id/class is one or more name bytes, a key starts with an ASCII
-// letter or `_` and continues with name bytes, and an unquoted value is one or
-// more name bytes. Anything else (`{"}`, `{=b}`, `{a=}`, `{.a {b}}`, an unclosed
-// quote, a newline) makes the whole run literal text: an all-or-nothing
+// where an id/class is one or more name bytes not starting with `.` or `#`
+// (`{...props}` is a spread, not three classes), a key starts with an ASCII
+// letter or `_` and continues with key bytes, and an unquoted value is one or
+// more name bytes. Anything else (`{"}`, `{=b}`, `{a=}`, `{.a {b}}`, `{x.y}`,
+// `{f()}`, an unclosed quote, a newline) makes the whole run literal text: an all-or-nothing
 // fallback rather than `md_parse_props`'s lenient reading, which leaks `{` or
 // `"` into the tag as a bare attribute name. The grammar here is a strict
 // subset of what `md_parse_props` accepts, so every run that passes is parsed
@@ -1418,6 +1433,7 @@ pub fn md_is_attr_content(ctx: *MD_CTX, beg: OFF, end: OFF) bool {
 
         if (ctx.ch(i) == '#' or ctx.ch(i) == '.') {
             i += 1;
+            if (i < end and (ctx.ch(i) == '.' or ctx.ch(i) == '#')) return false;
             const start = i;
             while (i < end and md_is_attr_name_char(ctx.ch(i))) i += 1;
             if (i == start) return false;
@@ -1425,7 +1441,7 @@ pub fn md_is_attr_content(ctx: *MD_CTX, beg: OFF, end: OFF) bool {
             if (ctx.ch(i) == ':') i += 1;
             if (i >= end or !(ISALPHA_(ctx.ch(i)) or ctx.ch(i) == '_')) return false;
             i += 1;
-            while (i < end and md_is_attr_name_char(ctx.ch(i))) i += 1;
+            while (i < end and md_is_attr_key_char(ctx.ch(i))) i += 1;
 
             if (i < end and ctx.ch(i) == '=') {
                 i += 1;
@@ -1450,6 +1466,25 @@ pub fn md_is_attr_content(ctx: *MD_CTX, beg: OFF, end: OFF) bool {
         if (i < end and !ISBLANK_(ctx.ch(i))) return false;
     }
 
+    return true;
+}
+
+// Is the well-formed attribute list `[beg, end)` nothing but bare keys —
+// `{title}`, `{a b}` — with no `#id`, `.class`, `:key` or `key=value` item?
+// That is the one shape an attribute run shares with a JSX-style `{expr}`,
+// and the blank before the brace is what tells them apart: `**b**{title}`
+// binds to the element it touches, `Hello {title}` is an expression in
+// running text. `md_find_block_attrs` refuses such a run; Comark reads it as
+// a boolean prop on the block (see docs/compatibility.md).
+pub fn md_is_bare_attr_content(ctx: *MD_CTX, beg: OFF, end: OFF) bool {
+    var i: OFF = beg;
+    while (i < end) : (i += 1) {
+        const ch = ctx.ch(i);
+        if (ISBLANK_(ch)) continue;
+        if (!(ISALPHA_(ch) or ch == '_')) return false;
+        while (i < end and md_is_attr_key_char(ctx.ch(i))) i += 1;
+        if (i < end and !ISBLANK_(ctx.ch(i))) return false;
+    }
     return true;
 }
 

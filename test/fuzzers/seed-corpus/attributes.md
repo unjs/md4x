@@ -52,3 +52,19 @@ y}
 Mixed {.ok "}
 
 Valid {#i .a.b data-x aria-label="y" k='v w' u=v :b="e" _p}
+
+Hello {props.title} {fn()} {items[0]}
+
+Hello {...props}
+
+Hello {title\}
+
+**b**{x.y}
+
+Hello {title} { title } {a b c}
+
+# H {title}
+
+**b**{title} **c** {title}
+
+Hello {title .cls}
