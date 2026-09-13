@@ -40,16 +40,16 @@
     "prepack": "cd ../.. && zig build --verbose && zig build wasm && zig build wasm-small && bun scripts/build-standalone.ts"
   },
   "devDependencies": {
-    "@ox-content/napi": "^2.81.0",
-    "confbox": "^0.2.4",
+    "@ox-content/napi": "^3.2.2",
+    "confbox": "^0.3.1",
     "js-yaml": "^5.2.3",
-    "markdown-it": "^14.1.1",
+    "markdown-it": "^15",
     "markdown-it-mdc": "^0.2.12",
     "md4w": "^0.2.7",
     "md4x-c": "npm:md4x@latest",
     "mitata": "^1.0.34",
     "rangi": "^2.2.0",
-    "satteri": "^0.9.5",
+    "satteri": "^0.10.5",
     "yaml": "^2.9.0"
   }
 }
