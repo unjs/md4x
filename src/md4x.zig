@@ -1702,6 +1702,7 @@ const TraceProbe = struct {
             c.TextType.code => "CODE",
             c.TextType.html => "HTML",
             c.TextType.latexmath => "LATEXMATH",
+            c.TextType.binding => "BINDING",
         };
     }
 

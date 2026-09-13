@@ -290,6 +290,10 @@ fn substr_needs_angle(ty: c.TextType, text: [*]const u8, size: c.MD_SIZE) bool {
     if (ty == c.TextType.nullchar)
         return false;
 
+    // `{{ expr }}` reparses as one destination token, blanks included.
+    if (ty == c.TextType.binding)
+        return false;
+
     if (ty == c.TextType.entity) {
         if (entity_codepoints(text, size)) |cps| {
             for (cps) |cp| {
@@ -1070,6 +1074,31 @@ fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata:
 
         .normal => {
             render_markdown_escaped(r, text, size);
+        },
+
+        // `{{ expr }}` round-trips as its source bytes: escaping anything
+        // inside would change the expression, and the bytes reparse as the
+        // same run. A newline inside it is re-emitted through the renderer
+        // so a continuation line keeps the container's indentation.
+        // Inside a table cell the parser already unescaped `\|`, so the pipe
+        // goes back out escaped or it would split the cell on reparse.
+        .binding => {
+            var beg: c.MD_SIZE = 0;
+            var off: c.MD_SIZE = 0;
+            while (off < size) : (off += 1) {
+                const ch = text[off];
+                if (ch == '\n') {
+                    if (off > beg) render_verbatim(r, text + beg, off - beg);
+                    render_newline(r);
+                    render_indent(r);
+                    beg = off + 1;
+                } else if (ch == '|' and r.in_table) {
+                    if (off > beg) render_verbatim(r, text + beg, off - beg);
+                    render_verbatim_lit(r, "\\|");
+                    beg = off + 1;
+                }
+            }
+            if (size > beg) render_verbatim(r, text + beg, size - beg);
         },
     }
 

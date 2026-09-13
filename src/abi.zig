@@ -108,6 +108,14 @@ pub const TextType = enum(c_uint) {
     code,
     html,
     latexmath,
+    /// A `{{ expr }}` / `{{{ expr }}}` interpolation run, braces included, as
+    /// the verbatim source bytes. The parser resolves nothing inside it — no
+    /// inline syntax, no entities, no escapes — and the HTML renderer emits it
+    /// unescaped so a template engine (rendu, Nuxt Content, …) run over the
+    /// output sees the expression it was written with. Every other renderer
+    /// treats it as ordinary text. Also appears as an `Attribute` substring
+    /// type for a run inside a link/image destination or title.
+    binding,
 };
 
 /// Table cell alignment. Ordinals are the values of the former C `MD_ALIGN`.

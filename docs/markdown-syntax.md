@@ -428,6 +428,37 @@ no trailing-brace slot of their own:
 
 Folding requires exactly one child and a matching tag; anything else nests normally.
 
+## Extension: Interpolation (`{{ expr }}`)
+
+A `{{ expr }}` or `{{{ expr }}}` run is a placeholder for a template engine run over
+md4x's output — [rendu](https://github.com/h3js/rendu), Nuxt Content / MDC, Comark's binding
+plugin. md4x passes it through **verbatim**:
+
+- nothing inside is inline syntax — `{{ a*b*c }}`, ``{{ `x` }}``, `{{ $x }}`, `{{ [i] }}` stay as written;
+- no entity or backslash escape is resolved, and the HTML renderer does not escape it —
+  `{{ a < b && c }}` renders `{{ a < b && c }}`, not `{{ a &lt; b &amp;&amp; c }}`;
+- inside a link or image destination it is one token: `[a]({{ url }})` → `<a href="{{ url }}">`,
+  with no percent-encoding; same in titles, alt text and `{attrs}` values.
+
+The rule is rendu's: `{{{` ends at the first `}}}` (falling back to a `{{` run ending at the
+first `}}` when there is none), the content must be at least one byte, and a run may span lines
+within one paragraph. Code spans and code blocks win over it. A trailing run is never an
+attribute list (`Hi {{ x }}` is text, not `<p { x>`).
+
+The parser reports the run as `TextType.binding`; the AST, text, ANSI and markdown renderers
+treat it as ordinary text. GitHub escapes the operators instead — a deliberate divergence,
+see `.agents/github-parity.md`.
+
+```
+Hello {{ user.name }}                → <p>Hello {{ user.name }}</p>
+[Profile]({{ user.url }})            → <p><a href="{{ user.url }}">Profile</a></p>
+{{{ rawHtml }}}                      → <p>{{{ rawHtml }}}</p>
+```
+
+rendu's other syntaxes — `<? code ?>`, `<?= expr ?>` and `<script server>` — need no
+special handling: they are CommonMark raw HTML (a processing instruction and a `<script>`
+block) and pass through verbatim already.
+
 ## Code Block Metadata
 
 Fenced code blocks support filename and line highlighting metadata:

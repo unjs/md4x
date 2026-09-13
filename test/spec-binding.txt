@@ -1,0 +1,226 @@
+# Interpolation (`{{ expr }}`)
+
+A `{{ expr }}` or `{{{ expr }}}` run is an interpolation placeholder for a
+template engine run over md4x's output — rendu, Nuxt Content / MDC, Comark's
+binding plugin. md4x passes the run through **verbatim**: nothing inside it is
+inline syntax, no entity or backslash escape is resolved, and the HTML renderer
+emits it unescaped, so the engine sees exactly the expression that was written.
+Every other renderer treats it as ordinary text.
+
+The rule is rendu's (`src/parser.ts`): a `{{{` opener ends at the first `}}}`,
+and if there is none the same `{{` is tried as a double opener ending at the
+first `}}`; the content must be at least one byte. A run may span lines inside
+one paragraph. Code spans and code blocks win over it, as they do over raw HTML.
+
+GitHub has no such syntax and escapes `{{ a < b }}` to `{{ a &lt; b }}`. This is
+a deliberate divergence, recorded in `.agents/github-parity.md`.
+
+## Operators are not escaped
+
+```````````````````````````````` example
+{{ a < b }} {{ a && b }} {{ "str" }} {{ a > b }}
+.
+<p>{{ a < b }} {{ a && b }} {{ "str" }} {{ a > b }}</p>
+````````````````````````````````
+
+## Nothing inside is inline syntax
+
+```````````````````````````````` example
+{{ a*b*c }} {{ `x` }} {{ $x }} {{ x ~~ y ~~ z }} {{ a == b == c }} {{ [x] }} {{ a\*b }} {{ &amp; }}
+.
+<p>{{ a*b*c }} {{ `x` }} {{ $x }} {{ x ~~ y ~~ z }} {{ a == b == c }} {{ [x] }} {{ a\*b }} {{ &amp; }}</p>
+````````````````````````````````
+
+## Raw (triple-brace) form
+
+```````````````````````````````` example
+{{{ a < b }}} and {{{ x }} y }}}
+.
+<p>{{{ a < b }}} and {{{ x }} y }}}</p>
+````````````````````````````````
+
+## An unclosed triple opener falls back to a double one
+
+```````````````````````````````` example
+{{{ a < b }} c
+.
+<p>{{{ a < b }} c</p>
+````````````````````````````````
+
+## The run ends at the first closer
+
+```````````````````````````````` example
+{{ a }} b }} and {{{ a }}}}
+.
+<p>{{ a }} b }} and {{{ a }}}}</p>
+````````````````````````````````
+
+## Empty braces are plain text
+
+```````````````````````````````` example
+{{}} and {{{}}} and {{ a < b
+.
+<p>{{}} and {{{}}} and {{ a &lt; b</p>
+````````````````````````````````
+
+## A run may span lines within a paragraph
+
+```````````````````````````````` example
+sum {{ a
+  ** b }} done
+.
+<p>sum {{ a
+  ** b }} done</p>
+````````````````````````````````
+
+## A line that opens a block still ends the paragraph
+
+```````````````````````````````` example
+open {{ a
+
++ b }} <
+.
+<p>open {{ a</p>
+<ul>
+<li>b }} &lt;</li>
+</ul>
+````````````````````````````````
+
+## Inside emphasis, a link label, a heading and a list item
+
+```````````````````````````````` example
+*{{ a < b }}* and [{{ x }}](u)
+
+# {{ title }}
+
+- {{ item.name }}
+.
+<p><em>{{ a < b }}</em> and <a href="u">{{ x }}</a></p>
+<h1>{{ title }}</h1>
+<ul>
+<li>{{ item.name }}</li>
+</ul>
+````````````````````````````````
+
+## Link and image destinations
+
+The blanks inside the run do not end the destination, and the destination is
+not percent-encoded.
+
+```````````````````````````````` example
+[a]({{ url }}) [b]({{url}}) ![c]({{ src }} "{{ t }}") [d]({{ fn(a, b) }}) [e](<{{ url }}>)
+
+[ref]: {{ base }}/x
+
+[ref]
+.
+<p><a href="{{ url }}">a</a> <a href="{{url}}">b</a> <img src="{{ src }}" alt="c" title="{{ t }}"> <a href="{{ fn(a, b) }}">d</a> <a href="{{ url }}">e</a></p>
+<p><a href="{{ base }}/x">ref</a></p>
+````````````````````````````````
+
+## Image alt text
+
+```````````````````````````````` example
+![{{ alt }}](p)
+.
+<p><img src="p" alt="{{ alt }}"></p>
+````````````````````````````````
+
+## Attribute values
+
+```````````````````````````````` example
+**b**{title="{{ x }}"}
+
+Para {title="{{ x }}"}
+.
+<p><strong title="{{ x }}">b</strong></p>
+<p title="{{ x }}">Para</p>
+````````````````````````````````
+
+## Code spans and code blocks win
+
+```````````````````````````````` example
+`{{ a < b }}`
+
+```
+{{ a < b }}
+```
+.
+<p><code>{{ a &lt; b }}</code></p>
+<pre><code>{{ a &lt; b }}
+</code></pre>
+````````````````````````````````
+
+## Table cells
+
+A `\|` inside the run is unescaped like anywhere else in a cell.
+
+```````````````````````````````` example
+| a | b |
+|---|---|
+| {{ a \| b }} | {{ x < y }} |
+.
+<table>
+<thead>
+<tr>
+<th>a</th>
+<th>b</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>{{ a | b }}</td>
+<td>{{ x < y }}</td>
+</tr>
+</tbody>
+</table>
+````````````````````````````````
+
+## A trailing run is never an attribute list
+
+```````````````````````````````` example
+Hi {{ site.name }}
+
+*a*{{ x }} [t]{{ x }}
+.
+<p>Hi {{ site.name }}</p>
+<p><em>a</em>{{ x }} [t]{{ x }}</p>
+````````````````````````````````
+
+## The AST carries the run as text
+
+```````````````````````````````` example [no-normalize]
+Hello {{ a < b }} [x]({{ url }})
+.
+{"nodes":[["p",{},"Hello {{ a < b }} ",["a",{"href":"{{ url }}"},"x"]]],"frontmatter":{},"meta":{"headings":[]}}
+.
+--format=json
+````````````````````````````````
+
+## The markdown renderer round-trips the source bytes
+
+```````````````````````````````` example [no-normalize]
+{{ a < b }} [x]({{ url }} "{{ t }}") ![i]({{ src }})
+
+| a |
+|---|
+| {{ a \| b }} |
+.
+{{ a < b }} [x]({{ url }} "{{ t }}") ![i]({{ src }})
+
+| a |
+| --- |
+| {{ a \| b }} |
+.
+--format=markdown
+````````````````````````````````
+
+## The text renderer keeps the run
+
+```````````````````````````````` example [no-normalize]
+Hello {{ a < b }}
+.
+Hello {{ a < b }}
+.
+--format=text
+````````````````````````````````

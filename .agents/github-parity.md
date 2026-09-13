@@ -143,6 +143,12 @@ classifier now recognises the construct itself, which is what the cause actually
 
 ### md4x's own extensions (3)
 
+Also in this bucket by construction, though no scored suite exercises it: `{{ expr }}`
+interpolation (`test/spec-binding.txt`). GitHub renders `{{ a < b }}` as text and escapes
+it to `{{ a &lt; b }}`; md4x emits the run verbatim so a template engine run over the HTML
+sees the expression as written. `spec-binding.txt` is excluded from the harness like every
+other md4x-only suite.
+
 Components, attributes, LaTeX math, `==highlight==`, frontmatter. GitHub
 leaves the syntax as literal text because it has no such feature. These are the reason
 md4x exists; parity here would mean deleting the product.

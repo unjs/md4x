@@ -652,11 +652,13 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
     // byte-level zero-init exactly (defaults could leave padding uninitialized).
     build.* = std.mem.zeroes(MD_ATTRIBUTE_BUILD);
 
-    // Trivial path if no backslash, ampersand, or NUL.
+    // Trivial path if no backslash, ampersand, NUL, or `{{`.
     var is_trivial = true;
     raw_off = 0;
     while (raw_off < raw_size) : (raw_off += 1) {
-        if (ISANYOF3_(raw_text[raw_off], '\\', '&', 0)) {
+        if (ISANYOF3_(raw_text[raw_off], '\\', '&', 0) or
+            (raw_text[raw_off] == '{' and raw_off + 1 < raw_size and raw_text[raw_off + 1] == '{'))
+        {
             is_trivial = false;
             break;
         }
@@ -695,6 +697,23 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
                 off += 1;
                 raw_off += 1;
                 continue;
+            }
+
+            // A `{{ expr }}` run is copied whole: no entity or escape inside
+            // it is resolved, so the renderer can emit the expression as
+            // written.
+            if (raw_text[raw_off] == '{') {
+                if (md_scan_binding(raw_text[0..raw_size], raw_off, true)) |bind_end| {
+                    md_build_attr_append_substr(ctx, build, c.TextType.binding, off) catch {
+                        md_free_attribute(ctx, build);
+                        return error.OutOfMemory;
+                    };
+                    const n: usize = bind_end - raw_off;
+                    @memcpy(@as([*]u8, @ptrCast(build.text + off))[0..n], @as([*]const u8, @ptrCast(raw_text + raw_off))[0..n]);
+                    off += @intCast(n);
+                    raw_off = @intCast(bind_end);
+                    continue;
+                }
             }
 
             if (raw_text[raw_off] == '&') {
@@ -742,6 +761,38 @@ pub fn md_build_attribute(ctx: *MD_CTX, raw_text: [*c]const CHAR, raw_size: SZ, 
     attr.text = if (build.text != null) build.text[0..off] else &.{};
     attr.substr_types = build.substr_types[0..n];
     attr.substr_offsets = build.substr_offsets[0 .. n + 1];
+}
+
+// ============================================================================
+//  Interpolation runs
+// ============================================================================
+
+// If `text[off..]` opens a `{{ expr }}` / `{{{ expr }}}` interpolation run,
+// the offset just past its closing braces; null otherwise. rendu's rule
+// (h3js/rendu src/parser.ts, `curlyRe`): a triple opener wants the first `}}}`,
+// and failing that the same `{{` is tried as a double opener wanting the first
+// `}}`; the content between must be at least one byte. `allow_newline` is
+// false where a run cannot cross a line, such as a link destination.
+pub fn md_scan_binding(text: []const u8, off: usize, allow_newline: bool) ?usize {
+    if (off + 1 >= text.len or text[off] != '{' or text[off + 1] != '{') return null;
+
+    const triple = off + 2 < text.len and text[off + 2] == '{';
+    if (triple) {
+        if (md_scan_binding_closer(text, off + 3, "}}}", allow_newline)) |end| return end;
+    }
+    return md_scan_binding_closer(text, off + 2, "}}", allow_newline);
+}
+
+fn md_scan_binding_closer(text: []const u8, content_beg: usize, closer: []const u8, allow_newline: bool) ?usize {
+    var i: usize = content_beg;
+    while (i + closer.len <= text.len) : (i += 1) {
+        if (!allow_newline and ISNEWLINE_(text[i])) return null;
+        if (std.mem.startsWith(u8, text[i..], closer)) {
+            if (i == content_beg) return null;
+            return i + closer.len;
+        }
+    }
+    return null;
 }
 
 // ============================================================================

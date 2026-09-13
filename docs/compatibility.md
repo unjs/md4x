@@ -218,6 +218,7 @@ Gaps between the Comark spec and md4x:
 | Emoji `:wave:`                    | 👋                                                       | literal                                           | build-time `-Demoji=true` (~26 KB gz)                   |
 | `<ul class="contains-task-list">` | present                                                  | absent                                            | documented not-goal                                     |
 | Non-Comark node types             | —                                                        | `math`, `mark`, `footnote-ref`                    | superset by design, **not disableable from JS**         |
+| `{{ expr }}` interpolation        | binding plugin, opt-in                                   | always verbatim text (`spec-binding.txt`)         | deliberate — the HTML renderer never escapes the run    |
 | `meta` shape                      | `{toc, summary}`                                         | `{headings}` (+`title`)                           | deliberate, declared                                    |
 | Lone inline component             | inline                                                   | lifted to block                                   | deliberate — matches `markdown-it-mdc`                  |
 

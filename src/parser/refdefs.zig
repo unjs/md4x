@@ -711,6 +711,15 @@ pub fn md_is_link_destination_B(ctx: *MD_CTX, beg: OFF, max_end: OFF, p_end: *OF
             continue;
         }
 
+        // A `{{ expr }}` run is one opaque token: the blanks (and parens)
+        // inside it do not end or unbalance the destination.
+        if (ctx.ch(off) == '{') {
+            if (util.md_scan_binding(ctx.str(0)[0..max_end], off, false)) |bind_end| {
+                off = @intCast(bind_end);
+                continue;
+            }
+        }
+
         if (ctx.isWhitespace(off) or ctx.isCntrl(off))
             break;
 

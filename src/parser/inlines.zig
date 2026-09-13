@@ -444,6 +444,8 @@ pub fn md_build_mark_char_map(ctx: *MD_CTX) void {
     ctx.mark_char_map['@'] = 1;
     ctx.mark_char_map['.'] = 1;
     ctx.mark_char_map['|'] = 1;
+    // `{{ expr }}` interpolation runs (TextType.binding).
+    ctx.mark_char_map['{'] = 1;
 }
 
 // md4x.c ~2828. Detect a code span starting at `beg`.
@@ -746,6 +748,35 @@ pub fn md_collect_marks(ctx: *MD_CTX, lines: []const MD_LINE, table_mode: bool) 
                         ret = -1;
                         return ret;
                     }
+                }
+                off += 1;
+                continue :scan;
+            }
+
+            // `{{ expr }}` / `{{{ expr }}}` interpolation run. Like raw HTML
+            // it is one resolved opener/closer pair whose interior collects
+            // no marks, so nothing inside it is inline syntax; unlike raw
+            // HTML it is emitted as TextType.binding, which only the HTML
+            // renderer treats specially. May span lines within the block.
+            if (ch == '{') {
+                const block_end = lines[lines.len - 1].end;
+                if (util.md_scan_binding(ctx.str(0)[0..block_end], off, true)) |bind_end_u| {
+                    const bind_end: OFF = @intCast(bind_end_u);
+                    if (addMark(ctx, '{', off, off, MarkFlags.opener | MarkFlags.resolved) == null) {
+                        ret = -1;
+                        return ret;
+                    }
+                    if (addMark(ctx, '}', bind_end, bind_end, MarkFlags.closer | MarkFlags.resolved) == null) {
+                        ret = -1;
+                        return ret;
+                    }
+                    ctx.marks.items[@intCast(ctx.nMarks() - 2)].next = ctx.nMarks() - 1;
+                    ctx.marks.items[@intCast(ctx.nMarks() - 1)].prev = ctx.nMarks() - 2;
+                    off = bind_end;
+                    if (off > line.*.end) {
+                        line = md_lookup_line(off, lines, &line_index);
+                    }
+                    continue :scan;
                 }
                 off += 1;
                 continue :scan;
@@ -2583,6 +2614,22 @@ pub fn md_process_inlines(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                         }
                     }
                 },
+
+                // Interpolation run: one verbatim text callback for the whole
+                // `{{ ... }}`, newlines included. The opener's `end` is moved
+                // past the closer so the loop skips the interior and the
+                // closer mark alike (the same trick as a footnote reference).
+                '{' => {
+                    const closer: [*c]MD_MARK = &ctx.marks.items[@intCast(mark.*.next)];
+                    ret = if (ctx.in_table_cell)
+                        md_emit_verbatim_text(ctx, c.TextType.binding, mark.*.beg, closer.*.end)
+                    else
+                        mdText(ctx, c.TextType.binding, ctx.str(mark.*.beg), closer.*.end - mark.*.beg);
+                    if (ret != 0) return ret;
+                    mark.*.end = closer.*.end;
+                    while (mark.*.end > line.*.end and @intFromPtr(line) < @intFromPtr(&lines[lines.len - 1])) line += 1;
+                },
+                '}' => {},
 
                 '<', '>' => {
                     if (mark.*.flags & MarkFlags.autolink == 0) {

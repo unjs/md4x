@@ -498,6 +498,9 @@ fn render_attribute(r: *MD_HTML, attr: *const c.Attribute, fn_append: AppendFn) 
         switch (ttype) {
             c.TextType.nullchar => render_utf8_codepoint(r, 0x0000, render_verbatim),
             c.TextType.entity => render_entity(r, text, size, fn_append),
+            // `{{ expr }}` in a destination or title: the template engine
+            // substitutes it, so neither URL- nor HTML-escaping applies.
+            c.TextType.binding => render_verbatim(r, text, size),
             else => fn_append(r, text, size),
         }
     }
@@ -1623,6 +1626,9 @@ fn text_callback(text_type: c.TextType, text_slice: []const c.MD_CHAR, userdata:
         else
             render_html_escaped(r, text, size),
         c.TextType.entity => render_entity(r, text, size, render_html_escaped),
+        // `{{ expr }}`: verbatim everywhere, alt="..." included — a template
+        // engine substitutes the run before a browser sees the attribute.
+        c.TextType.binding => render_verbatim(r, text, size),
         else => render_html_escaped(r, text, size),
     }
 
