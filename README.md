@@ -150,49 +150,49 @@ This is also what `md4x` and `md4x/wasm` resolve to under the **`browser`** expo
 ```
 bun packages/md4x/bench/index.mjs
 cpu: Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz
-runtime: bun 1.3.14 (x64-linux)
+runtime: bun 1.4.2 (x64-linux)
 
 benchmark                        avg (min … max) p75 / p99    (min … top 1%)
-md4x.napi (renderToHtml)            6.78 µs/iter   6.82 µs   6.88 µs ▃▃██▆▆▆▆█▃▃
-md4x.wasm (renderToHtml)           15.15 µs/iter  15.70 µs  31.72 µs █▄▃▂▂▁▁▁▁▁▁
-md4w (renderToHtml)                17.56 µs/iter  18.23 µs  38.41 µs ▆█▆▂▂▁▁▁▁▁▁
-markdown-it (renderToHtml)         59.77 µs/iter  69.44 µs 143.41 µs ██▂▃▃▂▁▁▁▁▁
-markdown-exit (renderToHtml)       56.02 µs/iter  54.56 µs 125.47 µs ▃█▂▁▁▁▁▁▁▁▁
-satteri (renderToHtml)             26.31 µs/iter  27.21 µs  47.39 µs ▄█▅▃▂▁▁▁▁▁▁
-ox-content (renderToHtml)          11.11 µs/iter  11.30 µs  11.56 µs ▃█▆▆▁▁▁▃▁▃▃
-qip.wasm (renderToHtml)            21.57 µs/iter  21.71 µs  37.39 µs █▆▃▂▁▁▁▁▁▁▁
+md4x.napi (renderToHtml)            7.38 µs/iter   7.43 µs   7.47 µs ▆█▆▁▆▃▆▃▃▆▆
+md4x.wasm (renderToHtml)           15.08 µs/iter  15.41 µs  30.75 µs █▅▃▂▁▁▁▁▁▁▁
+md4w (renderToHtml)                17.40 µs/iter  17.71 µs  37.11 µs ▄█▅▂▁▁▁▁▁▁▁
+markdown-it (renderToHtml)         72.68 µs/iter  73.10 µs 191.23 µs █▇▃▂▂▁▁▁▁▁▁
+markdown-exit (renderToHtml)       53.66 µs/iter  55.23 µs 106.47 µs ▁█▃▂▂▂▁▁▁▁▁
+satteri (renderToHtml)             14.84 µs/iter  15.52 µs  27.61 µs █▇▅▂▂▁▁▁▁▁▁
+ox-content (renderToHtml)          12.72 µs/iter  13.52 µs  22.70 µs ██▅▃▂▁▁▁▁▁▁
+qip.wasm (renderToHtml)            20.17 µs/iter  20.45 µs  34.41 µs █▅▃▁▁▁▁▁▁▁▁
 
 summary
   md4x.napi (renderToHtml)
-   1.64x faster than ox-content (renderToHtml)
-   2.23x faster than md4x.wasm (renderToHtml)
-   2.59x faster than md4w (renderToHtml)
-   3.18x faster than qip.wasm (renderToHtml)
-   3.88x faster than satteri (renderToHtml)
-   8.26x faster than markdown-exit (renderToHtml)
-   8.81x faster than markdown-it (renderToHtml)
+   1.72x faster than ox-content (renderToHtml)
+   2.01x faster than satteri (renderToHtml)
+   2.05x faster than md4x.wasm (renderToHtml)
+   2.36x faster than md4w (renderToHtml)
+   2.73x faster than qip.wasm (renderToHtml)
+   7.28x faster than markdown-exit (renderToHtml)
+   9.85x faster than markdown-it (renderToHtml)
 
-md4x.napi (parseAST) (medium)      23.24 µs/iter  25.51 µs  27.39 µs █▆▁▃▆▁▁▁▃▁▆
-md4x.wasm (parseAST) (medium)      31.88 µs/iter  33.05 µs  62.20 µs ▆█▆▃▂▁▁▁▁▁▁
-md4w (parseAST) (medium)           24.94 µs/iter  26.10 µs  26.99 µs ▃▃█▃▃▃▁▁▆▁▃
-markdown-it (parseAST) (medium)    41.26 µs/iter  43.17 µs  72.22 µs ▃█▅▂▂▂▂▁▁▁▁
-markdown-exit (parseAST) (medium)  35.42 µs/iter  36.24 µs  36.58 µs ▅▅▁█▅█▁▁▅█▅
-satteri (parseAST) (medium)        22.31 µs/iter  22.85 µs  39.60 µs ▂█▃▂▂▁▁▁▁▁▁
-ox-content (parseAST) (medium)     24.21 µs/iter  26.36 µs  26.69 µs ██▁▅▁▅▅▁▅█▅
+md4x.napi (parseAST) (medium)      21.16 µs/iter  21.80 µs  34.83 µs ▆█▇▂▂▁▁▁▁▁▁
+md4x.wasm (parseAST) (medium)      28.12 µs/iter  28.56 µs  45.51 µs ▄█▅▂▂▂▁▁▁▁▁
+md4w (parseAST) (medium)           23.07 µs/iter  23.53 µs  24.73 µs ██▃▁▃▃▃▁▁▁▃
+markdown-it (parseAST) (medium)    50.44 µs/iter  51.52 µs  53.98 µs ▃▃█▃▃▁▃▃▁▁▃
+markdown-exit (parseAST) (medium)  30.15 µs/iter  30.70 µs  31.38 µs ▃▃▁▁▆█▁▃▃▃▃
+satteri (parseAST) (medium)        32.27 µs/iter  32.38 µs  67.77 µs ▂█▃▂▁▁▁▁▁▁▁
+ox-content (parseAST) (medium)     17.54 µs/iter  18.19 µs  18.72 µs ▃▃█▆▁▁▃▁▃▁▆
 
 summary
-  satteri (parseAST) (medium)
-   1.04x faster than md4x.napi (parseAST) (medium)
-   1.09x faster than ox-content (parseAST) (medium)
-   1.12x faster than md4w (parseAST) (medium)
-   1.43x faster than md4x.wasm (parseAST) (medium)
-   1.59x faster than markdown-exit (parseAST) (medium)
-   1.85x faster than markdown-it (parseAST) (medium)
+  ox-content (parseAST) (medium)
+   1.21x faster than md4x.napi (parseAST) (medium)
+   1.32x faster than md4w (parseAST) (medium)
+   1.6x faster than md4x.wasm (parseAST) (medium)
+   1.72x faster than markdown-exit (parseAST) (medium)
+   1.84x faster than satteri (parseAST) (medium)
+   2.88x faster than markdown-it (parseAST) (medium)
 ```
 
 Notes:
 
-- The `parseAST` group at the top (satteri, md4x.napi, ox-content, md4w) sits within ~12% of each other, which is inside run-to-run noise on this machine — repeat runs reorder them. Treat them as tied; the clear gaps are further down the list.
+- The `parseAST` group at the top (ox-content, md4x.napi, md4w) sits within ~20% of each other, which is close to run-to-run noise on this machine — repeat runs reorder them. Treat them as roughly tied; the clear gaps are further down the list.
 - The parsers do not all return the same thing: markdown-it yields a flat array of tokens where md4x returns a nested comark AST, satteri's mdast carries full `position` data on every node, and ox-content hands back the tree as a JSON string (the bench `JSON.parse`s it so every entry ends at a materialized tree).
 - ox-content ships with GFM off, so the bench passes `{ gfm: true }` to put it on the same fixture as the rest.
 - [qip](https://qip.dev/markdown-to-html) is the `gfm-commonmark.0.31.2` WASM component, not an npm package — the bench fetches it once into `bench/.cache/` (gitignored) and skips the entry if the download fails. It renders through fixed 2 MiB in/out buffers with no imports, and exposes HTML only, so it does not appear in the `parseAST` group.
@@ -294,35 +294,35 @@ renderToHtml("# Hello **world", { heal: true, full: true });
 ```
 bun packages/md4x/bench/heal.mjs
 cpu: Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz
-runtime: bun 1.3.14 (x64-linux)
+runtime: bun 1.4.2 (x64-linux)
 
 benchmark                   avg (min … max) p75 / p99    (min … top 1%)
-md4x-napi heal (small)         1.28 µs/iter   1.32 µs   1.81 µs ▃█▂▂▁▂▁▁▁▂▁
-md4x-wasm heal (small)         3.34 µs/iter   3.08 µs   9.29 µs █▃▁▂▁▁▁▁▁▁▁
-remend heal (small)            9.09 µs/iter   9.77 µs  22.17 µs ██▅▃▂▂▁▁▁▁▁
+md4x-napi heal (small)         1.23 µs/iter   1.22 µs   1.79 µs ▇█▂▁▁▁▁▁▁▁▁
+md4x-wasm heal (small)         1.80 µs/iter   1.80 µs   2.16 µs ▆█▃▂▁▁▁▁▁▁▁
+remend heal (small)            3.16 µs/iter   3.17 µs   9.27 µs █▄▂▁▁▁▁▁▁▁▁
 
 summary
   md4x-napi heal (small)
-   2.61x faster than md4x-wasm heal (small)
-   7.12x faster than remend heal (small)
+   1.47x faster than md4x-wasm heal (small)
+   2.57x faster than remend heal (small)
 
-md4x-napi heal (medium)        3.21 µs/iter   3.24 µs   3.39 µs ▄█▆▄▃▂▂▂▄▂▂
-md4x-wasm heal (medium)        4.40 µs/iter   4.45 µs   4.93 µs █▅█▅▅▃▁▂▁▁▂
-remend heal (medium)          53.67 µs/iter  57.84 µs  78.92 µs █▅▂▃▃▂▁▁▁▁▁
+md4x-napi heal (medium)        3.14 µs/iter   3.16 µs   3.44 µs ▃▂▅█▃▁▁▁▁▁▁
+md4x-wasm heal (medium)        4.17 µs/iter   4.26 µs   4.38 µs ▅▅▂▁▂▃█▆▅▃▃
+remend heal (medium)          19.24 µs/iter  18.97 µs  32.81 µs █▇▂▂▁▁▂▁▁▁▁
 
 summary
   md4x-napi heal (medium)
-   1.37x faster than md4x-wasm heal (medium)
-   16.71x faster than remend heal (medium)
+   1.33x faster than md4x-wasm heal (medium)
+   6.12x faster than remend heal (medium)
 
-md4x-napi heal (large)       147.94 µs/iter 148.21 µs 229.58 µs ▅█▃▁▁▁▁▁▁▁▁
-md4x-wasm heal (large)       175.43 µs/iter 177.00 µs 292.66 µs ▄█▂▁▁▁▁▁▁▁▁
-remend heal (large)           18.63 ms/iter  18.79 ms  19.46 ms ▅▂▅█▂▄▂▂▁▁▂
+md4x-napi heal (large)       148.63 µs/iter 147.74 µs 230.79 µs ▂█▂▁▁▁▁▁▁▁▁
+md4x-wasm heal (large)       184.50 µs/iter 186.32 µs 259.67 µs ▅▆█▂▁▁▁▁▁▁▁
+remend heal (large)          603.85 µs/iter 604.93 µs 762.44 µs ▃█▃▂▁▁▁▁▁▁▁
 
 summary
   md4x-napi heal (large)
-   1.19x faster than md4x-wasm heal (large)
-   125.91x faster than remend heal (large)
+   1.24x faster than md4x-wasm heal (large)
+   4.06x faster than remend heal (large)
 ```
 
 </details>
@@ -348,32 +348,32 @@ yamlToJson("title: Hello"); // '{"title":"Hello"}'  (raw JSON string)
 ```
 bun packages/md4x/bench/yaml.mjs
 cpu: Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz
-runtime: bun 1.3.14 (x64-linux)
+runtime: bun 1.4.2 (x64-linux)
 
 benchmark                      avg (min … max) p75 / p99    (min … top 1%)
-md4x.napi (parseYAML) (medium)   22.34 µs/iter  22.32 µs  22.35 µs ▆▁▆▁▁▁▃▆▃▁█
-md4x.wasm (parseYAML) (medium)   41.11 µs/iter  49.34 µs  80.21 µs ▄█▃▂▂▂▂▂▁▁▁
-js-yaml (parseYAML) (medium)     50.69 µs/iter  53.59 µs  98.25 µs ▅█▅▃▂▂▂▂▁▁▁
-yaml (parseYAML) (medium)       377.44 µs/iter 392.99 µs 728.75 µs ▃█▃▂▁▁▂▂▂▁▁
-confbox (parseYAML) (medium)     40.27 µs/iter  43.47 µs  44.08 µs ▅▅█▅▅▅▅▁▁▅█
+md4x.napi (parseYAML) (medium)   21.87 µs/iter  21.80 µs  22.98 µs ▅▃▃▃▃█▁▁▁▁▃
+md4x.wasm (parseYAML) (medium)   31.16 µs/iter  33.67 µs  34.15 µs ▅█▅▁█▅▅▁▁█▅
+js-yaml (parseYAML) (medium)     46.59 µs/iter  46.55 µs  83.79 µs ▃█▄▂▁▁▁▁▁▁▁
+yaml (parseYAML) (medium)       292.90 µs/iter 301.71 µs 527.77 µs ▂█▄▂▂▁▁▁▁▁▁
+confbox (parseYAML) (medium)     44.69 µs/iter  45.34 µs  76.02 µs ▃█▅▂▁▁▁▁▁▁▁
 
 summary
   md4x.napi (parseYAML) (medium)
-   1.8x faster than confbox (parseYAML) (medium)
-   1.84x faster than md4x.wasm (parseYAML) (medium)
-   2.27x faster than js-yaml (parseYAML) (medium)
-   16.89x faster than yaml (parseYAML) (medium)
+   1.42x faster than md4x.wasm (parseYAML) (medium)
+   2.04x faster than confbox (parseYAML) (medium)
+   2.13x faster than js-yaml (parseYAML) (medium)
+   13.39x faster than yaml (parseYAML) (medium)
 
-md4x.napi (yamlToJson) (medium)  17.78 µs/iter  17.83 µs  19.29 µs ▂▂▂▂█▂▁▁▁▁▂
-md4x.wasm (yamlToJson) (medium)  28.63 µs/iter  29.35 µs  29.61 µs ▃▁▁▁▆▁▁█▆▆▃
-js-yaml (yamlToJson) (medium)    44.24 µs/iter  43.28 µs  47.30 µs ▂▂█▂▁▁▁▁▁▁▂
-yaml (yamlToJson) (medium)      321.22 µs/iter 310.31 µs 644.56 µs ▅█▂▁▁▁▁▁▁▁▁
+md4x.napi (yamlToJson) (medium)  17.24 µs/iter  17.36 µs  17.45 µs ▅▁▁█▁█▅▅▅█▅
+md4x.wasm (yamlToJson) (medium)  24.42 µs/iter  24.81 µs  25.12 µs ▃▁▁▁▆█▃▁▃▃▆
+js-yaml (yamlToJson) (medium)    43.13 µs/iter  43.01 µs  45.38 µs ▆▁▆▆█▁▁▃▁▁▃
+yaml (yamlToJson) (medium)      253.26 µs/iter 253.56 µs 412.91 µs ▂█▃▂▁▁▁▁▁▁▁
 
 summary
   md4x.napi (yamlToJson) (medium)
-   1.61x faster than md4x.wasm (yamlToJson) (medium)
-   2.49x faster than js-yaml (yamlToJson) (medium)
-   18.07x faster than yaml (yamlToJson) (medium)
+   1.42x faster than md4x.wasm (yamlToJson) (medium)
+   2.5x faster than js-yaml (yamlToJson) (medium)
+   14.69x faster than yaml (yamlToJson) (medium)
 ```
 
 Notes:
