@@ -128,6 +128,9 @@ unchanged, and OOM must stay indistinguishable from a callback's `-1`.
   parse (one linear pass, lazily on the first candidate) and then queried by
   binary search, so a candidate never re-scans the document — unbalanced or
   deeply nested braces stay linear
+- Permissive autolinks: the URL tail scan is memoized, so a run of candidates
+  whose tails all reach the same failing end (`www.x.yy#(` repeated) walks it
+  once rather than once per candidate
 
 **Callback sequence example** for `* foo **bar [link](http://example.com) baz**`:
 

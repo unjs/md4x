@@ -147,6 +147,18 @@ pathological = {
     "many broken permissive autolinks":
             (("www._" * 50000 + "x"),
             re.compile("<p>(www._){50000}x</p>")),
+    # md4c #464: every candidate's URL tail runs to the same failing end.
+    "many invalid autolinks":
+            (("www.xx.xx#(" * 20000 + "[x]()"),
+            re.compile(r"<p>(www.xx.xx#\(){20000}<a href=\"\">x</a></p>")),
+    # The same, ending on a `)` whose trimming depends on where the tail
+    # began (what md4c's horizon gets wrong), and on a control character.
+    "many invalid autolinks, closing paren":
+            (("http://a.b/(" * 20000 + ")`x`"),
+            re.compile(r"<p>(http://a.b/\(){20000}\)<code>x</code></p>")),
+    "many invalid autolinks, control character":
+            (("www.xx.xx/(" * 20000 + "\x01"),
+            re.compile(r"<p>(www.xx.xx/\(){20000}\x01</p>")),
     "huge table":
             (("th|" * 10000 + "\n" + "-|" * 10000 + "\n" + "td\n" * 10000),
             re.compile("")),

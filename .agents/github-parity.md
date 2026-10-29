@@ -82,7 +82,7 @@ inlines and md4x deliberately does not.
 
 ## Baseline — whole corpus re-recorded 2026-08-16
 
-798 cases. Parity by suite:
+816 cases. Parity by suite:
 
 | suite                           | parity  |
 | ------------------------------- | ------- |
@@ -90,7 +90,7 @@ inlines and md4x deliberately does not.
 | `spec-gfm.txt`                  | 15/18   |
 | `spec-tables.txt`               | 15/20   |
 | `spec-strikethrough.txt`        | 5/5     |
-| `spec-permissive-autolinks.txt` | 9/15    |
+| `spec-permissive-autolinks.txt` | 17/33   |
 | `spec-footnotes.txt`            | 9/36    |
 | `spec-alerts.txt`               | 11/43   |
 | `spec-tasklists.txt`            | 1/9     |
@@ -99,18 +99,25 @@ Divergences by cause:
 
 | cause              |   n | meaning                                                              |
 | ------------------ | --: | -------------------------------------------------------------------- |
-| `markup-shape`     |  63 | same words, different wrapper markup — the actionable bucket         |
+| `markup-shape`     |  64 | same words, different wrapper markup — the actionable bucket         |
 | `sanitizer`        |  62 | GitHub's HTML sanitizer rewrote or dropped raw HTML — **not a goal** |
-| `unclassified`     |  23 | triaged below                                                        |
-| `entity-escaping`  |  21 | `&quot;` vs `"` re-serialization — **not a goal**                    |
+| `unclassified`     |  28 | triaged below                                                        |
+| `entity-escaping`  |  23 | `&quot;` vs `"` re-serialization — **not a goal**                    |
 | `md4x-extension`   |   5 | md4x syntax GitHub does not have — **not a goal**                    |
 | `scheme-allowlist` |   7 | GitHub only linkifies known URL schemes — **not a goal**             |
-| `autolink-rules`   |   5 | which characters may border an autolink — **not a goal**             |
+| `autolink-rules`   |   6 | which characters may border an autolink — **not a goal**             |
+| `url-encoding`     |   1 | an entity in a bare URL's href — triaged below                       |
 | `unicode-punct`    |   2 | GitHub's older Unicode tables — **not a goal**                       |
 
-The headline number is misleading on its own and should never be quoted bare: 102 of the
-188 divergences are causes md4x will not chase, and `spec.txt`'s 545/652 is almost
+The headline number is misleading on its own and should never be quoted bare: 105 of the
+198 divergences are causes md4x will not chase, and `spec.txt`'s 545/652 is almost
 entirely `sanitizer` plus `entity-escaping`. The number that matters is `unclassified`.
+
+Whole-baseline `--update` run, 2026-10, after the md4c permissive-autolink port
+(`5893c54` … `f9e5eb2`): only `spec-permissive-autolinks.txt` moved, 15 → 33 cases as the
+upstream examples came in, 9/15 → 17/33. Of the 18 new cases 8 match GitHub and 10 do
+not; each of the 10 is filed below ([border rules](#autolink-border-rules-6),
+[unclassified](#unclassified-28--triaged-still-open)). Every other suite is unchanged.
 
 Whole-baseline `--update` run, 2026-08-16, after the `\|` unescape in table cells (below).
 Three suites moved and nothing else did: `spec-gfm.txt` gained upstream example 200, which
@@ -123,7 +130,7 @@ keep re-recording the whole thing.
 
 ## Not goals
 
-Six causes, 102 of 188 divergences. Chasing any of them makes md4x worse.
+Six causes, 105 of 198 divergences. Chasing any of them makes md4x worse.
 
 ### GitHub's HTML sanitizer (62)
 
@@ -163,7 +170,7 @@ only opens a block when YAML follows it, and a block with no bytes between its f
 two thematic breaks. Removing wiki links took the rest. Frontmatter no longer costs a
 single divergence here or in CommonMark; see `docs/compatibility.md`.
 
-### Entity re-serialization (21)
+### Entity re-serialization (23)
 
 GitHub parses its own output and re-serializes it, which unescapes `&quot;` back to `"`
 in text where CommonMark leaves it escaped. The two are equivalent HTML. md4x follows the
@@ -182,7 +189,7 @@ GitHub only linkifies a fixed set of URL schemes; CommonMark allows any, and md4
 CommonMark. Scored by comparing the two `href` **sets**: a document usually mixes an
 `ftp://` autolink GitHub declines with `http://` ones it accepts, and the old "GitHub
 produced no link at all" guard therefore missed three of these
-(`spec-permissive-autolinks.txt` 9 and 13, `spec-gfm.txt` 14).
+(`spec-permissive-autolinks.txt` 9 and 17, `spec-gfm.txt` 14).
 
 The rule fires only when every extra link is a genuine autolink — an anchor whose text
 _is_ its href. `spec.txt#500` (`[link](foo\)\:)`) used to slip in because its href has no
@@ -190,18 +197,18 @@ recognised scheme, but it is an ordinary inline link that GitHub's URL filter dr
 it now scores as `markup-shape`. Likewise `spec-tables.txt#16`, where the extra href is
 GitHub's camo image proxy wrapping an `<img>`.
 
-### Autolink border rules (5)
+### Autolink border rules (6)
 
 md4x inherits md4c's rules for what may sit next to, and inside, a permissive autolink;
 GitHub's are not the same set, and GitHub is consistently the more permissive one. All
-five are pinned as deliberate by `test/spec-permissive-autolinks.txt`, and four of them
-are additionally CommonMark-exact.
+six are pinned as deliberate, by `test/spec-permissive-autolinks.txt` or `test/spec.txt`.
 
 | case                               | md4x declines because                                                             |
 | ---------------------------------- | --------------------------------------------------------------------------------- |
 | `spec-permissive-autolinks.txt#3`  | `:` precedes; only `(`, `{`, `[` and opening emphasis may                         |
 | `spec-permissive-autolinks.txt#8`  | a literal `*` precedes (an emphasis _opener_ may, a literal one may not)          |
-| `spec-permissive-autolinks.txt#15` | `__` in the local part — every non-alphanumeric must be bordered by alphanumerics |
+| `spec-permissive-autolinks.txt#32` | `www.localhost` — without a scheme the host needs two components (md4c `3da1937`) |
+| `spec-permissive-autolinks.txt#33` | `__` in the local part — every non-alphanumeric must be bordered by alphanumerics |
 | `spec.txt#602`, `spec.txt#606`     | `<` precedes; both are CommonMark-exact, and GitHub is the outlier                |
 
 Worth revisiting only if users report the opposite: the rules exist to stop autolinks
@@ -215,7 +222,7 @@ md4x. **md4x is the more current one**; this will resolve itself when GitHub upg
 
 ## Open — the actionable gap
 
-### `markup-shape` (63) — scaffolding differs
+### `markup-shape` (64) — scaffolding differs
 
 Both renderers understood the syntax; the wrapper around it differs. Cosmetic to a
 reader, load-bearing for anyone styling md4x output with GitHub's CSS. Whether to chase
@@ -272,7 +279,7 @@ these is a product decision nobody has taken.
   that is literally true; the cause is GitHub's href policy, which is the same hosting
   concern as [the sanitizer](#githubs-html-sanitizer-62). Nothing to chase.
 
-### `unclassified` (23) — triaged, still open
+### `unclassified` (28) — triaged, still open
 
 Real behavioural differences. Three are GitHub being wrong; one (`spec-tables.txt#18`) is
 md4x departing from the GFM spec on purpose.
@@ -354,16 +361,26 @@ The rest are structural: an alert with no body (#9), one containing a fenced blo
 nested alert (#27), one inside a list item (#28), and `>[!tip]\n>-` where the `-` is a
 setext underline to GitHub and a list to md4x (#22).
 
-**Footnotes (6), autolinks (1) and CommonMark core (1).**
+**Footnotes (6), autolinks (6) and CommonMark core (1).**
 
-| case                              | difference                                                                                                                                           |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `spec-footnotes.txt#7, #36, #37`  | md4x numbers footnote anchors (`fn-1`); GitHub derives them from the **label** (`fn-a`, `fn-ünï`). Affects any deep link into a rendered document.   |
-| `spec-footnotes.txt#31`           | A footnote ref inside a link: md4x nests it correctly, GitHub breaks the link apart. **GitHub is wrong.**                                            |
-| `spec-footnotes.txt#34`           | `[^nf]:` on the line after a paragraph: md4x keeps it as text, GitHub **drops the content entirely**. **GitHub is wrong.**                           |
-| `spec-footnotes.txt#27`           | A footnote inside an alert. Nothing new: it is the `<blockquote>`-not-`<div>` decision and the `fn-1` numbering above, landing in one case.          |
-| `spec-permissive-autolinks.txt#5` | `www.example.com}` — md4x stops the URL at the `}`, GitHub swallows it into the href (`…com%7D`). md4x's is the more useful reading; **not a goal**. |
-| `spec.txt#28`                     | `&#87654321;` (out of range): CommonMark says leave it literal, md4x does, GitHub emits U+FFFD. **GitHub is wrong.**                                 |
+| case                               | difference                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spec-footnotes.txt#7, #36, #37`   | md4x numbers footnote anchors (`fn-1`); GitHub derives them from the **label** (`fn-a`, `fn-ünï`). Affects any deep link into a rendered document.                                                                                                                                                                               |
+| `spec-footnotes.txt#31`            | A footnote ref inside a link: md4x nests it correctly, GitHub breaks the link apart. **GitHub is wrong.**                                                                                                                                                                                                                        |
+| `spec-footnotes.txt#34`            | `[^nf]:` on the line after a paragraph: md4x keeps it as text, GitHub **drops the content entirely**. **GitHub is wrong.**                                                                                                                                                                                                       |
+| `spec-footnotes.txt#27`            | A footnote inside an alert. Nothing new: it is the `<blockquote>`-not-`<div>` decision and the `fn-1` numbering above, landing in one case.                                                                                                                                                                                      |
+| `spec-permissive-autolinks.txt#5`  | `www.example.com}` — md4x stops the URL at the `}`, GitHub swallows it into the href (`…com%7D`). md4x's is the more useful reading; **not a goal**.                                                                                                                                                                             |
+| `spec-permissive-autolinks.txt#24` | The same rule for a URL tail (md4c `6240bca`): an excess `]` or `}` at its end stays outside (`…/a?x=y}`, `…/a[b]c]`). GitHub trims only `)`, so it swallows both. `[url]` agrees with GitHub. **Not a goal**, as #5.                                                                                                            |
+| `spec-permissive-autolinks.txt#12` | `http://localhost:abc` — only digits make a port (md4c `3da1937`), so md4x links `http://localhost` and leaves `:abc`; GitHub links the whole run up to the whitespace.                                                                                                                                                          |
+| `spec-permissive-autolinks.txt#26` | `…/a\.` — md4x drops the escaped terminal `.` together with its backslash; GitHub keeps the `\` in the link (`…/a%5C`) and drops only the `.`. md4x never splits an escape.                                                                                                                                                      |
+| `spec-permissive-autolinks.txt#29` | `https://…/a?x=%20` + a code span: md4x ends the URL at the resolved span, then rejects it because a code-span opener may not follow; GitHub links on through the backticks (`…%60code%60`).                                                                                                                                     |
+| `spec-permissive-autolinks.txt#30` | An e-mail followed by `*` or `:` — md4x's e-mail follower set is the old strict one (only the URL tail learned `:*_~'"`), GitHub links both.                                                                                                                                                                                     |
+| `spec-permissive-autolinks.txt#25` | Scored `url-encoding`. `&amp;` in a bare URL: both keep it literal in the link text, but md4x (as md4c) resolves it in the href and GitHub does not (`?a=b&amp;amp;c=d`). Within one link the two halves disagree, the asymmetry [`upstream-sync.md`](upstream-sync.md) fixed for bracketed autolinks the other way round. Open. |
+
+`spec-permissive-autolinks.txt#27` (an NBSP or EM SPACE ends a bare URL in md4x, GitHub
+keeps both inside it) scores as `markup-shape`, and `#22`/`#23` (a `"` after or inside a
+URL) as `entity-escaping`; neither needs anything beyond those buckets.
+| `spec.txt#28` | `&#87654321;` (out of range): CommonMark says leave it literal, md4x does, GitHub emits U+FFFD. **GitHub is wrong.** |
 
 `spec.txt#180` and `#629` used to sit in this table as sanitizer cases the classifier could
 not reach. It reaches them now — see [sanitizer](#githubs-html-sanitizer-62).

@@ -316,6 +316,26 @@ pub const MD_MARKSTACK = struct {
     top: c_int = -1,
 };
 
+// The URL tail a permissive autolink scanned last: `[beg, end)` plus the
+// bracket tallies over it and a mark cursor valid at each end (signed mark
+// indices, as `inlines.MarkCursor`). Where a tail stops does not depend on
+// where it starts, so a later candidate whose tail begins inside `[beg, end)`
+// stops at `end` too and only has to subtract what lies before its own start.
+// That is what keeps a line of failing candidates linear (md4c #464).
+// `end == 0` is the empty memo. It is cleared whenever the resolved marks it
+// was walked over may have changed: before every permissive-autolink pass
+// (`md_analyze_link_contents`) and after every autolink that resolves.
+pub const MD_PERMISSIVE_AUTOLINK_TAIL = struct {
+    beg: OFF = 0,
+    end: OFF = 0,
+    // The line (or table cell) end the scan was bounded by.
+    line_end: OFF = 0,
+    cursor_beg: isize = 0,
+    cursor_end: isize = 0,
+    // `(` `)` `[` `]` `{` `}`, in that order.
+    n_brackets: [6]c_int = .{ 0, 0, 0, 0, 0, 0 },
+};
+
 pub const MD_BLOCK_COMPONENT_INFO = struct {
     colon_count: c_uint = 0, // Number of colons in the opener fence (2+).
     name_beg: OFF = 0, // Offset of component name in source.
@@ -471,6 +491,9 @@ pub const MD_CTX = struct {
     // later `{{` in the same block cannot find one either, so it is not
     // searched again (a line of `{` was quadratic without this).
     binding_horizon: OFF = 0,
+    // For permissive autolinks: the last URL tail scanned. See
+    // `inlines.md_analyze_permissive_autolink`.
+    permissive_autolink_tail: MD_PERMISSIVE_AUTOLINK_TAIL = .{},
 
     // For block analysis. Holds MD_BLOCK as well as MD_LINE structures.
     block_bytes: ?*anyopaque = null,

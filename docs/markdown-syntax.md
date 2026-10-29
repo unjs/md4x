@@ -107,9 +107,15 @@ Interactions with the other MD4X extensions:
 
 ## Extension: Permissive Autolinks
 
-- **URL**: `https://example.com`
-- **Email**: `john@example.com`
-- **WWW**: `www.example.com`
+- **URL**: `https://example.com` — `http`, `https` and `ftp` only; a single-label host
+  (`http://localhost`) and a numeric port (`:3000`) are accepted
+- **Email**: `john@example.com`, also with an explicit `mailto:` or `xmpp:` in front
+- **WWW**: `www.example.com` — the host needs at least two labels
+
+After the host, a path, query or fragment runs to the next whitespace, `<`, control
+character or Markdown syntax (an entity reference or backslash escape is part of the
+URL), then trailing `?!.,:;*_~'"`, a trailing entity and an excess closing `)`, `]` or
+`}` are left outside the link. `test/spec-permissive-autolinks.txt` has the full rules.
 
 ## Extension: LaTeX Math
 

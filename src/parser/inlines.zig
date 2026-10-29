@@ -1816,19 +1816,19 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
                 var first_nested_i: c_int = opener_index + 1;
                 while (ctx.marks.items[@intCast(first_nested_i)].ch == 'D' and first_nested_i < closer_index) first_nested_i += 1;
 
-                // NOTE: the C loop condition tests first_nested->ch (md4c quirk); preserved verbatim.
-                var last_nested_i: c_int = closer_index - 1;
-                while (ctx.marks.items[@intCast(first_nested_i)].ch == 'D' and last_nested_i > opener_index) last_nested_i -= 1;
-
                 const first_nested = &ctx.marks.items[@intCast(first_nested_i)];
-                const last_nested = &ctx.marks.items[@intCast(last_nested_i)];
 
+                // The autolink closer is not necessarily the last mark before
+                // the closer bracket: resolved entity or escape marks may live
+                // inside the autolink, so follow the opener's `next`. Ports md4c
+                // 775e87e (which also drops the old last-mark loop, whose
+                // condition tested `first_nested` and never iterated).
                 if ((first_nested.flags & MarkFlags.resolved != 0) and
                     first_nested.beg == opener.end and
                     ISANYOF_(first_nested.ch, "@:.") and
-                    first_nested.next == last_nested_i and
-                    last_nested.end == closer.beg)
+                    ctx.marks.items[@intCast(first_nested.next)].end == closer.beg)
                 {
+                    const last_nested = &ctx.marks.items[@intCast(first_nested.next)];
                     first_nested.ch = 'D';
                     first_nested.flags &= ~MarkFlags.resolved;
                     last_nested.ch = 'D';
@@ -2212,9 +2212,19 @@ fn md_analyze_permissive_autolink_segment(
         if (!scan_backwards) off += 1;
     }
 
-    // Rollback falsely consumed delimiter.
-    if (seen_word_delim or seen_component_delim)
-        off = if (scan_backwards) off + 1 else off - 1;
+    // Rollback falsely consumed delimiter. A segment that consumed nothing has
+    // nothing to roll back (`http://?q=1` must not end its host before the
+    // `//`). Ports md4c 1645761.
+    //
+    // The run can end in two delimiters, a component delimiter and then a
+    // word delimiter (`ex.com._`, `a@ex.com.-`; every other pair breaks the
+    // loop before its second character), and then both go: md4c rolls back
+    // only the last, which ends the host on a `.` -- a link to `http://ex.com.`
+    // once the URL tail accepts `_` as a follower. md4x-only.
+    if (off != component_beg and (seen_word_delim or seen_component_delim)) {
+        const n_rollback: OFF = if (seen_word_delim and seen_component_delim) 2 else 1;
+        off = if (scan_backwards) off + n_rollback else off - n_rollback;
+    }
 
     if (off != component_beg) n_components += 1;
 
@@ -2222,6 +2232,96 @@ fn md_analyze_permissive_autolink_segment(
 
     p_end.* = off;
     return n_components;
+}
+
+// One step of the URL-tail walk below, from `off`: where the next step starts,
+// or null if `off` ends the tail -- whitespace, `<`, an ASCII control, or a
+// resolved mark other than an entity reference or a backslash escape (those are
+// a few characters of the URL, as in a standard autolink, and are stepped over
+// whole). `slot` is the bracket tally `off` adds to (see
+// MD_PERMISSIVE_AUTOLINK_TAIL), or null. Whether a step ends the tail depends
+// on `off` alone, never on where the walk began.
+const PermissiveAutolinkTailStep = struct { next: OFF, slot: ?u3 };
+
+fn md_permissive_autolink_tail_step(ctx: *MD_CTX, off: OFF, cursor: *MarkCursor) ?PermissiveAutolinkTailStep {
+    var char_size: SZ = 1;
+    const codepoint = util.md_decode_utf8(ctx.str(off), ctx.size - off, &char_size);
+
+    if (util.md_is_unicode_whitespace(codepoint) or codepoint == '<' or codepoint < 0x20 or codepoint == 0x7f)
+        return null;
+    if (codepoint >= 128) return .{ .next = off + char_size, .slot = null };
+
+    if (!ctx.isAlnum(off)) {
+        if (md_scan_right_for_resolved_mark(ctx, cursor.*, off, cursor)) |mark| {
+            if (mark.ch == '&' or (mark.ch == '\\' and !ctx.isNewline(mark.beg + 1)))
+                return .{ .next = mark.end, .slot = null };
+            return null;
+        }
+    }
+
+    const slot: ?u3 = switch (ctx.ch(off)) {
+        '(' => 0,
+        ')' => 1,
+        '[' => 2,
+        ']' => 3,
+        '{' => 4,
+        '}' => 5,
+        else => null,
+    };
+    return .{ .next = off + 1, .slot = slot };
+}
+
+// Scans the URL tail beginning at `tail_beg` and leaves it in
+// `ctx.permissive_autolink_tail`. A tail beginning inside the memoized one
+// shares its end, so only the stretch between the two starts is walked again,
+// to take its brackets back out of the tallies; that keeps a line of failing
+// candidates linear (md4c #464, "www.xx.xx#(" x 20000 + "[x]()").
+//
+// md4c f9e5eb2 fixes the same blow-up with a horizon instead -- reject any
+// candidate whose host ends before the place an earlier candidate failed --
+// which does not hold: a later candidate's tail can trim a `)` the earlier one
+// could not (`http://a.b/(http://c.d/x)` + a code span), and the horizon
+// outlives the link-contents pass it was set in, so a failure inside a link's
+// text rejects every bare URL before the link in the same paragraph.
+fn md_permissive_autolink_scan_tail(ctx: *MD_CTX, tail_beg: OFF, line_end: OFF, cursor_in: MarkCursor) void {
+    const memo = &ctx.permissive_autolink_tail;
+
+    if (memo.line_end == line_end and memo.beg <= tail_beg and tail_beg < memo.end) {
+        var off = memo.beg;
+        var cursor = memo.cursor_beg;
+        var n_brackets = memo.n_brackets;
+        while (off < tail_beg) {
+            const step = md_permissive_autolink_tail_step(ctx, off, &cursor) orelse break;
+            if (step.slot) |s| n_brackets[s] -= 1;
+            off = step.next;
+        }
+        // Every tail begins on an ASCII `/`, `?` or `#` outside any mark, which
+        // is a step boundary of every walk across it; anything else means the
+        // memo does not describe this tail, so fall through to a fresh scan.
+        if (off == tail_beg) {
+            memo.beg = tail_beg;
+            memo.cursor_beg = cursor;
+            memo.n_brackets = n_brackets;
+            return;
+        }
+    }
+
+    var off = tail_beg;
+    var cursor = cursor_in;
+    var n_brackets: [6]c_int = .{ 0, 0, 0, 0, 0, 0 };
+    while (off < line_end) {
+        const step = md_permissive_autolink_tail_step(ctx, off, &cursor) orelse break;
+        if (step.slot) |s| n_brackets[s] += 1;
+        off = step.next;
+    }
+    memo.* = .{
+        .beg = tail_beg,
+        .end = off,
+        .line_end = line_end,
+        .cursor_beg = cursor_in,
+        .cursor_end = cursor,
+        .n_brackets = n_brackets,
+    };
 }
 
 // md4x.c ~4459.
@@ -2234,11 +2334,22 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
     var end: OFF = opener.end;
     var left_cursor: MarkCursor = mark_index;
     var right_cursor: MarkCursor = mark_index;
+    var tail_trimmed = false;
 
     // E-mail requires the user name (before '@', i.e. scanning backwards).
     if (opener.ch == '@') {
         if (md_analyze_permissive_autolink_segment(ctx, beg, line_beg, &beg, true, 0, "", ".-_+", &left_cursor) < 1)
             return;
+
+        // Swallow an optional "mailto:" or "xmpp:" before it; the link then
+        // already carries its scheme. Ports md4c 5893c54.
+        if (beg - line_beg >= 7 and md_ascii_eq(ctx.str(beg - 7), "mailto:", 7)) {
+            beg -= 7;
+        } else if (beg - line_beg >= 5 and md_ascii_eq(ctx.str(beg - 5), "xmpp:", 5)) {
+            beg -= 5;
+        } else {
+            opener.flags |= MarkFlags.autolink_missing_mailto;
+        }
     }
 
     // Verify there's line boundary, whitespace, allowed punctuation or resolved
@@ -2248,37 +2359,78 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
         if (left_mark == null or (left_mark.?.flags & MarkFlags.opener == 0)) return;
     }
 
-    // Scan for hostname segment. Hostname is mandatory and requires at least
-    // two components delimited with a dot.
-    if (md_analyze_permissive_autolink_segment(ctx, end, line_end, &end, false, '.', "", "-_", &right_cursor) < 2)
+    // Scan for hostname segment. Hostname is mandatory. With an explicit scheme
+    // a single component is enough (`http://localhost`); WWW and e-mail
+    // autolinks require at least two components delimited with a dot. Ports
+    // md4c 3da1937.
+    if (md_analyze_permissive_autolink_segment(ctx, end, line_end, &end, false, '.', "", "-_", &right_cursor) < (if (opener.ch == ':') @as(c_int, 1) else 2))
         return;
 
     if (opener.ch != '@') {
-        // Scan for path segment.
-        if (end < line_end and ctx.ch(end) == '/') {
-            if (md_analyze_permissive_autolink_segment(ctx, end + 1, line_end, &end, false, '/', ".+-_~%", "", &right_cursor) < 0)
-                return;
-
-            // Path can also end with additional '/' if its a directory.
-            if (end < line_end and ctx.ch(end) == '/') end += 1;
-        }
-
-        // Scan for query segment.
-        if (end < line_end and ctx.ch(end) == '?') {
-            if (md_analyze_permissive_autolink_segment(ctx, end + 1, line_end, &end, false, '&', "._=()", "+-", &right_cursor) < 0)
-                return;
-        }
-
-        // Scan for fragment segment.
-        if (end < line_end and ctx.ch(end) == '#') {
-            if (md_analyze_permissive_autolink_segment(ctx, end + 1, line_end, &end, false, 0, "", ".-+_", &right_cursor) < 0)
-                return;
+        // Optional port number. Ports md4c 3da1937.
+        if (end + 1 < line_end and ctx.ch(end) == ':' and ctx.isDigit(end + 1)) {
+            end += 2;
+            while (end < line_end and ctx.isDigit(end)) end += 1;
         }
     }
 
+    // The URL tail: path, query and fragment as one continuous run, up to
+    // whitespace, `<`, a control character or resolved Markdown syntax, then
+    // trimmed of what more likely belongs to the surrounding text. Ports md4c
+    // f895c2b, 6240bca and 775e87e; the scan itself is memoized, see
+    // md_permissive_autolink_scan_tail.
+    if (opener.ch != '@' and end < line_end and ctx.isAnyOf(end, "/?#")) {
+        const tail_beg = end;
+        md_permissive_autolink_scan_tail(ctx, tail_beg, line_end, right_cursor);
+        const memo = &ctx.permissive_autolink_tail;
+        const scan_end = memo.end;
+        var n_brackets = memo.n_brackets;
+        var off = scan_end;
+        right_cursor = memo.cursor_end;
+
+        // Exclude terminal punctuation and excess closing brackets: they more
+        // likely belong to the surrounding text. (Unmatched opening brackets
+        // within the URL are valid.) A trailing entity reference goes as a
+        // whole, and so does a backslash escape of terminal punctuation; such
+        // a mark is never split.
+        // (The right scan may have parked its cursor one past the last mark.)
+        var cursor: MarkCursor = @min(right_cursor, ctx.nMarks() - 1);
+        while (off > tail_beg) {
+            const is_terminal_punct = ctx.isAnyOf(off - 1, "?!.,:;*_~'\"");
+            if (md_scan_left_for_resolved_mark(ctx, cursor, off - 1, &cursor)) |found| {
+                // The '&' covers the whole entity.
+                const mark = if (found.ch == ';') &ctx.marks.items[@intCast(found.prev)] else found;
+                if (mark.ch == '&' or is_terminal_punct) {
+                    off = mark.beg;
+                } else {
+                    break;
+                }
+            } else if (ctx.ch(off - 1) == ')' and n_brackets[1] > n_brackets[0]) {
+                n_brackets[1] -= 1;
+                off -= 1;
+            } else if (ctx.ch(off - 1) == ']' and n_brackets[3] > n_brackets[2]) {
+                n_brackets[3] -= 1;
+                off -= 1;
+            } else if (ctx.ch(off - 1) == '}' and n_brackets[5] > n_brackets[4]) {
+                n_brackets[5] -= 1;
+                off -= 1;
+            } else if (is_terminal_punct) {
+                off -= 1;
+            } else {
+                break;
+            }
+        }
+        end = off;
+        tail_trimmed = (end < scan_end);
+    }
+
     // Verify there's line boundary, whitespace, allowed punctuation or resolved
-    // closer mark just after the suspected autolink.
-    if (end < line_end and !ctx.isUnicodeWhitespace(end) and !ctx.isAnyOf(end, ")}].!?,;")) {
+    // closer mark just after the suspected autolink. Anything trimmed off the
+    // URL tail above is a fine follower too.
+    if (!tail_trimmed and end < line_end and !ctx.isUnicodeWhitespace(end) and
+        !ctx.isAnyOf(end, ")}].!?,;") and
+        !(opener.ch != '@' and ctx.isAnyOf(end, ":*_~'\"<")))
+    {
         const right_mark = md_scan_right_for_resolved_mark(ctx, right_cursor, end, &right_cursor);
         if (right_mark == null or (right_mark.?.flags & MarkFlags.closer == 0)) return;
     }
@@ -2290,6 +2442,12 @@ pub fn md_analyze_permissive_autolink(ctx: *MD_CTX, mark_index: c_int) void {
     closer.end = end;
     closer.ch = opener.ch;
     md_resolve_range(ctx, mark_index, mark_index + 1);
+
+    // The resolved pair is a zero-width mark the right scan now stops at, so
+    // a walk across this URL would no longer step over the entities and
+    // escapes inside it the way the memo's did. Nothing is lost: the next
+    // candidate starts past `end`, outside the tail just scanned.
+    ctx.permissive_autolink_tail = .{};
 }
 
 pub const MD_ANALYZE_NOSKIP_EMPH: u8 = 0x01;
@@ -2461,6 +2619,10 @@ pub fn md_analyze_link_contents(ctx: *MD_CTX, lines: []const MD_LINE, mark_beg: 
     // Every mark char is listed literally; md4c built these strings from the
     // dialect flags, but md4x has one dialect so the sets are constant.
     md_analyze_marks(ctx, lines, mark_beg, mark_end, "*_~$=", 0);
+    // The URL-tail memo is only valid while the resolved marks it stepped over
+    // or stopped at stay as they were: within one pass, up to the next
+    // autolink that resolves (md_analyze_permissive_autolink clears it then).
+    ctx.permissive_autolink_tail = .{};
     md_analyze_marks(ctx, lines, mark_beg, mark_end, "@:.", MD_ANALYZE_NOSKIP_EMPH);
 
     var i: usize = 0;
@@ -3087,8 +3249,10 @@ pub fn emitPermissiveAutolink(ctx: *MD_CTX, mark: [*c]MD_MARK, off: OFF) c_int {
     if (mark.*.flags & MarkFlags.opener != 0)
         closer.*.flags |= MarkFlags.valid_permissive_autolink;
 
-    if (opener.*.ch == '@' or opener.*.ch == '.' or
-        (opener.*.ch == '<' and (opener.*.flags & MarkFlags.autolink_missing_mailto != 0)))
+    // An e-mail written with its own `mailto:` / `xmpp:` (md4c 5893c54) keeps
+    // the scheme it has; only a bare one is given `mailto:`.
+    if (opener.*.ch == '.' or
+        (util.ISANYOF2_(opener.*.ch, '@', '<') and (opener.*.flags & MarkFlags.autolink_missing_mailto != 0)))
     {
         dest_size += 7;
         if (md_temp_buffer(ctx, dest_size * @sizeOf(CHAR)) != 0) return -1;

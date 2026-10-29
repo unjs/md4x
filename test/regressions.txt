@@ -468,6 +468,17 @@ bar
 <p><a href="http://example.com">http://example.com</a></p>
 ````````````````````````````````
 
+The suppression has to work also when the autolink contains an entity or
+a backslash escape (md4c `775e87e`).
+
+```````````````````````````````` example
+[https://example.org/?a=b&amp;c=d](https://example.org/?a=b&amp;c=d)
+[https://example.org/a\_b](https://example.org/a\_b)
+.
+<p><a href="https://example.org/?a=b&amp;c=d">https://example.org/?a=b&amp;c=d</a>
+<a href="https://example.org/a_b">https://example.org/a_b</a></p>
+````````````````````````````````
+
 
 ## [Issue 190](https://github.com/mity/md4c/issues/190)
 
@@ -1924,7 +1935,8 @@ https://www.youtube.com/watch?v=_tEL8bJ7yqU
 ````````````````````````````````
 
 The same rule at the edges of a component, and the query segment with no name
-before its `=`.
+before its `=`. Since the URL tail is one continuous run (md4c `f895c2b`), a
+trailing `_` is terminal punctuation and stays outside the link, as on GitHub.
 
 ```````````````````````````````` example
 http://example.com/_foo
@@ -1938,18 +1950,16 @@ http://example.com/foo--bar
 http://example.com/?=x
 .
 <p><a href="http://example.com/_foo">http://example.com/_foo</a></p>
-<p><a href="http://example.com/foo_">http://example.com/foo_</a></p>
+<p><a href="http://example.com/foo">http://example.com/foo</a>_</p>
 <p><a href="http://example.com/a/-b">http://example.com/a/-b</a></p>
 <p><a href="http://example.com/foo--bar">http://example.com/foo--bar</a></p>
 <p><a href="http://example.com/?=x">http://example.com/?=x</a></p>
 ````````````````````````````````
 
-Bracket balancing is now checked for every forward segment before the character
-class is consulted, rather than being folded into the allowed-character test.
-The two cases that pinned the old behaviour must not move: `(` is not a path
-character, so the Wikipedia URL still stops at the host and then fails the
-right boundary; `(` *is* a query character, so the Google one links -- brackets
-and all -- whether or not the whole URL is itself wrapped in brackets.
+Brackets inside the URL tail are balanced, not banned: a `(` in a path is as
+good as one in a query, and only an excess `)` at the very end is left outside
+the link, so a URL wrapped in parentheses still works (md4c `f895c2b`; GitHub
+agrees on all three).
 
 ```````````````````````````````` example
 https://en.wikipedia.org/wiki/Markup_(business)
@@ -1958,18 +1968,17 @@ https://encrypted.google.com/search?q=Markup+(business)
 
 (https://encrypted.google.com/search?q=Markup+(business))
 .
-<p>https://en.wikipedia.org/wiki/Markup_(business)</p>
+<p><a href="https://en.wikipedia.org/wiki/Markup_(business)">https://en.wikipedia.org/wiki/Markup_(business)</a></p>
 <p><a href="https://encrypted.google.com/search?q=Markup+(business)">https://encrypted.google.com/search?q=Markup+(business)</a></p>
 <p>(<a href="https://encrypted.google.com/search?q=Markup+(business)">https://encrypted.google.com/search?q=Markup+(business)</a>)</p>
 ````````````````````````````````
 
-A word delimiter that ends a segment is rolled back by one character so it stays
-outside the link. When the segment consumed nothing at all, that rollback lands
-`end` *before* where the segment started, on a character that then fails the
-right-boundary test -- which kills the match outright rather than shortening it.
-These three inputs used to produce a (partial) link and now produce none. This
-is md4c parity, pinned here because it is the one direction in which this change
-is *less* permissive.
+A delimiter that ends a host (or user name) is rolled back so it stays outside
+the link. A segment that consumed nothing has nothing to roll back (md4c
+`1645761`; before it, the rollback landed `end` before the segment's own start
+and killed the match), and a host ending in a `.` followed by a `-` or `_` gives
+back both, not just the last -- md4c gives back one and links `http://ex.coma.`.
+All three match GitHub.
 
 ```````````````````````````````` example
 http://example.com//
@@ -1978,9 +1987,65 @@ http://ex.coma._
 
 a@ex.com.-
 .
-<p>http://example.com//</p>
-<p>http://ex.coma._</p>
-<p>a@ex.com.-</p>
+<p><a href="http://example.com//">http://example.com//</a></p>
+<p><a href="http://ex.coma">http://ex.coma</a>._</p>
+<p><a href="mailto:a@ex.com">a@ex.com</a>.-</p>
+````````````````````````````````
+
+
+## [Issue 372](https://github.com/mity/md4c/issues/372)
+
+An explicit `mailto:` or `xmpp:` before a permissive e-mail autolink is part of
+the link, and the link keeps that scheme.
+
+```````````````````````````````` example
+mailto:foo@bar.baz
+.
+<p><a href="mailto:foo@bar.baz">mailto:foo@bar.baz</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+xmpp:foo@bar.baz
+.
+<p><a href="xmpp:foo@bar.baz">xmpp:foo@bar.baz</a></p>
+````````````````````````````````
+
+
+## [PR 454](https://github.com/mity/md4c/pull/454)
+
+Make sure we don't accept an empty hostname in the URL autolink.
+
+```````````````````````````````` example
+http://?q=1
+.
+<p>http://?q=1</p>
+````````````````````````````````
+
+
+## [Issue 464](https://github.com/mity/md4c/issues/464) — a failed URL tail must not reject other autolinks
+
+md4c `f9e5eb2` keeps a line of failing URL tails linear with a horizon: once a
+candidate fails at offset X, any later candidate whose host ends before X is
+rejected unexamined. That does not hold, and md4x memoizes the tail scan
+instead. A later candidate can trim an excess `)` the earlier one could not,
+so it succeeds where the earlier one failed:
+
+```````````````````````````````` example
+http://a.b/(http://c.d/x)`code`
+.
+<p>http://a.b/(<a href="http://c.d/x">http://c.d/x</a>)<code>code</code></p>
+````````````````````````````````
+
+And a link's text is analyzed before the text around it, so a URL tail failing
+inside the link would reject every bare URL in front of it:
+
+```````````````````````````````` example
+http://a.b/x [http://c.d/y`code`](u)
+
+see http://a.bc/x and [www.e.com/y`c`](u)
+.
+<p><a href="http://a.b/x">http://a.b/x</a> <a href="u">http://c.d/y<code>code</code></a></p>
+<p>see <a href="http://a.bc/x">http://a.bc/x</a> and <a href="u">www.e.com/y<code>c</code></a></p>
 ````````````````````````````````
 
 

@@ -30,19 +30,20 @@
       "diverge": 0
     },
     "spec-permissive-autolinks.txt": {
-      "cases": 15,
-      "diverge": 6
+      "cases": 33,
+      "diverge": 16
     }
   },
   "causes": {
-    "entity-escaping": 21,
+    "entity-escaping": 23,
     "sanitizer": 62,
-    "markup-shape": 63,
-    "unclassified": 23,
+    "markup-shape": 64,
+    "unclassified": 28,
     "unicode-punct": 2,
     "scheme-allowlist": 7,
-    "autolink-rules": 5,
-    "md4x-extension": 5
+    "autolink-rules": 6,
+    "md4x-extension": 5,
+    "url-encoding": 1
   },
   "divergences": [
     {
@@ -977,12 +978,62 @@
     },
     {
       "suite": "spec-permissive-autolinks.txt",
-      "n": 13,
+      "n": 12,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 17,
       "cause": "scheme-allowlist"
     },
     {
       "suite": "spec-permissive-autolinks.txt",
-      "n": 15,
+      "n": 22,
+      "cause": "entity-escaping"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 23,
+      "cause": "entity-escaping"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 24,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 25,
+      "cause": "url-encoding"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 26,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 27,
+      "cause": "markup-shape"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 29,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 30,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 32,
+      "cause": "autolink-rules"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 33,
       "cause": "autolink-rules"
     }
   ]
