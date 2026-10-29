@@ -213,8 +213,9 @@ pub const MD_MARK = extern struct {
 // This is a namespace of `u8` bit constants rather than a `packed struct(u8)`
 // on purpose: the upper bits are DELIBERATELY OVERLOADED per mark type — bit
 // 0x20 is `emph_oc` on an emphasis mark, `autolink` on '<'/'>',
-// `valid_permissive_autolink` on a permissive autolink and
-// `has_nested_brackets` on '[', and bit 0x40 is both `emph_mod3_0` and
+// `valid_permissive_autolink` on a permissive autolink,
+// `has_nested_brackets` on '[' and `dummy_bracket_consumed` on the dummy that
+// follows a bracket opener, and bit 0x40 is both `emph_mod3_0` and
 // `autolink_missing_mailto`. A packed struct cannot express that aliasing.
 pub const MarkFlags = struct {
     // Flags that apply to ALL mark types.
@@ -241,6 +242,12 @@ pub const MarkFlags = struct {
     // already use is 0x20 (`has_nested_brackets`), which is why this one is 0x40
     // and not 0x20.
     pub const footnote_ref: u8 = 0x40;
+    // On the first 'D' dummy after a '[' / '![' opener: that opener has
+    // already been paired with a closer by md_resolve_links, so a later closer
+    // walking the parent chain (md_bracket_opener) must skip past it. Only ever
+    // set on a 'D' (or, once the opener became a `[text]{attrs}` span, 'S')
+    // dummy, which carries no other flag. md4c c6008fb.
+    pub const dummy_bracket_consumed: u8 = 0x20;
 };
 
 pub const CODESPAN_MARK_MAXLEN: usize = 32;
@@ -410,6 +417,12 @@ pub const MD_CTX = struct {
     footnote_hashtable_size: usize = 0,
     /// 1-based counter handing out `MD_FOOTNOTE_DEF.index` on first reference.
     next_footnote_index: c_uint = 0,
+    /// Emission order, `footnote_order[index - 1]`, live only while
+    /// md_process_footnote_defs runs: a definition first referenced from
+    /// inside another one's body gets its index then and is appended here.
+    /// `footnote_defs` itself is never reordered — the hashtable points into
+    /// it. md4c f353ad6.
+    footnote_order: ?[]*MD_FOOTNOTE_DEF = null,
 
     // Stack of inline/span markers. (PLAN 8.1: ArrayListUnmanaged. The emphasis
     // engine walks it with raw `[*c]MD_MARK` pointers derived from

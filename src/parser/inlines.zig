@@ -442,10 +442,12 @@ pub fn md_rollback(ctx: *MD_CTX, opener_index: c_int, closer_index: c_int, how: 
         while (j < closer_index) : (j += 1) {
             const mark = &ctx.marks.items[@intCast(j)];
 
-            // Same asymmetry md_disable_marks guards against (md4c 326fe25):
-            // a footnote-reference opener inside the rolled-back range may have
-            // its `]` closer outside it. Both entry points need the guard —
-            // rollback and disable reach overlapping mark ranges.
+            // md4c 326fe25's asymmetry: a footnote-reference opener inside the
+            // rolled-back range may have its `]` closer outside it. Unlike
+            // md_disable_marks (which runs before footnote resolution and no
+            // longer needs a guard since c6008fb), a rollback runs AFTER
+            // md_resolve_footnote_refs, so that closer may already be resolved
+            // and must die with its opener.
             if (mark.ch == '[' and (mark.flags & MarkFlags.footnote_ref) != 0 and
                 mark.next >= 0 and mark.next >= closer_index)
             {
@@ -471,18 +473,14 @@ pub fn md_disable_marks(ctx: *MD_CTX, mark_index0: c_int, mark_index1: c_int) vo
     while (i < mark_index1) : (i += 1) {
         const mark = &ctx.marks.items[@intCast(i)];
 
-        // A footnote-reference opener's `]` closer may live OUTSIDE the disabled
-        // range (it does when the opener is swallowed by a link destination).
-        // Leaving it behind is what tripped md4c's assert in #348 — kill it with
-        // its opener. md4c 326fe25.
-        if (mark.ch == '[' and (mark.flags & MarkFlags.footnote_ref) != 0 and
-            mark.next >= 0 and mark.next >= mark_index1)
-        {
-            const closer = &ctx.marks.items[@intCast(mark.next)];
-            closer.ch = 'D';
-            closer.flags &= ~MarkFlags.resolved;
-        }
-
+        // No footnote special case here (md4c 326fe25 had one, 1ec0ff4 removed
+        // it): md_disable_marks only runs from md_resolve_links, before any
+        // footnote reference is resolved, so a disabled `[^` opener's `]`
+        // closer outside the range is still an unresolved queued closer, and
+        // md_resolve_links re-pairs it with the enclosing live opener
+        // (md_bracket_opener, md4c c6008fb). Killing it instead would leave
+        // `[z ![a](u[^x) y](/v)` unlinked where GitHub links it. md_rollback
+        // keeps its copy: it runs after footnote resolution.
         mark.ch = 'D';
         mark.flags &= ~MarkFlags.resolved;
     }
@@ -1407,6 +1405,12 @@ pub fn md_analyze_bracket(ctx: *MD_CTX, mark_index: c_int) void {
     if (mark.flags & MarkFlags.potential_opener != 0) {
         if (ctx.opener_stacks[BRACKET_OPENERS].top >= 0)
             ctx.marks.items[@intCast(ctx.opener_stacks[BRACKET_OPENERS].top)].flags |= MarkFlags.has_nested_brackets;
+
+        // Remember the enclosing opener in the first dummy, where it survives
+        // the initial pairing: a bracket inside a link destination may later
+        // be disabled, and its closer must then fall back to this parent
+        // (md_bracket_opener). md4c c6008fb.
+        ctx.marks.items[@intCast(mark_index + 1)].next = ctx.opener_stacks[BRACKET_OPENERS].top;
         md_mark_stack_push(ctx, &ctx.opener_stacks[BRACKET_OPENERS], mark_index);
         return;
     }
@@ -1418,13 +1422,38 @@ pub fn md_analyze_bracket(ctx: *MD_CTX, mark_index: c_int) void {
         opener.next = mark_index;
         mark.prev = opener_index;
 
+        // Queue the CLOSERS (in closer order), linked through `closer.next`,
+        // so md_resolve_links reassigning an opener does not disturb the
+        // queue. md4c c6008fb.
         if (ctx.unresolved_link_tail >= 0)
-            ctx.marks.items[@intCast(ctx.unresolved_link_tail)].prev = opener_index
+            ctx.marks.items[@intCast(ctx.unresolved_link_tail)].next = mark_index
         else
-            ctx.unresolved_link_head = opener_index;
-        ctx.unresolved_link_tail = opener_index;
-        opener.prev = -1;
+            ctx.unresolved_link_head = mark_index;
+        ctx.unresolved_link_tail = mark_index;
+        mark.next = -1;
     }
+}
+
+// Find the opener a queued `]` really pairs with: the one md_analyze_bracket
+// gave it unless that opener has since been disabled (swallowed by a link
+// destination) or consumed by an earlier closer that fell back to it — then
+// the nearest enclosing opener that is neither. Compresses the parent chain so
+// discarded openers are not revisited (the "many disabled bracket openers"
+// pathological case). md4c c6008fb.
+fn md_bracket_opener(ctx: *MD_CTX, opener_index0: c_int) c_int {
+    var index = opener_index0;
+    while (index >= 0 and (ctx.marks.items[@intCast(index)].ch == 'D' or
+        (ctx.marks.items[@intCast(index + 1)].flags & MarkFlags.dummy_bracket_consumed) != 0))
+        index = ctx.marks.items[@intCast(index + 1)].next;
+
+    var opener_index = opener_index0;
+    while (opener_index != index) {
+        const parent = ctx.marks.items[@intCast(opener_index + 1)].next;
+        ctx.marks.items[@intCast(opener_index + 1)].next = index;
+        opener_index = parent;
+    }
+
+    return index;
 }
 
 // ---- Document-wide `{`…`}` pairing for the inline-attribute scans ----
@@ -1605,47 +1634,67 @@ fn md_match_brace(ctx: *MD_CTX, open_off: OFF) error{OutOfMemory}!?OFF {
 
 // md4x.c ~3677.
 pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
-    var opener_index = ctx.unresolved_link_head;
+    // The queue holds the paired CLOSERS in closer order (inner to outer); each
+    // one's opener is looked up afresh, because a link destination resolved by
+    // an earlier iteration may have disabled the opener md_analyze_bracket gave
+    // it, freeing the closer for the enclosing one. md4c c6008fb.
+    var closer_index = ctx.unresolved_link_head;
     var last_link_beg: OFF = 0;
     var last_link_end: OFF = 0;
     var last_img_beg: OFF = 0;
     var last_img_end: OFF = 0;
 
-    while (opener_index >= 0) {
-        const opener = &ctx.marks.items[@intCast(opener_index)];
-        const closer_index = opener.next;
+    while (closer_index >= 0) {
         const closer = &ctx.marks.items[@intCast(closer_index)];
-        var next_index = opener.prev;
+        const opener_index = md_bracket_opener(ctx, closer.prev);
+        var next_index = closer.next;
         var next_opener: ?*MD_MARK = null;
         var next_closer: ?*MD_MARK = null;
+        var next_opener_index: c_int = -1;
         var attr: MD_LINK_ATTR = .{};
         var is_link: c_int = 0;
 
-        if (opener.ch == 'D') {
+        if (closer.ch == 'D' or opener_index < 0) {
             // We could have disabled this in a previous iteration (it fell
-            // inside a resolved link URL); processing it would just burn CPU
-            // cycles, or worse, resurrect a mark that was deliberately killed.
-            opener_index = next_index;
+            // inside a resolved link URL), or it has no live opener left;
+            // processing it would just burn CPU cycles, or worse, resurrect a
+            // mark that was deliberately killed.
+            closer_index = next_index;
             continue;
         }
 
-        // Footnote-reference openers are never links: md_resolve_footnote_refs
-        // resolves them after this pass has finished with the real links.
+        const opener = &ctx.marks.items[@intCast(opener_index)];
+        opener.next = closer_index;
+        closer.prev = opener_index;
+        ctx.marks.items[@intCast(opener_index + 1)].flags |= MarkFlags.dummy_bracket_consumed;
+
+        // A footnote reference with a definition is never a link:
+        // md_resolve_footnote_refs resolves it after this pass has finished
+        // with the real links. One WITHOUT a definition is an ordinary bracket
+        // from here on — the `^` goes back into the label text — so
+        // `[^x](/u)` and `[^x][ref]` link the way GitHub links them (md4c
+        // ae821cb, where a failed footnote probe must not consume the opener).
         if (opener.flags & MarkFlags.footnote_ref != 0) {
-            opener_index = next_index;
-            continue;
+            if (md_footnote_ref_def(ctx, opener, closer) != null) {
+                closer_index = next_index;
+                continue;
+            }
+            opener.flags &= ~MarkFlags.footnote_ref;
+            opener.end = opener.beg + 1;
         }
 
         if (next_index >= 0) {
-            next_opener = &ctx.marks.items[@intCast(next_index)];
-            next_closer = &ctx.marks.items[@intCast(next_opener.?.next)];
+            next_closer = &ctx.marks.items[@intCast(next_index)];
+            next_opener_index = md_bracket_opener(ctx, next_closer.?.prev);
+            if (next_opener_index >= 0 and next_closer.?.ch != 'D')
+                next_opener = &ctx.marks.items[@intCast(next_opener_index)];
         }
 
         if ((opener.beg < last_link_beg and closer.end < last_link_end) or
             (opener.beg < last_img_beg and closer.end < last_img_end) or
             (opener.beg < last_link_end and opener.ch == '['))
         {
-            opener_index = next_index;
+            closer_index = next_index;
             continue;
         }
 
@@ -1663,8 +1712,17 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
             if (is_link < 0) return -1;
 
             if (is_link != 0) {
+                // Eat the 2nd "[...]" and do not analyze it as a standalone
+                // link in the next iteration.
                 closer.end = next_closer.?.end;
-                next_index = ctx.marks.items[@intCast(next_index)].prev;
+                const label_closer_index = next_index;
+                next_index = ctx.marks.items[@intCast(next_index)].next;
+
+                // The consumed label cannot take part in inline span
+                // resolution: a `*` / `~~` / `==` / `$` inside `[*b]` would
+                // otherwise pair with one after the link and emit an
+                // unbalanced enter/leave. md4c e2c6766.
+                md_disable_marks(ctx, next_opener_index, label_closer_index + 1);
             }
         } else {
             if (closer.end < ctx.size and ctx.ch(closer.end) == '(') {
@@ -1779,10 +1837,35 @@ pub fn md_resolve_links(ctx: *MD_CTX, lines: []const MD_LINE) c_int {
             }
         }
 
-        opener_index = next_index;
+        closer_index = next_index;
     }
 
     return 0;
+}
+
+// The definition a `[^label]` footnote opener/closer pair refers to, or null.
+// The label is the raw text between the marks: `opener.end` points past `[^`,
+// `closer.beg` at the `]`.
+fn md_footnote_ref_def(ctx: *MD_CTX, opener: *const MD_MARK, closer: *const MD_MARK) ?*types.MD_FOOTNOTE_DEF {
+    const label_beg: OFF = opener.end;
+    const label_end: OFF = closer.beg;
+    if (label_beg >= label_end)
+        return null; // Empty label.
+
+    // A label holding a bracket can never match: md_is_footnote_definition
+    // stops a definition's label at the first `[` or `]`, and the lookup's
+    // normalization (whitespace collapse, case fold) cannot remove one.
+    // Reject it with an early-exit scan BEFORE the lookup hashes the whole
+    // label — nested `[^[^[^…x…]]]` pairs every opener with a closer past all
+    // the inner ones, and hashing each of those labels is O(n²) (md4c #380,
+    // f5be4b7). The scan stops at the first bracket, which for a nested opener
+    // is the next mark, so it stays linear. Unlike f5be4b7 this does NOT
+    // reject whitespace (GitHub resolves `[^ a]` / `[^a ]` to `a`) nor cap
+    // the length at 75 (GitHub resolves labels up to 1000 bytes).
+    if (std.mem.indexOfAny(u8, ctx.text[label_beg..label_end], "[]") != null)
+        return null;
+
+    return md_lookup_footnote_def(ctx, ctx.str(label_beg), label_end - label_beg);
 }
 
 // Resolve every `[^label]` footnote reference in the current block. Runs after
@@ -1807,20 +1890,16 @@ pub fn md_resolve_footnote_refs(ctx: *MD_CTX) void {
         if (closer.ch != ']')
             continue; // The closer was disabled; see md_disable_marks.
 
-        // The label is the raw text between the marks: `opener.end` points past
-        // `[^`, `closer.beg` at the `]`.
-        const label_beg: OFF = opener.end;
-        const label_end: OFF = closer.beg;
-        if (label_beg >= label_end)
-            continue; // Empty label.
-
-        const def = md_lookup_footnote_def(ctx, ctx.str(label_beg), label_end - label_beg) orelse
+        const def = md_footnote_ref_def(ctx, opener, closer) orelse
             continue; // Unknown label -> stays literal text.
 
         // Assign the id on first reference; count every reference.
         if (def.index == 0) {
             ctx.next_footnote_index += 1;
             def.index = ctx.next_footnote_index;
+            // First referenced from inside a footnote body being emitted:
+            // queue it for md_process_footnote_defs. md4c f353ad6.
+            if (ctx.footnote_order) |order| order[def.index - 1] = def;
         }
         def.ref_count += 1;
 

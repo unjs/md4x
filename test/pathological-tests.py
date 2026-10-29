@@ -74,6 +74,15 @@ pathological = {
     "many links":
             ("[t](/u) " * 50000,
             re.compile("(<a href=\"/u\">t</a> ?){50000}")),
+    # md4c c6008fb: a `]` whose opener a link destination disabled falls back
+    # to the enclosing opener; the parent-chain walk is path-compressed, so
+    # 50 000 disabled openers are skipped in linear time.
+    "many images with brackets in URLs":
+            ("[![img](url[)]() " * 50000,
+            re.compile(r'(<a href=""><img src="url%5B" alt="img"></a> ?){50000}')),
+    "many disabled bracket openers":
+            ("[" * 50000 + "![img](/url" + "[" * 50000 + ")](/outer)" + "]" * 49999,
+            re.compile(r'\[{49999}<a href="/outer"><img src="/url(%5B){50000}" alt="img"></a>\]{49999}')),
     "many references":
             ("".join(map(lambda x: ("[" + str(x) + "]: u\n"), range(1,20000 * 16))) + "[0] " * 20000,
             re.compile(r"(\[0\] ){19999}")),
@@ -147,6 +156,11 @@ pathological = {
     "many link ref. def. instantiations":
             (("[x]: " + "x" * 50000 + "\n[x]" * 50000),
             re.compile("")),
+    # md4c f5be4b7 (#380): every `[^` pairs with a `]` past all the inner
+    # ones, so looking each label up hashed O(n^2) bytes (~18 s here).
+    "many nested footnotes references":
+            (("[^na]:\n\n" + "[^" * 50000 + "x" + "]" * 50000),
+            re.compile(r"<p>(\[\^){49999}.*\]{49999}</p>")),
     "many unclosed inline attributes":
             (("*a*{" * 50000),
             re.compile("(<em>a</em>[{]){50000}")),
