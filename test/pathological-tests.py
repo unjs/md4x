@@ -394,6 +394,15 @@ passed = 0
 errored = 0
 failed = 0
 
+# Hard per-case cap for the output-checked cases above, so a reintroduced
+# quadratic fails the suite instead of hanging it. Not a performance budget:
+# every case runs in ~0.1 s or less in ReleaseFast, and the cap leaves room for
+# a Debug build on a slow runner. (md4c 19ddb22 added the same guard after its
+# multiprocessing-based TIMEOUT turned out never to fire -- see the 6d168ef
+# entry in .agents/upstream-sync.md. Like the timed heal cases below, this
+# lets subprocess enforce it and kill the child.)
+PATHOLOGICAL_TIMEOUT = 30.0
+
 #print("Testing pathological cases:")
 for description in pathological:
     if len(pathological[description]) == 2:
@@ -404,7 +413,12 @@ for description in pathological:
         prog = Prog(cmdline=args.program, default_options=default_options)
 
     start = timer()
-    [rc, actual, err] = prog.to_html(inp)
+    try:
+        [rc, actual, err] = prog.to_html(inp, timeout=PATHOLOGICAL_TIMEOUT)
+    except TimeoutExpired:
+        errored += 1
+        print('{:35} [TIMEOUT] killed after {:.0f} secs'.format(description, PATHOLOGICAL_TIMEOUT))
+        continue
     end = timer()
     if rc != 0:
         errored += 1
