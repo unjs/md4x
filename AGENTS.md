@@ -70,7 +70,7 @@ test/
   gh-parity.baseline.json # GitHub parity baseline, per-divergence causes
   coverage.txt        # Code coverage tests
   run-testsuite.py    # Individual suite runner
-  pathological-tests.py, prog.py, normalize.py
+  pathological-tests.py, prog.py, prog-tests.py, normalize.py
   fuzzers/            # seed-corpus/ + corpus/
 scripts/
   run-tests.ts        # Main test runner (builds JS artifacts, then every suite incl. vitest)

@@ -4,6 +4,7 @@
 from subprocess import *
 import platform
 import os
+import shutil
 
 def pipe_through_prog(argv, text, timeout=None):
     p1 = Popen(argv, stdout=PIPE, stdin=PIPE, stderr=PIPE)
@@ -20,7 +21,15 @@ def pipe_through_prog(argv, text, timeout=None):
 
 class Prog:
     def __init__(self, cmdline="md4x", default_options=[]):
-        self.cmdline = cmdline.split()
+        # A program that resolves as-is (an absolute path, or a bare name on
+        # PATH) is ONE argv element even if it contains spaces -- a checkout
+        # under "/home/me/my projects/" must not be split. Only a string that
+        # does not resolve is taken as a legacy "program --opt ..." command
+        # line. (md4c 1407182.)
+        program = shutil.which(cmdline)
+        if not program and os.name == 'nt':
+            program = shutil.which(cmdline + '.exe')
+        self.cmdline = [cmdline] if program else cmdline.split()
         if len(self.cmdline) <= 1:
             # cmdline provided no command line options. Use default ones.
             if isinstance(default_options, str):
