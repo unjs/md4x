@@ -1131,7 +1131,8 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
             ')', '.' => {
                 is_ordered_list = true;
                 // MD_FALLTHROUGH to bullet handling.
-                _ = md_end_current_block(ctx);
+                ret = md_end_current_block(ctx);
+                if (ret < 0) return ret;
                 cont.block_byte_off = @intCast(ctx.n_block_bytes);
 
                 ret = md_push_container_bytes(ctx, if (is_ordered_list) c.BlockType.ol else c.BlockType.ul, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
@@ -1141,7 +1142,8 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
             },
             '-', '+', '*' => {
                 // Remember offset in block_bytes so we can revisit if loose.
-                _ = md_end_current_block(ctx);
+                ret = md_end_current_block(ctx);
+                if (ret < 0) return ret;
                 cont.block_byte_off = @intCast(ctx.n_block_bytes);
 
                 ret = md_push_container_bytes(ctx, if (is_ordered_list) c.BlockType.ol else c.BlockType.ul, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);

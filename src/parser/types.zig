@@ -514,6 +514,14 @@ pub const MD_CTX = struct {
     brace_pairs: std.ArrayListUnmanaged(MD_BRACE_PAIR) = .empty,
     brace_pairs_built: bool = false,
 
+    // Set by a recognizer that hit an allocation failure but cannot report it
+    // through its own (bool / optional) result — today only md_jsx_value_end,
+    // reached from md_is_html_tag. The recognizer falls back to the reading it
+    // would have made without the allocation; md_parse_impl then turns a
+    // would-be success into -1, so the OOM is never swallowed (the class of
+    // md4c 47f8f4c).
+    deferred_oom: bool = false,
+
     // Character accessors. `CH(off)` / `STR(off)` from md4x.c operate on the
     // enclosing `ctx`; here they are methods on *const MD_CTX.
     // NOTE: ctx.text is `char*`; in classification we always reinterpret as the

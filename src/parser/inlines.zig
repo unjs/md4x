@@ -197,7 +197,13 @@ pub fn md_is_html_tag(ctx: *MD_CTX, lines: []const MD_LINE, beg: OFF, max_end: O
 // value must be. `p_line_index` / `p_line_end` are moved to the closer's
 // line. Null falls back to CommonMark's unquoted-value reading.
 fn md_jsx_value_end(ctx: *MD_CTX, lines: []const MD_LINE, off: OFF, max_end: OFF, p_line_index: *MD_SIZE, p_line_end: *OFF) ?OFF {
-    const close = (md_match_brace(ctx, off) catch return null) orelse return null;
+    const close = (md_match_brace(ctx, off) catch {
+        // md_is_html_tag returns bool and has many callers; record the OOM for
+        // md_parse_impl rather than read it as "no closer" and parse on.
+        ctx.log("realloc() failed.");
+        ctx.deferred_oom = true;
+        return null;
+    }) orelse return null;
     if (close >= max_end) return null;
 
     var line_end: OFF = p_line_end.*;

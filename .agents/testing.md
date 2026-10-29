@@ -83,7 +83,13 @@ Covered by Zig unit tests in `src/md4x.zig`:
 - **OOM sweep** — a `FailingAllocator` walks every internal allocation index over a document
   exercising ref-defs, tables, code metadata, attributes, components and autolinks, asserting each
   run is crash- and leak-free. The document carries a link title with 15 substrings, the only thing
-  driving `md_build_attr_append_substr` past its initial capacity of 8 — keep it.
+  driving `md_build_attr_append_substr` past its initial capacity of 8 — keep it. Each index is
+  also refused **once** (`OneShotFailingAllocator`, every later allocation served), and every run
+  that saw a refusal must return `-1`: `FailingAllocator` keeps refusing, so a swallowed OOM is
+  re-detected by the next allocation and only a one-shot failure exposes it as a silently wrong
+  parse returning `0`. A short-document sweep does the same where few allocations follow the
+  failure (md4c `47f8f4c`). A recognizer that cannot return an error (`md_is_html_tag` is `bool`)
+  records it in `MD_CTX.deferred_oom` instead of reading it as "no match".
 - **Golden SAX event trace** — the full ordered `enter_block`/`leave_block`/`enter_span`/`leave_span`/
   `text` stream over a document covering every block, span and text type, with each detail union
   arm's field values and every `Attribute`'s substring table spelled out. The corpus harness only

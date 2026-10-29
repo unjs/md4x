@@ -262,8 +262,10 @@ fn md_parse_impl(alloc: std.mem.Allocator, text: [*c]const CHAR, size: SZ, parse
     ctx.table_cell_boundaries_head = -1;
     ctx.table_cell_boundaries_tail = -1;
 
-    // All the work.
-    const ret = md_process_doc(&ctx);
+    // All the work. An OOM a recognizer had to absorb (MD_CTX.deferred_oom)
+    // still fails the parse.
+    var ret = md_process_doc(&ctx);
+    if (ret == 0 and ctx.deferred_oom) ret = -1;
 
     // Clean-up. The hashtable holds pointers into ctx.ref_defs (simple buckets)
     // and reads the ref_defs address range to tell simple from complex buckets,
@@ -1552,7 +1554,108 @@ test "OOM: full md_parse sweep is crash- and leak-free under FailingAllocator" {
         // Either a clean parse (0) or a graceful OOM abort (-1) — never a crash,
         // and ctx.alloc allocations are always released (else the allocator
         // would report a leak at test end).
-        try std.testing.expect(ret == 0 or ret == -1);
+        //
+        // And never a SWALLOWED OOM: if an allocation was refused, md_parse
+        // must report it. md4c 47f8f4c found three sites that read a failure
+        // as "nothing here" and parsed on over a half-built state (a ref def
+        // whose slot reservation failed was silently dropped; two discarded
+        // md_end_current_block results). A run that saw no injected failure
+        // must succeed.
+        if (fa.has_induced_failure) {
+            if (ret != -1) std.debug.print("OOM at allocation #{d} was swallowed (md_parse returned {d})\n", .{ fail, ret });
+            try std.testing.expectEqual(@as(c_int, -1), ret);
+        } else {
+            try std.testing.expectEqual(@as(c_int, 0), ret);
+        }
+
+        // The same index refused ONCE (see OneShotFailingAllocator): every
+        // later allocation succeeds, so a swallowed failure is not rescued by
+        // the next one failing too.
+        var one: OneShotFailingAllocator = .{ .inner = std.testing.allocator, .fail_index = fail };
+        const ret1 = md_parse_impl(one.allocator(), @ptrCast(src.ptr), @intCast(src.len), &p, &probe);
+        if (one.has_induced_failure) {
+            if (ret1 != -1) std.debug.print("one-shot OOM at allocation #{d} was swallowed (md_parse returned {d})\n", .{ fail, ret1 });
+            try std.testing.expectEqual(@as(c_int, -1), ret1);
+        } else {
+            try std.testing.expectEqual(@as(c_int, 0), ret1);
+        }
+    }
+}
+
+// Refuses exactly ONE allocation (#fail_index) and serves every other one —
+// a transient OOM. std.testing.FailingAllocator keeps refusing once it starts,
+// so a swallowed failure is almost always re-detected by the very next
+// allocation and md_parse still returns -1; only a one-shot failure lets a
+// swallowed OOM surface as a silently wrong parse that returns 0.
+const OneShotFailingAllocator = struct {
+    inner: std.mem.Allocator,
+    fail_index: usize,
+    index: usize = 0,
+    has_induced_failure: bool = false,
+
+    fn allocator(self: *OneShotFailingAllocator) std.mem.Allocator {
+        return .{ .ptr = self, .vtable = &.{
+            .alloc = alloc,
+            .resize = std.mem.Allocator.noResize,
+            .remap = std.mem.Allocator.noRemap,
+            .free = free,
+        } };
+    }
+    fn alloc(ctx: *anyopaque, len: usize, alignment: std.mem.Alignment, ra: usize) ?[*]u8 {
+        const self: *OneShotFailingAllocator = @ptrCast(@alignCast(ctx));
+        defer self.index += 1;
+        if (self.index == self.fail_index) {
+            self.has_induced_failure = true;
+            return null;
+        }
+        return self.inner.rawAlloc(len, alignment, ra);
+    }
+    fn free(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ra: usize) void {
+        const self: *OneShotFailingAllocator = @ptrCast(@alignCast(ctx));
+        self.inner.rawFree(memory, alignment, ra);
+    }
+};
+
+test "OOM: a one-shot allocation failure is never swallowed (md4c 47f8f4c)" {
+    // md4c 47f8f4c found three sites that read an OOM as "nothing here" and
+    // parsed on over a half-built state: the ref-def slot reservation leaving
+    // ret at 0 (the definition is silently dropped and its paragraph rendered
+    // as text), and two discarded md_end_current_block results (md_process_doc
+    // and md_enter_child_containers). Each document below ends in (or is
+    // entirely) a ref def so the failure lands on one of those paths.
+    const docs = [_][]const u8{
+        "[a]: /x\n",
+        "[a]: /x",
+        "[a]: /x\n[b]: /y\n",
+        "[a]: /x\n- b\n",
+        "[a]: /x\n1. b\n",
+        "> [a]: /x\n",
+        "- [a]: /x\n",
+        "[a]: /x\nline\n",
+        "[a\nb]: /x \"t\nu\"\n",
+        "[^a]: note\n",
+        "[a]: /x\n===\n",
+        // md4x-only: md_jsx_value_end (under md_is_html_tag, which returns
+        // bool) builds the brace-pair table on first use. Its OOM is carried
+        // out through MD_CTX.deferred_oom; once read as "no closer" and the
+        // tag simply re-parsed CommonMark-style.
+        "<Card n={1} />\n",
+        "a <b c={d}> e\n",
+    };
+    var probe: AbortProbe = .{};
+    var p = probe.parser();
+    for (docs) |src| {
+        var fail: usize = 0;
+        while (fail < 64) : (fail += 1) {
+            var fa: OneShotFailingAllocator = .{ .inner = std.testing.allocator, .fail_index = fail };
+            const ret = md_parse_impl(fa.allocator(), @ptrCast(src.ptr), @intCast(src.len), &p, &probe);
+            if (!fa.has_induced_failure) {
+                try std.testing.expectEqual(@as(c_int, 0), ret);
+                break;
+            }
+            if (ret != -1) std.debug.print("OOM at allocation #{d} swallowed on \"{s}\" (md_parse returned {d})\n", .{ fail, src, ret });
+            try std.testing.expectEqual(@as(c_int, -1), ret);
+        }
     }
 }
 

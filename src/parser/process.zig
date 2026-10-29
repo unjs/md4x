@@ -435,8 +435,11 @@ pub fn md_process_code_block_contents(ctx: *MD_CTX, is_fenced: c_int, lines_in: 
 }
 
 // md4x.c ~5473. Parse highlight ranges string (e.g. "1-3,5,7") into expanded
-// array. Returns heap-allocated array (null on empty/error) and sets out_count.
-pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_count: *c_uint) [*c]c_uint {
+// array. Returns heap-allocated array (null when nothing parsed) and sets
+// out_count. An allocation failure is an ERROR, not "no highlights": folding
+// the two together silently dropped the `{…}` ranges and parsed on (the class
+// of md4c 47f8f4c).
+pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_count: *c_uint) error{OutOfMemory}![*c]c_uint {
     var arr: [*c]c_uint = null;
     var capacity: c_uint = 0;
     var count: c_uint = 0;
@@ -485,7 +488,7 @@ pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_coun
                 const tmp = util.realloc_array_a(c_uint, ctx.alloc, arr, @intCast(capacity), @intCast(new_cap));
                 if (tmp == null) {
                     util.free_array_a(c_uint, ctx.alloc, arr, @intCast(capacity));
-                    return null;
+                    return error.OutOfMemory;
                 }
                 arr = tmp;
                 capacity = new_cap;
@@ -502,13 +505,14 @@ pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_coun
     // Shrink-to-fit so the freed length equals the reported count (the detail
     // carries `highlights` as a slice, with no capacity). A shrink realloc resizes
     // in place on c_allocator / the testing allocator, so it effectively never
-    // fails here; if it ever did (OOM), drop the highlights cleanly rather than
-    // leave a capacity≠count buffer the caller would free by the wrong length.
+    // fails here; if it ever did (OOM), free the buffer and report the OOM
+    // rather than leave a capacity≠count buffer the caller would free by the
+    // wrong length.
     if (count < capacity) {
         const shr = util.realloc_array_a(c_uint, ctx.alloc, arr, @intCast(capacity), @intCast(count));
         if (shr == null) {
             util.free_array_a(c_uint, ctx.alloc, arr, @intCast(capacity));
-            return null;
+            return error.OutOfMemory;
         }
         arr = shr;
         capacity = count;
@@ -609,7 +613,10 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
         // Parse highlights into expanded integer array.
         if (has_highlights != 0 and hl_end > hl_beg) {
             var hl_count: c_uint = 0;
-            const hl = md_parse_highlights(ctx, ctx.str(hl_beg), hl_end - hl_beg, &hl_count);
+            const hl = md_parse_highlights(ctx, ctx.str(hl_beg), hl_end - hl_beg, &hl_count) catch {
+                ctx.log("realloc() failed.");
+                return -1;
+            };
             if (hl != null) det.highlights = hl[0..hl_count];
         }
 
@@ -1547,7 +1554,8 @@ pub fn md_process_doc(ctx: *MD_CTX) c_int {
         if (ret < 0) return ret;
     }
 
-    _ = md_end_current_block(ctx);
+    ret = md_end_current_block(ctx);
+    if (ret < 0) return ret;
 
     ret = md_build_ref_def_hashtable(ctx);
     if (ret < 0) return ret;
