@@ -5,7 +5,7 @@
 // thin libc binding (a direct mirror of the C driver); argument vectors come
 // from the Zig runtime (std.process.Init).
 //
-// Copyright (c) 2016-2024 Martin Mitáš
+// Copyright (c) 2016-2026 Martin Mitáš
 // Copyright (c) 2026 Pooya Parsa <pooya@pi0.io>
 // MIT License (see repository LICENSE).
 
