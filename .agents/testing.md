@@ -13,6 +13,10 @@ bun run build:js                                  # rebuild what the JS suites l
 Suite format: Markdown examples with a `.` separator and expected HTML. The runner pipes input
 through `md4x` and compares normalized output.
 
+`bun scripts/run-tests.ts` does **not** rebuild `zig-out/bin/md4x`, which the `.txt` and
+pathological suites run — `zig build` first after a parser change, or a stale CLI reports
+spurious suite failures.
+
 Suites: `spec.txt`, `spec-tables.txt`, `spec-strikethrough.txt`, `spec-tasklists.txt`,
 `spec-latex-math.txt`, `spec-permissive-autolinks.txt`,
 `spec-soft-breaks.txt`, `spec-underline.txt`, `spec-frontmatter.txt`, `spec-components.txt`,
