@@ -122,7 +122,12 @@ Measured live against `api.github.com/markdown` in both `markdown` and `gfm` mod
 counts as parity if it matches either. Baseline: `test/gh-parity.baseline.json`,
 rationale in [.agents/github-parity.md](../.agents/github-parity.md).
 
-**188 divergences over 798 cases.** Whole-baseline re-record on 2026-08-16, after `\|`
+**198 divergences over 816 cases.** Re-recorded after the md4c permissive-autolink port
+(`5893c54` … `f9e5eb2`): `spec-permissive-autolinks.txt` grew from 15 to 33 cases with
+the upstream examples, 8 of the 18 new ones matching GitHub; nothing else moved. See
+[.agents/github-parity.md](../.agents/github-parity.md) for the 10 that do not.
+
+Before that, 188 over 798: whole-baseline re-record on 2026-08-16, after `\|`
 started unescaping inside table cells. All three new cases are the tests for that fix: GFM
 example 200, imported into `spec-gfm.txt` and **matching**, plus two `spec-tables.txt`
 cases pinning the same fix in math and raw HTML, which GitHub has no equivalent for and so
@@ -143,20 +148,21 @@ dropped to a plain `entity-escaping` divergence, and the two wiki cases in
 | spec-footnotes.txt            |    9/36 |
 | spec-alerts.txt               |   11/43 |
 | spec-strikethrough.txt        |     5/5 |
-| spec-permissive-autolinks.txt |    9/15 |
+| spec-permissive-autolinks.txt |   17/33 |
 
 | Cause              |   n | Status                                             |
 | ------------------ | --: | -------------------------------------------------- |
-| `markup-shape`     |  63 | open — but only 47 actionable, see below           |
+| `markup-shape`     |  64 | open — but only 47 actionable, see below           |
 | `sanitizer`        |  62 | not-goal — GitHub strips raw HTML, md4x does not   |
-| `unclassified`     |  23 | triaged, all documented                            |
-| `entity-escaping`  |  21 | not-goal                                           |
+| `unclassified`     |  28 | triaged, all documented                            |
+| `entity-escaping`  |  23 | not-goal                                           |
 | `md4x-extension`   |   5 | not-goal                                           |
 | `scheme-allowlist` |   7 | not-goal — GitHub linkifies only http(s)/mailto    |
-| `autolink-rules`   |   5 | not-goal — which characters may border an autolink |
+| `autolink-rules`   |   6 | not-goal — which characters may border an autolink |
+| `url-encoding`     |   1 | open — an entity in a bare URL's href              |
 | `unicode-punct`    |   2 | not-goal — GitHub's tables predate 0.31            |
 
-102 of 188 are declared not-goals. **No divergence is an outright "md4x emits wrong HTML"
+105 of 198 are declared not-goals. **No divergence is an outright "md4x emits wrong HTML"
 bug** — each reduces to a not-goal, a decision already taken, a GitHub defect, or an open
 gap. Cases where md4x is the correct one include CommonMark-exact nested strong (8),
 `&#87654321;` (GitHub emits U+FFFD), footnote-in-link, `[^nf]:` after a paragraph, and a

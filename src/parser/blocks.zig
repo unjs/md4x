@@ -639,7 +639,10 @@ pub fn md_is_html_block_start_condition(ctx: *MD_CTX, beg: OFF) c_int {
                         return 6;
                     if (tmp + 1 < ctx.size and ctx.ch(tmp) == '/' and ctx.ch(tmp + 1) == '>')
                         return 6;
-                    break;
+                    // A prefix match only: a longer name later in the bucket
+                    // may still fit (`th` → `thead`, `head` → `header`, `li` →
+                    // `link`, `tr` → `track`, …). Ports md4c e313f46.
+                    continue;
                 }
             }
         }
@@ -1131,7 +1134,8 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
             ')', '.' => {
                 is_ordered_list = true;
                 // MD_FALLTHROUGH to bullet handling.
-                _ = md_end_current_block(ctx);
+                ret = md_end_current_block(ctx);
+                if (ret < 0) return ret;
                 cont.block_byte_off = @intCast(ctx.n_block_bytes);
 
                 ret = md_push_container_bytes(ctx, if (is_ordered_list) c.BlockType.ol else c.BlockType.ul, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
@@ -1141,7 +1145,8 @@ pub fn md_enter_child_containers(ctx: *MD_CTX, n_children: c_int) c_int {
             },
             '-', '+', '*' => {
                 // Remember offset in block_bytes so we can revisit if loose.
-                _ = md_end_current_block(ctx);
+                ret = md_end_current_block(ctx);
+                if (ret < 0) return ret;
                 cont.block_byte_off = @intCast(ctx.n_block_bytes);
 
                 ret = md_push_container_bytes(ctx, if (is_ordered_list) c.BlockType.ol else c.BlockType.ul, cont.start, @intCast(uval(cont.ch)), MD_BLOCK_CONTAINER_OPENER);
@@ -1324,6 +1329,16 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     var hr_killer: OFF = 0;
     var ret: c_int = 0;
 
+    // Consume the previous line's implicit-parent run (see the blank-line walk
+    // below) and invalidate it up front, so no return path can leave a stale
+    // run behind for a line it does not describe.
+    const last_implicit_beg = ctx.last_n_implicit_parents_beg;
+    const last_implicit_end = ctx.last_n_implicit_parents_end;
+    ctx.last_n_implicit_parents_beg = 0;
+    ctx.last_n_implicit_parents_end = 0;
+    var n_implicit_parents_beg: c_int = 0;
+    var n_implicit_parents_end: c_int = 0;
+
     line.indent = md_line_indentation(ctx, total_indent, off, &off);
     total_indent += line.indent;
     line.beg = off;
@@ -1372,10 +1387,25 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
         // Blank line does not need any real indentation to be nested inside a
         // list, block component, or template slot.
         if (n_brothers + n_children == 0) {
+            n_implicit_parents_beg = n_parents;
             while (n_parents < ctx.nContainers() and ctx.containers.items[@intCast(n_parents)].ch != '>' and
                 ctx.containers.items[@intCast(n_parents)].ch != ':' and
                 ctx.containers.items[@intCast(n_parents)].ch != '#')
+            {
+                // Ports md4c ff1cd9f + be8a0fe. Every container in the previous
+                // blank line's run is a list, so a walk entering it anywhere
+                // stops where that one did. The containers cannot have changed
+                // since: a blank line opens none, and the run is only recorded
+                // when that line kept all of it (see the end of this function).
+                if (last_implicit_beg <= n_parents and n_parents <= last_implicit_end and
+                    last_implicit_end > last_implicit_beg and last_implicit_end <= ctx.nContainers())
+                {
+                    n_parents = last_implicit_end;
+                    break;
+                }
                 n_parents += 1;
+            }
+            n_implicit_parents_end = n_parents;
         }
     }
 
@@ -1616,11 +1646,12 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
                     n_brothers + n_children == 0 and ctx.current_block == null and
                     md_top_block_is_empty_li(ctx))
                 {
+                    // Ports md4c 60e8065: give back exactly the indentation the
+                    // item took. Re-deriving it from `total_indent` counted the
+                    // columns of every enclosing `>` mark as indentation, so
+                    // `> > -` + two blank lines + `> >   b` became indented code.
+                    line.indent += ctx.containers.items[@intCast(n_parents - 1)].contents_indent;
                     n_parents -= 1;
-
-                    line.indent = total_indent;
-                    if (n_parents > 0)
-                        line.indent -= MIN_u(line.indent, ctx.containers.items[@intCast(n_parents - 1)].contents_indent);
                 }
             }
             ctx.consecutive_blank_lines = 0;
@@ -2120,6 +2151,15 @@ pub fn md_analyze_line(ctx: *MD_CTX, beg: OFF, p_end: *OFF, pivot_line_in: *cons
     if (n_children > 0) {
         ret = md_enter_child_containers(ctx, n_children);
         if (ret < 0) return ret;
+    }
+
+    // Publish the implicit-parent run only if this line kept every container
+    // in it open; otherwise the next line must walk.
+    if (n_brothers + n_children == 0 and n_parents >= n_implicit_parents_end and
+        n_implicit_parents_end <= ctx.nContainers())
+    {
+        ctx.last_n_implicit_parents_beg = n_implicit_parents_beg;
+        ctx.last_n_implicit_parents_end = n_implicit_parents_end;
     }
 
     return ret;

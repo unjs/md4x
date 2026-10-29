@@ -213,8 +213,9 @@ pub const MD_MARK = extern struct {
 // This is a namespace of `u8` bit constants rather than a `packed struct(u8)`
 // on purpose: the upper bits are DELIBERATELY OVERLOADED per mark type — bit
 // 0x20 is `emph_oc` on an emphasis mark, `autolink` on '<'/'>',
-// `valid_permissive_autolink` on a permissive autolink and
-// `has_nested_brackets` on '[', and bit 0x40 is both `emph_mod3_0` and
+// `valid_permissive_autolink` on a permissive autolink,
+// `has_nested_brackets` on '[' and `dummy_bracket_consumed` on the dummy that
+// follows a bracket opener, and bit 0x40 is both `emph_mod3_0` and
 // `autolink_missing_mailto`. A packed struct cannot express that aliasing.
 pub const MarkFlags = struct {
     // Flags that apply to ALL mark types.
@@ -241,6 +242,12 @@ pub const MarkFlags = struct {
     // already use is 0x20 (`has_nested_brackets`), which is why this one is 0x40
     // and not 0x20.
     pub const footnote_ref: u8 = 0x40;
+    // On the first 'D' dummy after a '[' / '![' opener: that opener has
+    // already been paired with a closer by md_resolve_links, so a later closer
+    // walking the parent chain (md_bracket_opener) must skip past it. Only ever
+    // set on a 'D' (or, once the opener became a `[text]{attrs}` span, 'S')
+    // dummy, which carries no other flag. md4c c6008fb.
+    pub const dummy_bracket_consumed: u8 = 0x20;
 };
 
 pub const CODESPAN_MARK_MAXLEN: usize = 32;
@@ -307,6 +314,26 @@ pub const MD_REF_DEF_LIST = extern struct {
 //  openers of the given type." Top == -1 if empty.
 pub const MD_MARKSTACK = struct {
     top: c_int = -1,
+};
+
+// The URL tail a permissive autolink scanned last: `[beg, end)` plus the
+// bracket tallies over it and a mark cursor valid at each end (signed mark
+// indices, as `inlines.MarkCursor`). Where a tail stops does not depend on
+// where it starts, so a later candidate whose tail begins inside `[beg, end)`
+// stops at `end` too and only has to subtract what lies before its own start.
+// That is what keeps a line of failing candidates linear (md4c #464).
+// `end == 0` is the empty memo. It is cleared whenever the resolved marks it
+// was walked over may have changed: before every permissive-autolink pass
+// (`md_analyze_link_contents`) and after every autolink that resolves.
+pub const MD_PERMISSIVE_AUTOLINK_TAIL = struct {
+    beg: OFF = 0,
+    end: OFF = 0,
+    // The line (or table cell) end the scan was bounded by.
+    line_end: OFF = 0,
+    cursor_beg: isize = 0,
+    cursor_end: isize = 0,
+    // `(` `)` `[` `]` `{` `}`, in that order.
+    n_brackets: [6]c_int = .{ 0, 0, 0, 0, 0, 0 },
 };
 
 pub const MD_BLOCK_COMPONENT_INFO = struct {
@@ -410,6 +437,12 @@ pub const MD_CTX = struct {
     footnote_hashtable_size: usize = 0,
     /// 1-based counter handing out `MD_FOOTNOTE_DEF.index` on first reference.
     next_footnote_index: c_uint = 0,
+    /// Emission order, `footnote_order[index - 1]`, live only while
+    /// md_process_footnote_defs runs: a definition first referenced from
+    /// inside another one's body gets its index then and is appended here.
+    /// `footnote_defs` itself is never reordered — the hashtable points into
+    /// it. md4c f353ad6.
+    footnote_order: ?[]*MD_FOOTNOTE_DEF = null,
 
     // Stack of inline/span markers. (PLAN 8.1: ArrayListUnmanaged. The emphasis
     // engine walks it with raw `[*c]MD_MARK` pointers derived from
@@ -458,6 +491,9 @@ pub const MD_CTX = struct {
     // later `{{` in the same block cannot find one either, so it is not
     // searched again (a line of `{` was quadratic without this).
     binding_horizon: OFF = 0,
+    // For permissive autolinks: the last URL tail scanned. See
+    // `inlines.md_analyze_permissive_autolink`.
+    permissive_autolink_tail: MD_PERMISSIVE_AUTOLINK_TAIL = .{},
 
     // For block analysis. Holds MD_BLOCK as well as MD_LINE structures.
     block_bytes: ?*anyopaque = null,
@@ -484,6 +520,15 @@ pub const MD_CTX = struct {
     last_line_has_list_loosening_effect: bool = false,
     // Blank lines since the last non-blank one (md4c `consecutive_blank_lines`).
     consecutive_blank_lines: c_uint = 0,
+    // The run of containers the previous line, a blank one, walked through
+    // implicitly — `containers[beg..end]` are all lists (md4c
+    // `last_n_implicit_parents_{beg,end}`). A blank line starting anywhere in
+    // that run ends at `end` too, so md_analyze_line jumps there instead of
+    // re-walking every level: O(depth) per blank line was O(n^2) over `- ` * n
+    // followed by n blank lines. Only ever describes the line just analyzed;
+    // `beg == end` means no shortcut.
+    last_n_implicit_parents_beg: c_int = 0,
+    last_n_implicit_parents_end: c_int = 0,
     // Arena offset of the most recently pushed MD_BLOCK header, written by
     // md_start_new_block / md_push_container_bytes. The header is the arena's
     // top only while `last_block_off + @sizeOf(MD_BLOCK) == n_block_bytes`;
@@ -513,6 +558,14 @@ pub const MD_CTX = struct {
     // (inlines.zig). Sorted ascending by `.open`; unmatched `{` are absent.
     brace_pairs: std.ArrayListUnmanaged(MD_BRACE_PAIR) = .empty,
     brace_pairs_built: bool = false,
+
+    // Set by a recognizer that hit an allocation failure but cannot report it
+    // through its own (bool / optional) result — today only md_jsx_value_end,
+    // reached from md_is_html_tag. The recognizer falls back to the reading it
+    // would have made without the allocation; md_parse_impl then turns a
+    // would-be success into -1, so the OOM is never swallowed (the class of
+    // md4c 47f8f4c).
+    deferred_oom: bool = false,
 
     // Character accessors. `CH(off)` / `STR(off)` from md4x.c operate on the
     // enclosing `ctx`; here they are methods on *const MD_CTX.

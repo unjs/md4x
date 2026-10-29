@@ -888,8 +888,9 @@ pub fn md_is_link_reference_definition(ctx: *MD_CTX, lines: []const MD_LINE) c_i
     // leave a half-filled committed entry, so we only bump items.len on success.
     ctx.ref_defs.ensureUnusedCapacity(ctx.alloc, 1) catch {
         ctx.log("realloc() failed.");
-        // ret stays 0 → abort.
-        return md_is_link_reference_definition_abort(ctx, def, ret);
+        // -1, not 0: 0 means "not a ref def", which would silently drop the
+        // definition and parse on (md4c 47f8f4c).
+        return -1;
     };
     def = &ctx.ref_defs.items.ptr[ctx.ref_defs.items.len];
     @memset(std.mem.asBytes(def.?), 0);

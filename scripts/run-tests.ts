@@ -39,6 +39,19 @@ try {
 }
 console.log();
 
+// How test/prog.py turns `-p PROGRAM` into an argv — every Python suite below
+// goes through it, so a broken split fails all of them at once.
+console.log("Testing program invocation:");
+try {
+  execFileSync("python3", ["prog-tests.py", program], {
+    cwd: testDir,
+    stdio: "inherit",
+  });
+} catch {
+  errCount++;
+}
+console.log();
+
 const testSuites = readdirSync(testDir)
   .filter((f) => f.endsWith(".txt"))
   .sort();

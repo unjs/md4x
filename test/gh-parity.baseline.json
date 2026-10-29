@@ -10,7 +10,7 @@
       "diverge": 3
     },
     "spec-tables.txt": {
-      "cases": 20,
+      "cases": 23,
       "diverge": 5
     },
     "spec-tasklists.txt": {
@@ -18,8 +18,8 @@
       "diverge": 8
     },
     "spec-footnotes.txt": {
-      "cases": 36,
-      "diverge": 27
+      "cases": 43,
+      "diverge": 30
     },
     "spec-alerts.txt": {
       "cases": 43,
@@ -30,19 +30,20 @@
       "diverge": 0
     },
     "spec-permissive-autolinks.txt": {
-      "cases": 15,
-      "diverge": 6
+      "cases": 33,
+      "diverge": 16
     }
   },
   "causes": {
-    "entity-escaping": 21,
+    "entity-escaping": 23,
     "sanitizer": 62,
-    "markup-shape": 63,
-    "unclassified": 23,
+    "markup-shape": 66,
+    "unclassified": 29,
     "unicode-punct": 2,
     "scheme-allowlist": 7,
-    "autolink-rules": 5,
-    "md4x-extension": 5
+    "autolink-rules": 6,
+    "md4x-extension": 5,
+    "url-encoding": 1
   },
   "divergences": [
     {
@@ -793,7 +794,22 @@
     {
       "suite": "spec-footnotes.txt",
       "n": 36,
+      "cause": "markup-shape"
+    },
+    {
+      "suite": "spec-footnotes.txt",
+      "n": 41,
       "cause": "unclassified"
+    },
+    {
+      "suite": "spec-footnotes.txt",
+      "n": 42,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-footnotes.txt",
+      "n": 43,
+      "cause": "markup-shape"
     },
     {
       "suite": "spec-alerts.txt",
@@ -977,12 +993,62 @@
     },
     {
       "suite": "spec-permissive-autolinks.txt",
-      "n": 13,
+      "n": 12,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 17,
       "cause": "scheme-allowlist"
     },
     {
       "suite": "spec-permissive-autolinks.txt",
-      "n": 15,
+      "n": 22,
+      "cause": "entity-escaping"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 23,
+      "cause": "entity-escaping"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 24,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 25,
+      "cause": "url-encoding"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 26,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 27,
+      "cause": "markup-shape"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 29,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 30,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 32,
+      "cause": "autolink-rules"
+    },
+    {
+      "suite": "spec-permissive-autolinks.txt",
+      "n": 33,
       "cause": "autolink-rules"
     }
   ]

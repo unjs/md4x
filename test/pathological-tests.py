@@ -24,6 +24,11 @@ pathological = {
     "U+0000 in code span across lines":
             ("`\u0000\n`",
             re.compile(r"<p><code>.? </code></p>")),
+    # md4c a25ed43. md4x's line-end scan never had md4c's no-CR fast path,
+    # but the mixed form is what such a path would get wrong.
+    "CR and CR+LF line endings":
+            ("# h1\r\n\r\na\rb\r\n\r- x\r\n- y\r",
+            re.compile("^<h1>h1</h1>\r?\n<p>a\r?\nb</p>\r?\n<ul>\r?\n<li>x</li>\r?\n<li>y</li>\r?\n</ul>\r?\n$")),
     "U+FEFF (Unicode BOM)":
             ("\ufefffoo",
             re.compile("<p>foo</p>")),
@@ -69,6 +74,15 @@ pathological = {
     "many links":
             ("[t](/u) " * 50000,
             re.compile("(<a href=\"/u\">t</a> ?){50000}")),
+    # md4c c6008fb: a `]` whose opener a link destination disabled falls back
+    # to the enclosing opener; the parent-chain walk is path-compressed, so
+    # 50 000 disabled openers are skipped in linear time.
+    "many images with brackets in URLs":
+            ("[![img](url[)]() " * 50000,
+            re.compile(r'(<a href=""><img src="url%5B" alt="img"></a> ?){50000}')),
+    "many disabled bracket openers":
+            ("[" * 50000 + "![img](/url" + "[" * 50000 + ")](/outer)" + "]" * 49999,
+            re.compile(r'\[{49999}<a href="/outer"><img src="/url(%5B){50000}" alt="img"></a>\]{49999}')),
     "many references":
             ("".join(map(lambda x: ("[" + str(x) + "]: u\n"), range(1,20000 * 16))) + "[0] " * 20000,
             re.compile(r"(\[0\] ){19999}")),
@@ -114,12 +128,37 @@ pathological = {
     "broken thematic break":
             (("* " * 50000 + "a"),
             re.compile("<ul>\r?\n(<li>\r?\n<ul>\r?\n){49999}<li>a</li>\r?\n</ul>\r?\n(</li>\r?\n</ul>\r?\n){49999}")),
+    # md4c ff1cd9f / be8a0fe / 9fed560 (GHSA-582f-rcwc-x4mp). Each blank line
+    # used to re-walk every open list level, O(depth) per line. Timed (see
+    # pathological_budget below): the output is right either way, and the
+    # quadratic build took 7.5 s and 14.8 s here against ~0.04 s. The regex is
+    # anchored and split in two runs to stay under the 65535-repeat cap some
+    # Python builds impose: an unanchored partial count would be retried from
+    # every <li> and make the regex itself quadratic.
+    "many implicit nested blocks":
+            (("- " * 100000 + "x\n" + "\n" * 100000),
+            re.compile("^<ul>\r?\n(<li>\r?\n<ul>\r?\n){50000}(<li>\r?\n<ul>\r?\n){49999}<li>x</li>\r?\n")),
+    "many implicit nested blocks, alternating blank lines":
+            (("- " * 100000 + "x\n" + "\n  \n" * 100000),
+            re.compile("^<ul>\r?\n(<li>\r?\n<ul>\r?\n){50000}(<li>\r?\n<ul>\r?\n){49999}<li>x</li>\r?\n")),
     "nested invalid link references":
             (("[" * 50000 + "]" * 50000 + "\n\n[a]: /b"),
             re.compile(r"\[{50000}\]{50000}")),
     "many broken permissive autolinks":
             (("www._" * 50000 + "x"),
             re.compile("<p>(www._){50000}x</p>")),
+    # md4c #464: every candidate's URL tail runs to the same failing end.
+    "many invalid autolinks":
+            (("www.xx.xx#(" * 20000 + "[x]()"),
+            re.compile(r"<p>(www.xx.xx#\(){20000}<a href=\"\">x</a></p>")),
+    # The same, ending on a `)` whose trimming depends on where the tail
+    # began (what md4c's horizon gets wrong), and on a control character.
+    "many invalid autolinks, closing paren":
+            (("http://a.b/(" * 20000 + ")`x`"),
+            re.compile(r"<p>(http://a.b/\(){20000}\)<code>x</code></p>")),
+    "many invalid autolinks, control character":
+            (("www.xx.xx/(" * 20000 + "\x01"),
+            re.compile(r"<p>(www.xx.xx/\(){20000}\x01</p>")),
     "huge table":
             (("th|" * 10000 + "\n" + "-|" * 10000 + "\n" + "td\n" * 10000),
             re.compile("")),
@@ -129,6 +168,11 @@ pathological = {
     "many link ref. def. instantiations":
             (("[x]: " + "x" * 50000 + "\n[x]" * 50000),
             re.compile("")),
+    # md4c f5be4b7 (#380): every `[^` pairs with a `]` past all the inner
+    # ones, so looking each label up hashed O(n^2) bytes (~18 s here).
+    "many nested footnotes references":
+            (("[^na]:\n\n" + "[^" * 50000 + "x" + "]" * 50000),
+            re.compile(r"<p>(\[\^){49999}.*\]{49999}</p>")),
     "many unclosed inline attributes":
             (("*a*{" * 50000),
             re.compile("(<em>a</em>[{]){50000}")),
@@ -389,10 +433,27 @@ def time_heal(program, inp, budget=None):
     return (best, 0, actual, err)
 
 
+# Cases above whose bug is time, not output: a hard cap in seconds, failing the
+# case when it is blown. Generous on purpose -- 50x the fixed build's time, and
+# still several times under the quadratic one.
+pathological_budget = {
+    "many implicit nested blocks": 2.0,
+    "many implicit nested blocks, alternating blank lines": 2.0,
+}
+
 whitespace_re = re.compile('/s+/')
 passed = 0
 errored = 0
 failed = 0
+
+# Hard per-case cap for the output-checked cases above, so a reintroduced
+# quadratic fails the suite instead of hanging it. Not a performance budget:
+# every case runs in ~0.1 s or less in ReleaseFast, and the cap leaves room for
+# a Debug build on a slow runner. (md4c 19ddb22 added the same guard after its
+# multiprocessing-based TIMEOUT turned out never to fire -- see the 6d168ef
+# entry in .agents/upstream-sync.md. Like the timed heal cases below, this
+# lets subprocess enforce it and kill the child.)
+PATHOLOGICAL_TIMEOUT = 30.0
 
 #print("Testing pathological cases:")
 for description in pathological:
@@ -403,8 +464,18 @@ for description in pathological:
         (inp, regex, default_options) = pathological[description]
         prog = Prog(cmdline=args.program, default_options=default_options)
 
+    budget = pathological_budget.get(description)
     start = timer()
-    [rc, actual, err] = prog.to_html(inp)
+    try:
+        [rc, actual, err] = prog.to_html(inp, timeout=budget or PATHOLOGICAL_TIMEOUT)
+    except TimeoutExpired:
+        if budget is None:
+            errored += 1
+            print('{:35} [TIMEOUT] killed after {:.0f} secs'.format(description, PATHOLOGICAL_TIMEOUT))
+        else:
+            failed += 1
+            print('{:35} [FAILED] killed after the {:.3f} sec budget'.format(description, budget))
+        continue
     end = timer()
     if rc != 0:
         errored += 1

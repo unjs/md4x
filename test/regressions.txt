@@ -468,6 +468,17 @@ bar
 <p><a href="http://example.com">http://example.com</a></p>
 ````````````````````````````````
 
+The suppression has to work also when the autolink contains an entity or
+a backslash escape (md4c `775e87e`).
+
+```````````````````````````````` example
+[https://example.org/?a=b&amp;c=d](https://example.org/?a=b&amp;c=d)
+[https://example.org/a\_b](https://example.org/a\_b)
+.
+<p><a href="https://example.org/?a=b&amp;c=d">https://example.org/?a=b&amp;c=d</a>
+<a href="https://example.org/a_b">https://example.org/a_b</a></p>
+````````````````````````````````
+
 
 ## [Issue 190](https://github.com/mity/md4c/issues/190)
 
@@ -1924,7 +1935,8 @@ https://www.youtube.com/watch?v=_tEL8bJ7yqU
 ````````````````````````````````
 
 The same rule at the edges of a component, and the query segment with no name
-before its `=`.
+before its `=`. Since the URL tail is one continuous run (md4c `f895c2b`), a
+trailing `_` is terminal punctuation and stays outside the link, as on GitHub.
 
 ```````````````````````````````` example
 http://example.com/_foo
@@ -1938,18 +1950,16 @@ http://example.com/foo--bar
 http://example.com/?=x
 .
 <p><a href="http://example.com/_foo">http://example.com/_foo</a></p>
-<p><a href="http://example.com/foo_">http://example.com/foo_</a></p>
+<p><a href="http://example.com/foo">http://example.com/foo</a>_</p>
 <p><a href="http://example.com/a/-b">http://example.com/a/-b</a></p>
 <p><a href="http://example.com/foo--bar">http://example.com/foo--bar</a></p>
 <p><a href="http://example.com/?=x">http://example.com/?=x</a></p>
 ````````````````````````````````
 
-Bracket balancing is now checked for every forward segment before the character
-class is consulted, rather than being folded into the allowed-character test.
-The two cases that pinned the old behaviour must not move: `(` is not a path
-character, so the Wikipedia URL still stops at the host and then fails the
-right boundary; `(` *is* a query character, so the Google one links -- brackets
-and all -- whether or not the whole URL is itself wrapped in brackets.
+Brackets inside the URL tail are balanced, not banned: a `(` in a path is as
+good as one in a query, and only an excess `)` at the very end is left outside
+the link, so a URL wrapped in parentheses still works (md4c `f895c2b`; GitHub
+agrees on all three).
 
 ```````````````````````````````` example
 https://en.wikipedia.org/wiki/Markup_(business)
@@ -1958,18 +1968,17 @@ https://encrypted.google.com/search?q=Markup+(business)
 
 (https://encrypted.google.com/search?q=Markup+(business))
 .
-<p>https://en.wikipedia.org/wiki/Markup_(business)</p>
+<p><a href="https://en.wikipedia.org/wiki/Markup_(business)">https://en.wikipedia.org/wiki/Markup_(business)</a></p>
 <p><a href="https://encrypted.google.com/search?q=Markup+(business)">https://encrypted.google.com/search?q=Markup+(business)</a></p>
 <p>(<a href="https://encrypted.google.com/search?q=Markup+(business)">https://encrypted.google.com/search?q=Markup+(business)</a>)</p>
 ````````````````````````````````
 
-A word delimiter that ends a segment is rolled back by one character so it stays
-outside the link. When the segment consumed nothing at all, that rollback lands
-`end` *before* where the segment started, on a character that then fails the
-right-boundary test -- which kills the match outright rather than shortening it.
-These three inputs used to produce a (partial) link and now produce none. This
-is md4c parity, pinned here because it is the one direction in which this change
-is *less* permissive.
+A delimiter that ends a host (or user name) is rolled back so it stays outside
+the link. A segment that consumed nothing has nothing to roll back (md4c
+`1645761`; before it, the rollback landed `end` before the segment's own start
+and killed the match), and a host ending in a `.` followed by a `-` or `_` gives
+back both, not just the last -- md4c gives back one and links `http://ex.coma.`.
+All three match GitHub.
 
 ```````````````````````````````` example
 http://example.com//
@@ -1978,9 +1987,65 @@ http://ex.coma._
 
 a@ex.com.-
 .
-<p>http://example.com//</p>
-<p>http://ex.coma._</p>
-<p>a@ex.com.-</p>
+<p><a href="http://example.com//">http://example.com//</a></p>
+<p><a href="http://ex.coma">http://ex.coma</a>._</p>
+<p><a href="mailto:a@ex.com">a@ex.com</a>.-</p>
+````````````````````````````````
+
+
+## [Issue 372](https://github.com/mity/md4c/issues/372)
+
+An explicit `mailto:` or `xmpp:` before a permissive e-mail autolink is part of
+the link, and the link keeps that scheme.
+
+```````````````````````````````` example
+mailto:foo@bar.baz
+.
+<p><a href="mailto:foo@bar.baz">mailto:foo@bar.baz</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+xmpp:foo@bar.baz
+.
+<p><a href="xmpp:foo@bar.baz">xmpp:foo@bar.baz</a></p>
+````````````````````````````````
+
+
+## [PR 454](https://github.com/mity/md4c/pull/454)
+
+Make sure we don't accept an empty hostname in the URL autolink.
+
+```````````````````````````````` example
+http://?q=1
+.
+<p>http://?q=1</p>
+````````````````````````````````
+
+
+## [Issue 464](https://github.com/mity/md4c/issues/464) — a failed URL tail must not reject other autolinks
+
+md4c `f9e5eb2` keeps a line of failing URL tails linear with a horizon: once a
+candidate fails at offset X, any later candidate whose host ends before X is
+rejected unexamined. That does not hold, and md4x memoizes the tail scan
+instead. A later candidate can trim an excess `)` the earlier one could not,
+so it succeeds where the earlier one failed:
+
+```````````````````````````````` example
+http://a.b/(http://c.d/x)`code`
+.
+<p>http://a.b/(<a href="http://c.d/x">http://c.d/x</a>)<code>code</code></p>
+````````````````````````````````
+
+And a link's text is analyzed before the text around it, so a URL tail failing
+inside the link would reject every bare URL in front of it:
+
+```````````````````````````````` example
+http://a.b/x [http://c.d/y`code`](u)
+
+see http://a.bc/x and [www.e.com/y`c`](u)
+.
+<p><a href="http://a.b/x">http://a.b/x</a> <a href="u">http://c.d/y<code>code</code></a></p>
+<p>see <a href="http://a.bc/x">http://a.bc/x</a> and <a href="u">www.e.com/y<code>c</code></a></p>
 ````````````````````````````````
 
 
@@ -2015,9 +2080,11 @@ percent-encoded into its `src`, and the remainder stays literal (md4c
 ## Footnote reference swallowed by a link destination
 
 The `[^` opener is swallowed by the `(...)` destination; its `]` closer lives
-*outside* the disabled range and has to be killed along with it, or the emission
-pass meets a resolved closer whose opener is a dummy (md4c `326fe25`, #348).
-The original reproducer used a wiki-link destination, which md4x no longer has.
+*outside* the disabled range. The emission pass must never meet a resolved
+closer whose opener is a dummy (md4c `326fe25`, #348): the closer falls back to
+the nearest enclosing live opener (md4c `c6008fb`) — here there is none, so it
+stays literal. The original reproducer used a wiki-link destination, which md4x
+no longer has.
 
 ```````````````````````````````` example
 [x]([^a) b]
@@ -2042,6 +2109,189 @@ Note.<a href="#fnref-1-1" class="footnote-backref">&#8617;</a>
 </li>
 </ol>
 </section>
+````````````````````````````````
+
+
+## [Issue 367](https://github.com/mity/md4c/issues/367)
+
+Opening brackets in a link destination or title must not consume the closing
+bracket of an enclosing link or image. A `]` whose opener a destination
+swallowed falls back to the nearest enclosing live opener (md4c `c6008fb`).
+
+```````````````````````````````` example
+[![img](url[)]()
+.
+<p><a href=""><img src="url%5B" alt="img"></a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[![img](url[[)](/outer)
+.
+<p><a href="/outer"><img src="url%5B%5B" alt="img"></a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[![img](<url[>)](/outer)
+.
+<p><a href="/outer"><img src="url%5B" alt="img"></a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[![img](url "title[")](/outer)
+.
+<p><a href="/outer"><img src="url" alt="img" title="title["></a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[![img](url[)][ref]
+
+[ref]: /outer
+.
+<p><a href="/outer"><img src="url%5B" alt="img"></a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+![![img](url[)](/outer)
+.
+<p><img src="/outer" alt="img"></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[[![img](url[)]](/outer)
+.
+<p><a href="/outer">[<img src="url%5B" alt="img">]</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[[link](url[)](/outer)
+.
+<p>[<a href="url%5B">link</a>](/outer)</p>
+````````````````````````````````
+
+The same holds when the swallowed opener is a `[^` footnote-reference opener:
+its `]` is not killed with it but re-pairs with the enclosing `[` (which is why
+md4x dropped md4c `326fe25`'s special case from `md_disable_marks`, as md4c
+`1ec0ff4` did). GitHub renders both of these the same way:
+
+```````````````````````````````` example
+[z ![a](u[^x) y](/v)
+
+[^x]: n
+.
+<p><a href="/v">z <img src="u%5B%5Ex" alt="a"> y</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[![img](url[^x)]()
+
+[^x]: n
+.
+<p><a href=""><img src="url%5B%5Ex" alt="img"></a></p>
+````````````````````````````````
+
+
+## Full reference link labels do not participate in span resolution
+
+The marks inside a consumed `[label]` are disabled, so a delimiter in the label
+cannot pair with one after the link and emit an unbalanced span (md4c
+`e2c6766`). md4x's own `==` / `$` delimiters are covered too.
+
+```````````````````````````````` example
+[a][*b] c*
+
+[*b]: /url
+.
+<p><a href="/url">a</a> c*</p>
+````````````````````````````````
+
+```````````````````````````````` example
+*x [a][b*] c
+
+[b*]: /url
+.
+<p>*x <a href="/url">a</a> c</p>
+````````````````````````````````
+
+```````````````````````````````` example
+[a][~~b] c~~ [d][==e] f== [g][$h] i$
+
+[~~b]: /u1
+[==e]: /u2
+[$h]: /u3
+.
+<p><a href="/u1">a</a> c~~ <a href="/u2">d</a> f== <a href="/u3">g</a> i$</p>
+````````````````````````````````
+
+
+## Footnote definitions remain lookupable after reference ordering
+
+The label hashtable points into the definition array, so emission must not
+reorder it: a reference first made from inside another footnote's body is looked
+up while the bodies are being emitted, and the definition it finds is appended
+to the emission order (md4c `f353ad6`).
+
+```````````````````````````````` example
+x[^b] y[^a]
+
+[^a]: alpha
+[^b]: beta see [^a]
+.
+<p>x<sup><a href="#fn-1" id="fnref-1-1">1</a></sup> y<sup><a href="#fn-2" id="fnref-2-1">2</a></sup></p>
+<section class="footnotes">
+<ol>
+<li id="fn-1">
+beta see <sup><a href="#fn-2" id="fnref-2-2">2</a></sup><a href="#fnref-1-1" class="footnote-backref">&#8617;</a>
+</li>
+<li id="fn-2">
+alpha<a href="#fnref-2-1" class="footnote-backref">&#8617;</a> <a href="#fnref-2-2" class="footnote-backref">&#8617;</a>
+</li>
+</ol>
+</section>
+````````````````````````````````
+
+```````````````````````````````` example
+x[^b]
+
+[^a]: unused
+[^b]: beta see [^c]
+[^c]: gamma
+.
+<p>x<sup><a href="#fn-1" id="fnref-1-1">1</a></sup></p>
+<section class="footnotes">
+<ol>
+<li id="fn-1">
+beta see <sup><a href="#fn-2" id="fnref-2-1">2</a></sup><a href="#fnref-1-1" class="footnote-backref">&#8617;</a>
+</li>
+<li id="fn-2">
+gamma<a href="#fnref-2-1" class="footnote-backref">&#8617;</a>
+</li>
+</ol>
+</section>
+````````````````````````````````
+
+
+## [PR 443](https://github.com/mity/md4c/pull/443)
+
+DEL (U+007F) is a control character, so it ends an unbracketed link destination
+and an autolink URI, just like space and the C0 controls. `<` ends an autolink
+URI too (md4c `e7d24b0`).
+
+```````````````````````````````` example
+[a](bc)
+.
+<p>[a](bc)</p>
+````````````````````````````````
+
+```````````````````````````````` example
+<http://ab>
+.
+<p>&lt;http://ab&gt;</p>
+````````````````````````````````
+
+```````````````````````````````` example
+<http://a<b>
+.
+<p>&lt;http://a<b></p>
 ````````````````````````````````
 
 
@@ -2555,4 +2805,436 @@ list:
 <li></li>
 </ul>
 <p>foo</p>
+````````````````````````````````
+
+
+## [Issue 247](https://github.com/mity/md4c/issues/247)
+
+Tabs in verbatim content are preserved after removing structural indentation;
+only the remainder of a partially consumed tab is expanded to spaces. md4x fixed
+this independently (unjs/md4x#23, § Issue 23 above); md4c landed its own fix in
+2671f25. These are md4c's examples. md4x's `<pre>` contents match md4c's
+byte-for-byte on all 17 and only md4x's newline after `<li>` differs, so the
+expectations are md4x's bytes, compared without normalization.
+
+```````````````````````````````` example [no-normalize]
+<!--
+→x
+-->
+```
+<!--
+→y
+-->
+```
+→z
+.
+<!--
+→x
+-->
+<pre><code>&lt;!--
+→y
+--&gt;
+</code></pre>
+<pre><code>z
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+```
+→→x
+ → y
+```
+.
+<pre><code>→→x
+ → y
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+~~~
+→
+ →→
+~~~
+.
+<pre><code>→
+ →→
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+  ```
+→→x
+  →y
+```
+.
+<pre><code>  →x
+→y
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+> ```
+> →→x
+> ```
+.
+<blockquote>
+<pre><code>→→x
+</code></pre>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+> ```
+>→→x
+> ```
+.
+<blockquote>
+<pre><code>  →x
+</code></pre>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+- ```
+  →x
+  ```
+.
+<ul>
+<li>
+<pre><code>→x
+</code></pre>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+- ```
+→→x
+  ```
+.
+<ul>
+<li>
+<pre><code>  →x
+</code></pre>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+1. ```
+→→x
+   ```
+.
+<ol>
+<li>
+<pre><code> →x
+</code></pre>
+</li>
+</ol>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+<pre>
+→x
+</pre>
+.
+<pre>
+→x
+</pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+> - <pre>
+>   →x
+>   </pre>
+.
+<blockquote>
+<ul>
+<li>
+<pre>
+→x
+</pre>
+</li>
+</ul>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+→→x
+    →y
+.
+<pre><code>→x
+→y
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+ →→x
+.
+<pre><code>→x
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+    x
+    →
+.
+<pre><code>x
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+    x
+    →
+    y
+.
+<pre><code>x
+→
+y
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+  ```
+    x
+```
+.
+<pre><code>  x
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+→x
+.
+<pre><code>x
+</code></pre>
+````````````````````````````````
+
+
+## [Issue 414](https://github.com/mity/md4c/issues/414) — deliberately not ported
+
+md4c 10fa4f4 turns the line after a paragraph's leading link reference
+definitions into a thematic break when it reads as one. GitHub (cmark-gfm) does
+not: the setext underline finds a paragraph with no content left, so `---`
+stays paragraph text, and the definition still counts. md4x keeps GitHub's
+reading; see `.agents/upstream-sync.md`.
+
+```````````````````````````````` example
+[foo]:bar
+---
+.
+<p>---</p>
+````````````````````````````````
+
+```````````````````````````````` example
+[foo]:bar
+---
+baz
+
+[foo]
+.
+<p>---
+baz</p>
+<p><a href="bar">foo</a></p>
+````````````````````````````````
+
+
+## [Issue 435](https://github.com/mity/md4c/issues/435)
+
+Lower-case "<![cdata" does not make a valid HTML block starting condition
+(md4c 902b1bc; md4x already required a letter after `<!`, § Issue 23).
+
+```````````````````````````````` example
+<![cdata[ text ]]>
+.
+<p>&lt;![cdata[ text ]]&gt;</p>
+````````````````````````````````
+
+
+## HTML block tag-name boundaries
+
+From md4c e313f46. A longer type 6 name stays eligible when an earlier, shorter
+name in the same bucket matches only a prefix: `th` used to shadow `thead`,
+`head` `header`, `li` `link`, `tr` `track` and so on, which left those tags to
+type 7 — and type 7 cannot interrupt a paragraph.
+
+```````````````````````````````` example
+<prefix>
+
+# Heading
+.
+<prefix>
+<h1>Heading</h1>
+````````````````````````````````
+
+```````````````````````````````` example
+para
+<thead>
+*x*
+.
+<p>para</p>
+<thead>
+*x*
+````````````````````````````````
+
+```````````````````````````````` example
+para
+</thead>
+*x*
+.
+<p>para</p>
+</thead>
+*x*
+````````````````````````````````
+
+```````````````````````````````` example
+para
+<header>
+*x*
+.
+<p>para</p>
+<header>
+*x*
+````````````````````````````````
+
+```````````````````````````````` example
+para
+<link>
+*x*
+.
+<p>para</p>
+<link>
+*x*
+````````````````````````````````
+
+The other half of e313f46 is deliberately **not** ported: md4c refuses `<pre/>`
+(and `<script/>`, `<style/>`, `<textarea/>`) as an HTML block, following the
+letter of spec 4.6 start condition 7. cmark-gfm has no such exclusion and GitHub
+renders `<pre/>` on its own line as a type 7 block; md4x stays with GitHub.
+
+```````````````````````````````` example
+<pre/>
+*x*
+.
+<pre/>
+*x*
+````````````````````````````````
+
+
+## Nonempty list item followed by two blank lines
+
+From md4c 205b7f7, whose fix md4x already had (unjs/md4x#28,
+`md_top_block_is_empty_li`). Two leading blank lines put the content line at
+offset four; this must not make later indented content leave the item.
+
+```````````````````````````````` example
+
+
+- a
+
+
+  b
+.
+<ul>
+<li>
+<p>a</p>
+<p>b</p>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example
+-
+
+
+  b
+.
+<ul>
+<li></li>
+</ul>
+<p>b</p>
+````````````````````````````````
+
+```````````````````````````````` example
+-
+  [ref]: /url
+
+
+  b
+.
+<ul>
+<li>
+<p>b</p>
+</li>
+</ul>
+````````````````````````````````
+
+
+## Nested empty item after two blank lines
+
+From md4c 157e9fc. The inner item closes, while the following paragraph remains
+in the outer item.
+
+```````````````````````````````` example
+- -
+
+
+    b
+.
+<ul>
+<li>
+<ul>
+<li></li>
+</ul>
+<p>b</p>
+</li>
+</ul>
+````````````````````````````````
+
+
+## Empty item inside nested block quotes
+
+From md4c 60e8065. Closing the empty item must keep the enclosing block quote
+markers consumed: the line's indentation is the item's `contents_indent` given
+back, not `total_indent`, which also counts the columns of every `>`.
+
+```````````````````````````````` example
+> > > > -
+> > > >
+> > > >
+> > > >   b
+.
+<blockquote>
+<blockquote>
+<blockquote>
+<blockquote>
+<ul>
+<li></li>
+</ul>
+<p>b</p>
+</blockquote>
+</blockquote>
+</blockquote>
+</blockquote>
+````````````````````````````````
+
+The same with the block quote itself inside a list item:
+
+```````````````````````````````` example
+- a
+  > -
+  >
+  >
+  >   b
+.
+<ul>
+<li>a
+<blockquote>
+<ul>
+<li></li>
+</ul>
+<p>b</p>
+</blockquote>
+</li>
+</ul>
 ````````````````````````````````

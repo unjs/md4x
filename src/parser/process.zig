@@ -169,18 +169,31 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.BlockType, beg: OFF, end:
         ctx.table_cell_boundaries_tail = -1;
         return -1;
     }
+    // pipe_offs[] holds where each cell begins; a cell ends one byte before the
+    // next entry (on its closing pipe). The row's own leading and trailing
+    // pipes are optional, so the row start / end only open or close a cell
+    // when no pipe sits there. Every other pair of adjacent entries is a cell,
+    // empty or not: `| a || c |` is three cells, as on GitHub. (md4c used to
+    // drop every zero-width cell instead, which also made the outer pipes
+    // vanish; ports the table half of md4c 60965ab.)
     var j: c_int = 0;
-    pipe_offs[@intCast(j)] = beg;
-    j += 1;
+    var last_pipe_end: OFF = beg;
+    if (ctx.table_cell_boundaries_head < 0 or ctx.marks.items[@intCast(ctx.table_cell_boundaries_head)].beg > beg) {
+        pipe_offs[@intCast(j)] = beg;
+        j += 1;
+    }
     {
         var i: c_int = ctx.table_cell_boundaries_head;
         while (i >= 0) : (i = ctx.marks.items[@intCast(i)].next) {
-            pipe_offs[@intCast(j)] = ctx.marks.items[@intCast(i)].end;
+            last_pipe_end = ctx.marks.items[@intCast(i)].end;
+            pipe_offs[@intCast(j)] = last_pipe_end;
             j += 1;
         }
     }
-    pipe_offs[@intCast(j)] = end + 1;
-    j += 1;
+    if (ctx.table_cell_boundaries_head < 0 or last_pipe_end < end) {
+        pipe_offs[@intCast(j)] = end + 1;
+        j += 1;
+    }
 
     // Process cells.
     ret = mdEnterBlock(ctx, &.{ .tr = {} });
@@ -194,15 +207,13 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.BlockType, beg: OFF, end:
     {
         var i: c_int = 0;
         while (i < j - 1 and k < col_count) : (i += 1) {
-            if (pipe_offs[@intCast(i)] < pipe_offs[@intCast(i + 1)] - 1) {
-                ret = md_process_table_cell(ctx, cell_type, align_arr[@intCast(k)], pipe_offs[@intCast(i)], pipe_offs[@intCast(i + 1)] - 1);
-                k += 1;
-                if (ret < 0) {
-                    util.free_array_a(OFF, ctx.alloc, pipe_offs, @intCast(n));
-                    ctx.table_cell_boundaries_head = -1;
-                    ctx.table_cell_boundaries_tail = -1;
-                    return ret;
-                }
+            ret = md_process_table_cell(ctx, cell_type, align_arr[@intCast(k)], pipe_offs[@intCast(i)], pipe_offs[@intCast(i + 1)] - 1);
+            k += 1;
+            if (ret < 0) {
+                util.free_array_a(OFF, ctx.alloc, pipe_offs, @intCast(n));
+                ctx.table_cell_boundaries_head = -1;
+                ctx.table_cell_boundaries_tail = -1;
+                return ret;
             }
         }
     }
@@ -435,8 +446,11 @@ pub fn md_process_code_block_contents(ctx: *MD_CTX, is_fenced: c_int, lines_in: 
 }
 
 // md4x.c ~5473. Parse highlight ranges string (e.g. "1-3,5,7") into expanded
-// array. Returns heap-allocated array (null on empty/error) and sets out_count.
-pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_count: *c_uint) [*c]c_uint {
+// array. Returns heap-allocated array (null when nothing parsed) and sets
+// out_count. An allocation failure is an ERROR, not "no highlights": folding
+// the two together silently dropped the `{…}` ranges and parsed on (the class
+// of md4c 47f8f4c).
+pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_count: *c_uint) error{OutOfMemory}![*c]c_uint {
     var arr: [*c]c_uint = null;
     var capacity: c_uint = 0;
     var count: c_uint = 0;
@@ -485,7 +499,7 @@ pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_coun
                 const tmp = util.realloc_array_a(c_uint, ctx.alloc, arr, @intCast(capacity), @intCast(new_cap));
                 if (tmp == null) {
                     util.free_array_a(c_uint, ctx.alloc, arr, @intCast(capacity));
-                    return null;
+                    return error.OutOfMemory;
                 }
                 arr = tmp;
                 capacity = new_cap;
@@ -502,13 +516,14 @@ pub fn md_parse_highlights(ctx: *MD_CTX, str: [*c]const CHAR, size: SZ, out_coun
     // Shrink-to-fit so the freed length equals the reported count (the detail
     // carries `highlights` as a slice, with no capacity). A shrink realloc resizes
     // in place on c_allocator / the testing allocator, so it effectively never
-    // fails here; if it ever did (OOM), drop the highlights cleanly rather than
-    // leave a capacity≠count buffer the caller would free by the wrong length.
+    // fails here; if it ever did (OOM), free the buffer and report the OOM
+    // rather than leave a capacity≠count buffer the caller would free by the
+    // wrong length.
     if (count < capacity) {
         const shr = util.realloc_array_a(c_uint, ctx.alloc, arr, @intCast(capacity), @intCast(count));
         if (shr == null) {
             util.free_array_a(c_uint, ctx.alloc, arr, @intCast(capacity));
-            return null;
+            return error.OutOfMemory;
         }
         arr = shr;
         capacity = count;
@@ -609,7 +624,10 @@ pub fn md_setup_fenced_code_detail(ctx: *MD_CTX, block: *const MD_BLOCK, det: *c
         // Parse highlights into expanded integer array.
         if (has_highlights != 0 and hl_end > hl_beg) {
             var hl_count: c_uint = 0;
-            const hl = md_parse_highlights(ctx, ctx.str(hl_beg), hl_end - hl_beg, &hl_count);
+            const hl = md_parse_highlights(ctx, ctx.str(hl_beg), hl_end - hl_beg, &hl_count) catch {
+                ctx.log("realloc() failed.");
+                return -1;
+            };
             if (hl != null) det.highlights = hl[0..hl_count];
         }
 
@@ -1490,33 +1508,43 @@ fn md_process_footnote_def(ctx: *MD_CTX, def: *const types.MD_FOOTNOTE_DEF) c_in
     return ret;
 }
 
-fn md_footnote_def_less_by_index(_: void, a: types.MD_FOOTNOTE_DEF, b: types.MD_FOOTNOTE_DEF) bool {
-    // Unreferenced defs (index == 0) always sort after referenced ones.
-    if (a.index == 0) return false;
-    if (b.index == 0) return true;
-    return a.index < b.index;
-}
-
 // Emit the footnote definitions that were actually referenced, in
 // first-reference order, wrapped in one `footnote_def_section`. Called from
 // md_process_doc AFTER md_process_all_blocks — this deferred emission is why the
 // definition lines are copied to the heap rather than left in the block arena,
 // which md_process_all_blocks has already consumed by now. md4c a8b0d3e.
+//
+// The definitions are NOT sorted in place: the label hashtable points into
+// `ctx.footnote_defs`, and emitting a body re-parses it, so a `[^x]` inside a
+// footnote is looked up during this loop — after a sort it would miss (or hit
+// the wrong record). The order lives in `ctx.footnote_order` instead, and
+// md_resolve_footnote_refs appends a definition first referenced from inside
+// another one, which the loop bound (re-read every iteration) then reaches.
+// md4c f353ad6.
 fn md_process_footnote_defs(ctx: *MD_CTX) c_int {
     if (ctx.footnote_defs.items.len == 0 or ctx.next_footnote_index == 0)
         return 0;
 
-    // Sort by index so emission follows reference order. Sorting in place is
-    // safe: every lookup is done by now, and md_free_footnote_defs only needs
-    // the array's bounds (unchanged), not its order.
-    std.sort.pdq(types.MD_FOOTNOTE_DEF, ctx.footnote_defs.items, {}, md_footnote_def_less_by_index);
+    // Each definition gets at most one index, so n_defs slots suffice.
+    const order = ctx.alloc.alloc(*types.MD_FOOTNOTE_DEF, ctx.footnote_defs.items.len) catch {
+        ctx.log("malloc() failed.");
+        return -1;
+    };
+    defer {
+        ctx.alloc.free(order);
+        ctx.footnote_order = null;
+    }
+    for (ctx.footnote_defs.items) |*def| {
+        if (def.index != 0) order[def.index - 1] = def;
+    }
+    ctx.footnote_order = order;
 
     var ret = mdEnterBlock(ctx, &.{ .footnote_def_section = {} });
     if (ret != 0) return ret;
 
-    for (ctx.footnote_defs.items) |*def| {
-        if (def.index == 0) break;
-        ret = md_process_footnote_def(ctx, def);
+    var i: usize = 0;
+    while (i < ctx.next_footnote_index) : (i += 1) {
+        ret = md_process_footnote_def(ctx, order[i]);
         if (ret != 0) return ret;
     }
 
@@ -1547,7 +1575,8 @@ pub fn md_process_doc(ctx: *MD_CTX) c_int {
         if (ret < 0) return ret;
     }
 
-    _ = md_end_current_block(ctx);
+    ret = md_end_current_block(ctx);
+    if (ret < 0) return ret;
 
     ret = md_build_ref_def_hashtable(ctx);
     if (ret < 0) return ret;

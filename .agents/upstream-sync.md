@@ -12,17 +12,20 @@ wrong**.
 
 ## Where we are
 
-|                |                                                                          |
-| -------------- | ------------------------------------------------------------------------ |
-| Upstream       | `https://github.com/mity/md4c.git`, branch `master`                      |
-| Fork point     | `481fbfbdf72daab2912380d62bb5f2187d438408` (2024-02-25)                  |
-| Last reviewed  | `c4be8625eb11725d604232b028df10c2ddf9b577` (2026-08-06)                  |
-| Reviewed on    | 2026-08-13                                                               |
-| Range reviewed | 120 commits, 89 of which touch `src/`, `test/`, `md2html/` or `scripts/` |
+|               |                                                                     |
+| ------------- | ------------------------------------------------------------------- |
+| Upstream      | `https://github.com/mity/md4c.git`, branch `master`                 |
+| Fork point    | `481fbfbdf72daab2912380d62bb5f2187d438408` (2024-02-25)             |
+| Last reviewed | `f9e5eb232b95b737373ae706648cb75bd259ed1a` (2026-10-19)             |
+| Reviewed on   | 2026-10-29                                                          |
+| Sweeps        | 2026-08: fork point → `c4be862`, 120 commits, 89 in the path filter |
+|               | 2026-10: `c4be862` → `f9e5eb2`, 88 commits, 71 in the path filter   |
 
 The fork point never changes. `last_reviewed` advances on **every** completed sweep,
 including one that concludes "all no-op" — a sha having been _looked at_ is the durable
-fact; whether code was ported is recorded per-commit in the [ledger](#ledger--2026-08-sweep-fork-point--c4be862).
+fact; whether code was ported is recorded per-commit in the ledgers
+([2026-08](#ledger--2026-08-sweep-fork-point--c4be862),
+[2026-10](#ledger--2026-10-sweep-c4be862--f9e5eb2)).
 
 ## Running a sync
 
@@ -132,13 +135,20 @@ md4c HEAD in the autolink differential (see `00b9516`).
 
 ### `1ec0ff4` — remove the footnote special case in `md_disable_marks`
 
-**Do not port.** It is predicated on upstream's `md_resolve_brackets` refactor (`193141e`),
-which md4x does not have. The `326fe25` guard lives in **both** `md_rollback` and
-`md_disable_marks` here; removing it upstream-style would reintroduce the #348 bug in a
-tree shaped like this one. Since wiki links were removed the guard is no longer reachable
-in practice (see the wiki-link section above), but the reasoning against porting the
-refactor-dependent deletion is unchanged. The 2026-08 audit initially called this N/A — see
-[Corrections](#corrections-to-the-2026-08-audit).
+> **Superseded 2026-10: now ported, together with `c6008fb`.** The verdict below held for
+> the tree it was written against. `c6008fb` queues bracket _closers_ and lets each one
+> re-find its live opener (`md_bracket_opener`), so a `[^` opener disabled inside a link
+> destination leaves its `]` closer free for the enclosing opener. Killing that closer, as
+> the guard did, then becomes the bug: `[z ![a](u[^x) y](/v)` stayed unlinked where md4c HEAD
+> and GitHub link it. The `md_disable_marks` copy is gone; the **`md_rollback` copy stays**,
+> because rollback runs _after_ `md_resolve_footnote_refs` and the closer may already be
+> resolved. Do not delete the rollback guard on the strength of this note.
+
+Original verdict (2026-08): **Do not port.** It is predicated on upstream's
+`md_resolve_brackets` refactor (`193141e`), which md4x does not have. The `326fe25` guard
+lived in **both** `md_rollback` and `md_disable_marks` here; removing it upstream-style would
+have reintroduced the #348 bug in a tree shaped like that one. The 2026-08 audit initially
+called this N/A — see [Corrections](#corrections-to-the-2026-08-audit).
 
 ### `193141e` — refactor bracket resolution into `md_resolve_brackets()`
 
@@ -319,6 +329,74 @@ footnote_refs`, `md_build_footnote_def_hashtable` and `md_process_footnote_defs`
 - The `## Parser Flags` table in `docs/parser-api.md` is gone. Nothing documents a flag
   because nothing has one.
 
+### `f9e5eb2` — permissive-autolink "horizon" for the quadratic tail
+
+**Do not port; the blow-up it targets is fixed differently.** md4c #464
+(`www.xx.xx#(` × 20 000 + `[x]()`) re-walked the shared URL tail once per failing candidate.
+Upstream's fix records where a candidate failed and rejects any later candidate whose host
+ends before that offset, without examining it. That is wrong twice over, both pinned in
+`test/regressions.txt`:
+
+- a later candidate can trim an excess `)` the earlier one could not
+  (`http://a.b/(http://c.d/x)` followed by a code span);
+- link text is analyzed before the text around it and the horizon is never reset, so one
+  failing URL inside link text rejects every bare URL and e-mail earlier in the paragraph
+  (``http://a.b/x [http://c.d/y`code`](u)`` — md4c 0.6 and GitHub link it, md4c HEAD does
+  not).
+
+md4x memoizes the tail scan instead (`MD_PERMISSIVE_AUTOLINK_TAIL` in `types.zig`,
+`md_permissive_autolink_scan_tail` in `inlines.zig`): where a tail stops does not depend on
+where it starts, so a candidate beginning inside the memo only subtracts the bracket tallies
+of the stretch before its own start, and the memo's start advances with it — linear overall.
+The memo is cleared before each permissive-autolink pass and after every autolink that
+resolves. Three pathological cases (upstream's, plus closing-paren and control-character
+variants) take ~6 ms; with the memo disabled each takes 9–10 s. A 15 000-input differential of
+memoized against uncached scanning found 0 mismatches.
+
+### `10fa4f4` + `be74ea1` — a thematic break ends a ref-def-only paragraph
+
+**Do not port.** The two CommonMark reference implementations disagree: commonmark.js gives
+`[foo]:bar\n---` an `<hr>`, cmark (and so cmark-gfm, so GitHub) adds the `---` to the
+emptied paragraph. GitHub confirmed `<p>---</p>`, which is what md4x already emits. Pinned in
+`test/regressions.txt` (§ Issue 414). `be74ea1` only repairs arena corruption `10fa4f4`
+itself introduced.
+
+### `e313f46`, type-1 half — `<pre/>` does not open an HTML block
+
+**Do not port that half; the type-6 half is ported.** Spec 0.31.2 start condition 7 does
+exclude `pre`/`script`/`style`/`textarea` open tags, so upstream follows the letter of the
+spec, but GitHub renders `<pre/>\n*x*` as an HTML block with `*x*` left raw. Both behaviours
+are pinned and explained in `test/regressions.txt`.
+
+### `f5be4b7` — footnote label cap and whitespace rejection
+
+**Only the O(n²) half is ported.** Upstream caps a footnote label at 75 characters "same as
+GitHub" and rejects leading/trailing whitespace. Neither is GitHub's behaviour: GitHub
+resolves labels up to 1 000 bytes (cmark's link-label limit) and resolves `[^ a]` / `[^a ]`
+to `a`. Above 75 characters md4c HEAD also reads `[^aaa…]: note` as a link reference
+definition. md4x takes only the fix that matters — reject a label containing a bracket
+before hashing it (`md_footnote_ref_def`) — which removes the nested `[^[^[^…]]]` blow-up
+(18 s → 0.008 s). `test/spec-footnotes.txt` pins GitHub's reading.
+
+### Insert `++x++` (`12657f7`, `475295b`)
+
+**Skip.** GitHub leaves `++x++` literal. With no flag word it would be on for everyone, and
+it false-positives on ordinary prose and code: `use ++i and then j++`, `a++b++c`. It would also
+add a span type mid-enum. `:ins[x]` already produces `<ins>x</ins>` via COMPONENTS.
+
+### Preserve blank lines `MD_FLAG_PRESERVEBLANKLINES` (`3e17bae`)
+
+**Skip.** Off by default upstream, and only meaningful behind a flag. Taken unconditionally
+(md4x has no flag word) every blank-line run beyond the first would emit `<br>`s, changing
+most documents and diverging from GitHub.
+
+### `<video>` as a type-6 tag (`b4033f3`, `30362ff`, reverted by `b3c6223`)
+
+**Net zero; do not import `test/spec-addendum.txt`.** Upstream added and reverted it within a
+week. `<video>` is not in CommonMark 0.31.2's type-6 list and GitHub wraps it in `<p>`. The
+addendum file `30362ff` introduced exists only to pin the reverted behaviour (md4x passes 2 of
+its 6 examples, both by way of type 7).
+
 ## Deliberate deviations — md4x ahead of md4c on CommonMark
 
 Not upstream commits: **md4x code that no longer matches upstream's, on purpose.** A future
@@ -413,9 +491,12 @@ Two related behaviors deliberately did **not** change:
   halves to stay literal, which would have moved the destination away from GitHub.
 - **Permissive (bare-URL) autolinks.** `https://e.com/?a=1&amp;b=2` unbracketed is not an
   autolink in md4x at all — the entity marks resolve first and the `:`-driven segment
-  scanner never fires. GitHub links it, entity decoded. That is a separate mechanism
-  (`md_analyze_permissive_autolink`), it is inherited from md4c too — verified against
-  `md2html --fpermissive-autolinks` — and it is untouched here.
+  scanner never fires. GitHub links it with the entity kept **literal** in both text and
+  href (corrected 2026-10; this note originally said "entity decoded"). That is a separate
+  mechanism (`md_analyze_permissive_autolink`), inherited from md4c — verified against
+  `md2html --fpermissive-autolinks`. Since the 2026-10 sweep's `775e87e` port the tail steps
+  over entities, and md4x decodes `&amp;` in the href where GitHub does not: an open
+  `autolink-rules` divergence in the parity baseline, not a bug to chase toward md4c.
 
 Blast radius, measured: over `scripts/diff-corpus.sh`'s whole corpus × 6 formats with the
 corpus pinned at the pre-change tree, **zero** hashes move — no existing suite or seed
@@ -525,22 +606,23 @@ Three related decisions from the same sweep, recorded so they are not re-litigat
 
 ## Open — reviewed, actionable, not landed
 
-| upstream             | item                                                                                       | note                                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `323995c`, `ed89abe` | `src/cli/md4x.1` documents ~17 options the CLI rejects with exit 1                         | See below. `[misc]`                                                     |
-| `f6b445d`, `99d4667` | `--replay-fuzz` is vestigial                                                               | See below. `[misc]`                                                     |
-| `ce4636b`            | `MD_CHECK` should abort on any non-zero, not just `< 0`                                    | Decision, not a port. See below. `[mem]`                                |
-| `377cc53`, `be7332b` | `2016-2024` → `2016-2026` (4 files); `http://github.com/unjs/md4x` → `https://` (10 files) | Trivial. `[misc]`                                                       |
-| `2a0f60d`, `e90921a` | `test/spec-permissive-autolinks.txt` text drift                                            | Cosmetic. See below. `[auto]`                                           |
-| `28e2fbd`            | duplicate chars in the URL-escape set (`md4x-html.zig:70`)                                 | Zero output change; the comptime `ESCAPE_MAP` is bit-identical. `[rnd]` |
+| upstream             | item                                                       | note                                                                    |
+| -------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `f6b445d`, `99d4667` | `--replay-fuzz` is vestigial                               | See below. `[misc]`                                                     |
+| `ce4636b`            | `MD_CHECK` should abort on any non-zero, not just `< 0`    | Decision, not a port. See below. `[mem]`                                |
+| `28e2fbd`            | duplicate chars in the URL-escape set (`md4x-html.zig:70`) | Zero output change; the comptime `ESCAPE_MAP` is bit-identical. `[rnd]` |
+| `cf7a662`, `058d084` | `src/cli/md4x.1` roff nits                                 | See below. `[misc]`                                                     |
 
-- **Man page.** Verified: `--ftables`, `--github`, `--fverbatim-entities` all exit 1. md4x
-  dropped every dialect/extension flag (the dialect is fixed, no entry point takes parser
-  flags, and there is no parser flag word — see the wave-2 and wave-3 notes above)
-  but kept md4c's page verbatim; it also omits `--heal`, lists 3 of 6 `--format` values, and
-  still stamps "February 2026". The fix is a product decision: rewrite the page to describe the
-  real CLI (recommended), or implement the flags — which would also change the default from ALL
-  to CommonMark.
+Closed in the 2026-10 sweep: `323995c`/`ed89abe` (the man page was already rewritten for the
+real CLI in `ebab615` — fixed dialect, all six formats, `--heal`, `--heading-ids`),
+`377cc53`/`be7332b` (`fc5930d` updated the last `2016-2024` line; no
+`http://github.com/unjs/md4x` link remained), and `2a0f60d`/`e90921a` (the permissive-autolink
+suite was re-imported from md4c HEAD in `1769fff`).
+
+- **Man page roff nits.** Option dashes are bare `-` rather than `\-` (`cf7a662`);
+  `.B --html-title= \fITITLE\fR` renders a stray space (`058d084` fixed the same with `.BR`);
+  the date is not ISO; the `--help` line `-o  --output` lacks its comma. Not render-checked
+  (no groff `utf8` device on the review machine).
 - **`--replay-fuzz`.** md4c's prefix is two words, parser flags then renderer flags. Wave 2
   dropped the parser-flags half, so md4x's prefix is **4 bytes** (renderer flags only) —
   a sync must not restore the 8-byte layout. It is still vestigial either way: nothing in
@@ -553,10 +635,10 @@ Three related decisions from the same sweep, recorded so they are not re-litigat
   (~60 `ret < 0` sites) and **pins the pre-`ce4636b` matrix in tests** (`src/md4x.zig:800-854`).
   Either follow upstream, or document in `docs/parser-api.md` that callbacks must abort with a
   negative code. Doing neither leaves md4x pinned to behavior upstream calls a bug.
-- **Spec text drift.** `john.doe@gmail.com` → `example.com` (10 occurrences) and the typos
-  `formost` → `foremost`, `username` → `user name`. md4x passes the suite either way. Do **not**
-  re-add the per-example `--fpermissive-*` flag blocks or upstream's `MD4C` naming — both
-  divergences are intentional.
+- **Permissive-autolink suite (closed).** When re-importing `test/spec-permissive-autolinks.txt`,
+  do **not** re-add the per-example `--fpermissive-*` flag blocks, the flags-off example, or
+  upstream's `MD4C` naming — all intentional divergences. The brace example is adapted because
+  md4x passes a whole `{…}` through as an expression.
 
 md4x-only follow-ups the sweep raised, with no upstream counterpart, that did not land:
 `.github/workflows/ci.yml` never runs `zig build fuzz-zig`, and `AGENTS.md` claims a
@@ -568,6 +650,9 @@ Commits newer than `last_reviewed` that were ported on their own, out of order, 
 bug report forced the issue. `last_reviewed` does **not** move for these — the commits between
 it and them are still unreviewed — so the next sweep will print them again; classify them
 `ported` from this table rather than re-investigating.
+
+Currently empty of pending entries: the 2026-10 sweep classified `f7f9c57` from the row below
+(kept for its reasoning).
 
 | md4x         | upstream  | subject                                                              | note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ------------ | --------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -582,18 +667,29 @@ it and them are still unreviewed — so the next sweep will print them again; cl
 2. After `589681b` removed the column cap, md4c HEAD truncates the count mod 65536 — a
    65 536-column table emits **zero** `<th>` and drops its content. md4x keeps a 65535 cap for
    exactly this reason.
-3. `6d168ef`'s pathological-test timeout never fires.
+3. ~~`6d168ef`'s pathological-test timeout never fires.~~ Fixed upstream by `19ddb22`.
 4. In `d1f8a97`, a segment that consumes nothing still rolls `end` back past its own start,
-   killing the whole match (`http://example.com//`, `http://ex.coma._`, `a@ex.com.-`).
+   killing the whole match. The `http://example.com//` half is fixed upstream by `1645761`;
+   the `._` / `.-` half is now a one-delimiter rollback (since `f895c2b`, `http://ex.com._`
+   links the href `http://ex.com.`) and still reproduces in md4c HEAD.
 5. The four CommonMark divergences in
-   [Deliberate deviations](#deliberate-deviations--md4x-ahead-of-md4c-on-commonmark), all of
-   which reproduce in md4c HEAD: `<textareaa` as a raw HTML block, `<!_` as one (and HTML
-   block type 5 unreachable behind it), an indented `<div>` interrupting a paragraph, and a
-   surviving tab rewritten as spaces in verbatim indentation.
+   [Deliberate deviations](#deliberate-deviations--md4x-ahead-of-md4c-on-commonmark). Upstream
+   has since fixed type 4 (`902b1bc`), tag-name boundaries (`e313f46`) and verbatim tabs
+   (`2671f25`); `<![CDATA[` at end of file still becomes a paragraph in md4c HEAD. The
+   indent-guard case was not re-checked in the 2026-10 sweep.
 6. `f7f9c57` (the mity/md4c#413 fix) still misreads the arena top: with two blank lines,
    `-\n  ---\n\n\n  b` ejects `b` from the item whenever the `---` content starts at byte
    `256k + 4`, and the same holds for any ATX heading at such an offset. See
    [Landed ahead of the next sweep](#landed-ahead-of-the-next-sweep).
+7. `f9e5eb2`'s horizon rejects valid permissive autolinks — see its
+   [do-not-port entry](#f9e5eb2--permissive-autolink-horizon-for-the-quadratic-tail) for the two inputs.
+8. `f5be4b7`'s "75 characters, same as GitHub" is not GitHub's limit (1 000), GitHub resolves
+   `[^ a]` / `[^a ]`, and above 75 characters `[^aaa…]: note` becomes a link reference definition.
+9. `775e87e`'s message says cmark-gfm decodes the entity in the href; GitHub keeps `&amp;amp;`
+   literal in both text and href. Upstream's spec text also says a tail may begin with `:`,
+   while the code only accepts `/?#` (`:` only as a digit port).
+10. `10fa4f4` follows commonmark.js against cmark/cmark-gfm (informational, not a bug).
+    `9fed560`'s message says it doubles the input; its diff halves the alternating case.
 
 ## Ledger — 2026-08 sweep (fork point → `c4be862`)
 
@@ -767,3 +863,123 @@ Recorded because the ledger, not the report, is the durable artifact.
 9. **Unicode regeneration coverage.** The audit recommended "at least one spec case per class";
    `d806f23` added **8** cases to `coverage.txt` (five punctuation-flanking, three folding).
    Against the pre-regeneration binary that suite is 31 passed / 7 failed; after, 38 / 0.
+
+## Ledger — 2026-10 sweep (`c4be862` → `f9e5eb2`)
+
+71 rows, oldest first, in `bun scripts/upstream-sync.ts` order for `c4be862..f9e5eb2`. Four
+parallel reports this time: `[auto]` autolinks, `[blk]` blocks/lists/tables, `[inl]`/`[ext]`
+inlines and footnotes, `[mem]`/`[misc]`/`[uni]` memory, harness, unicode and residue.
+
+| sha       | subject                                                                           | class                                  | note                                                                                   |
+| --------- | --------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------- |
+| `3e17bae` | Add optional blank line preservation (MD_FLAG_PRESERVEBLANKLINES) (#385)          | do-not-port                            | Flag-gated block type; unconditional would add `<br>`s to most docs. `[ext]`           |
+| `6f9cc83` | Replace fall through comments with MD_FALLTHROUGH macro (#389)                    | n/a                                    | Zig switch has no fallthrough. `[misc]`                                                |
+| `0c4df9e` | Replace TRUE and FALSE macros with stdbool.h                                      | n/a                                    | C-only. `[misc]`                                                                       |
+| `9358cbc` | Remove redefinition of MD_FOOTNOTE_DEF                                            | n/a                                    | C typedef. `[misc]`                                                                    |
+| `12657f7` | Add extension for insert                                                          | do-not-port                            | GitHub leaves `++x++` literal; false positives on `++i`. `:ins[x]` works. `[ext]`      |
+| `86ef56e` | CMakeLists.txt: Improve handling of build options.                                | n/a                                    | md4x builds with `zig build`. `[misc]`                                                 |
+| `853eb6d` | Fix compiler warning with -Wpedantic when not using C23 or newer standard. (#393) | n/a                                    | C-only. `[misc]`                                                                       |
+| `f0d5d0e` | Add Embedded CI and fix ESP-IDF build (#394)                                      | n/a                                    | No CMake/ESP-IDF. `[misc]`                                                             |
+| `56fe6d1` | Add highlight to man page. Fix placement in usage.                                | n/a                                    | No `--f*` flags; highlight always on. `[misc]`                                         |
+| `76d7497` | Fix alignment of comments                                                         | n/a                                    | `src/abi.zig` comments are md4x's own. `[misc]`                                        |
+| `5fc8ca5` | Fix alignment of comments for MD_BLOCK and MD_SPAN structs                        | n/a                                    | Same. `[misc]`                                                                         |
+| `7f7ff6b` | Add example for strikethrough                                                     | n/a                                    | No `--fstrikethrough` in md4x. `[misc]`                                                |
+| `61f5ce7` | Fix implicit conversion: shorten-64-to-32                                         | n/a                                    | Zig has no implicit narrowing; `@intCast` is explicit. `[mem]`                         |
+| `bed011f` | Remove #define inline                                                             | n/a                                    | C-only. `[misc]`                                                                       |
+| `b630227` | Make md_free_attribute() idempotent and free partial builds                       | already-fixed                          | `util.zig` frees each buffer at its tracked length and nulls it. `[mem]`               |
+| `fa0efb8` | Stop double-freeing a committed reference definition's label                      | already-fixed                          | Slot reserved first, `items.len` bumped only on success. `[mem]`                       |
+| `3a96686` | Use EXIT_SUCCESS and EXIT_FAILURE for exit()                                      | n/a                                    | CLI's `exit(0/1)` already right. `[misc]`                                              |
+| `b4033f3` | Add <video> to block-level HTML tag list (type 6)                                 | n/a                                    | Reverted by `b3c6223`; net zero. `[blk]`                                               |
+| `47f8f4c` | Propagate three swallowed out-of-memory errors                                    | ported                                 | → `55f7401`; all 3 sites live; +2 md4x-only OOM sites; one-shot alloc sweep. `[mem]`   |
+| `5893c54` | md_analyze_permissive_autolink: Allow explicit...                                 | ported                                 | → `1769fff`; `mailto:`/`xmpp:` prefix joins the link. `[auto]`                         |
+| `30362ff` | test/spec-addendum.txt: New file.                                                 | do-not-port                            | spec-addendum pins `<video>`, reverted upstream. `[uni]`                               |
+| `f7f9c57` | md_analyze_line: Handle blank lines in a list item in less hacky way.             | ported                                 | → unjs/md4x#28 (Landed ahead), with the `last_block_off` fix. `[blk]`                  |
+| `10fa4f4` | md_consume_link_reference_definitions: Detect thematic break.                     | do-not-port                            | GitHub keeps `[foo]:bar\n---` as `<p>---</p>`; pinned. `[blk]`                         |
+| `f5be4b7` | Footnotes: Improve detection of footnote references. (#421)                       | ported (partial)                       | → `7c3bc79`; O(n²) half only, the 75-char cap/whitespace rule is not GitHub's. `[inl]` |
+| `be74ea1` | md_consume_link_reference_definitions: Fix manipulation... (#426)                 | n/a                                    | Repairs only what `10fa4f4` broke. `[blk]`                                             |
+| `60965ab` | Rework pipe handling in order to better resolve... (#419)                         | ported (table half)                    | → `1c71763`; `\|\|` is an empty cell, as on GitHub. Spoiler half n/a. `[blk]`          |
+| `b3c6223` | Revert video tag extension (#428)                                                 | n/a                                    | md4x never had `video`. `[blk]`                                                        |
+| `ff481cc` | script/unicode/*: Updated to Unicode 18.0.0.                                      | ported                                 | → `253332e`; regenerated `unicode_tables.zig` byte-identical. `[uni]`                  |
+| `7414c2a` | md2html/CmakeLists.txt: On MacOS set INSTALL_RPATH.                               | n/a                                    | CMake. `[misc]`                                                                        |
+| `7fc1815` | src/md4c.h: Fix some comments (typos, bad wording).                               | n/a                                    | Wording absent from md4x. `[misc]`                                                     |
+| `475295b` | Combine superscript, highlight, and insert portions of md_collect_marks           | n/a                                    | No `^`/`++` collectors; md4x's `==` is its own. `[inl]`                                |
+| `c933a91` | Combine md_analyze_XXX functions into md_analyze_generic                          | n/a                                    | Refactor; its spoiler regression is fixed by `89a9bf4`. `[inl]`                        |
+| `3d3c690` | Cleanup                                                                           | n/a                                    | Cosmetic + subscript-only. `[inl]`                                                     |
+| `c8d7a7e` | Remove prev_mark; it's only used in MD_ASSERT                                     | n/a                                    | C assert cleanup. `[inl]`                                                              |
+| `902b1bc` | md_is_html_block_start_condition: Fix condition 4.                                | already-fixed                          | md4x deviation #2 (unjs/md4x#23); example imported. `[blk]`                            |
+| `a25ed43` | md_analyze_line: Use memchr() to find the end of line.                            | already-fixed                          | `scan.indexOfAnyPos` is vectorized; CR/CRLF case imported. `[blk]`                     |
+| `11e0b30` | md_analyze_line: Use memchr() to find the end of line...                          | already-fixed                          | Same; do not reintroduce a libc scan. `[blk]`                                          |
+| `45ec7ac` | Test link destination stop characters in two comparisons                          | n/a                                    | Same predicate as two comparisons. `[inl]`                                             |
+| `e7d24b0` | Test DEL and '<' as link destination and autolink stop characters                 | ported (tests)                         | → `7c3bc79`; md4x already passed 3/3. `[inl]`                                          |
+| `ec89a39` | Create ISCNTRLORWHITESPACE helper macro and...                                    | n/a                                    | Refactor of `45ec7ac`. `[inl]`                                                         |
+| `89a9bf4` | Only pair "\|\|" runs as spoiler marks                                            | n/a                                    | No spoilers. `[inl]`                                                                   |
+| `bd740dd` | Code cleanup (#445)                                                               | n/a                                    | C macro parenthesization. `[inl]`                                                      |
+| `c6008fb` | Fix bracket pairing across link destinations                                      | ported                                 | → `7c3bc79`; closer queue + `md_bracket_opener`; flips `1ec0ff4`. `[inl]`              |
+| `3da1937` | md_analyze_permissive_autolink: Accept single-component hosts and ports.          | ported                                 | → `1769fff`; `http://localhost:3000`. `www.` still needs two labels. `[auto]`          |
+| `d15aeb6` | spec-permissive-autolinks.txt: Add examples for a colon without a port.           | ported                                 | → `1769fff`; tests, in `f895c2b`'s revised form. `[auto]`                              |
+| `1407182` | tests: preserve executable paths containing spaces                                | ported                                 | → `95512c9`; `prog.py` + new `test/prog-tests.py`. `[uni]`                             |
+| `2bd1364` | tests: accept native stdout line endings                                          | ported                                 | → `95512c9`. `[uni]`                                                                   |
+| `058d084` | Fix typos                                                                         | **open** (tidy)                        | Same `--html-title= TITLE` roff space in `md4x.1`. `[misc]`                            |
+| `ea6c590` | Add description to manpage; Use SY and YS macros for synopsis                     | n/a                                    | `md4x.1` already has a DESCRIPTION. `[misc]`                                           |
+| `cf7a662` | Escape hyphens for option dashes; Remove blank lines for readability              | **open** (tidy)                        | `md4x.1` option dashes unescaped. `[misc]`                                             |
+| `b764c6b` | Use escape sequences for tilde and caret to ensure proper rendering               | n/a                                    | No `~`/`^` in `md4x.1`. `[misc]`                                                       |
+| `2671f25` | Preserve tabs in verbatim block indentation                                       | already-fixed                          | md4x deviation #4; 17 examples byte-identical, imported. `[blk]`                       |
+| `23e381f` | regressions.txt: Fix missing ending fence for the last test case.                 | n/a                                    | md4x imported `e7d24b0`'s cases in fixed form. `[blk]`                                 |
+| `a047a32` | CHANGELOG.md: Update.                                                             | n/a                                    | CHANGELOG + a stray marker md4x never had. `[uni]`                                     |
+| `f895c2b` | Preserve punctuation in permissive autolink URL tails                             | ported                                 | → `1769fff`; continuous tail + trailing trim; toward GitHub. `[auto]`                  |
+| `1645761` | md_analyze_permissive_autolink_segment: Refuse an empty hostname.                 | ported                                 | → `1769fff`; required by `3da1937` (`http://?q=1`). `[auto]`                           |
+| `e2c6766` | Fix span pairing across full-reference link labels                                | ported                                 | → `7c3bc79`; reference label's marks disabled. `[inl]`                                 |
+| `f353ad6` | Keep footnote definitions stable during ordered emission                          | ported                                 | → `7c3bc79`; `footnote_order`, defs never sorted in place. `[inl]`                     |
+| `ae821cb` | Keep failed footnote probes from consuming link openers                           | ported                                 | → `7c3bc79`; undefined `[^x]` is a plain bracket. `[inl]`                              |
+| `e313f46` | Fix HTML block start tag boundaries                                               | ported (type 6) / do-not-port (type 1) | → `ba4c14a`; `<pre/>` exclusion declined, GitHub opens a block. `[blk]`                |
+| `205b7f7` | Fix list item closure after two blank lines                                       | already-fixed                          | `md_top_block_is_empty_li` (#28); 3 examples imported. `[blk]`                         |
+| `157e9fc` | Cover nested empty list item closure                                              | already-fixed                          | Tests only; imported. `[blk]`                                                          |
+| `60e8065` | Preserve quote indentation after closing an empty list item                       | ported                                 | → `ba4c14a`; `line.indent += contents_indent`. `[blk]`                                 |
+| `2acc72a` | Change switch statement to use fallthrough for md_analyze_generic                 | n/a                                    | Cosmetic. `[inl]`                                                                      |
+| `6240bca` | md_analyze_permissive_autolink: Trim excess closing brackets and braces.          | ported                                 | → `1769fff`; excess `]`/`}` trim differs from GitHub (open divergence). `[auto]`       |
+| `775e87e` | md_analyze_permissive_autolink: Accept entities and escapes in the URL tail.      | ported                                 | → `1769fff`; incl. #152; href decodes `&amp;` unlike GitHub. `[auto]`                  |
+| `ff1cd9f` | md_analyze_line: Jump right into the implicit parent blocks...                    | ported                                 | → `ba4c14a`, with `be8a0fe`; stricter cache invalidation. `[blk]`                      |
+| `be8a0fe` | md_analyze_line: Generalize the shortcut...                                       | ported                                 | → `ba4c14a`; 14.8 s → 0.03 s. `[blk]`                                                  |
+| `19ddb22` | tests: enforce the pathological-test timeout without multiprocessing              | ported                                 | → `6367ab4`; md4x's output-checked cases had no timeout. `[uni]`                       |
+| `9fed560` | tests: make the implicit nested block tests fail without the fix                  | ported                                 | → `ba4c14a`; timed cases + `pathological_budget`. `[blk]`                              |
+| `f9e5eb2` | md_analyze_permissive_autolink: Fix O(n^2) in an autolink "tail".                 | do-not-port                            | Horizon rejects valid links; memoized tail scan instead (`1769fff`). `[auto]`          |
+
+**Excluded from the table (17 of 88).** README/CHANGELOG/CMake/CI/packaging/version only, all
+no-ops for md4x: `00788b1` `150fcf6` `2733b7c` `3e7ace2` `5325b33` `58c55b6` `5985f63`
+`5d02447` `6d9ecf0` `6e3fa6d` `71ac6c4` `71d999c` `72db6f9` `c7ba975` `d614776` `e9fdebb`
+`fb83eb2`. No merge commits in the range.
+
+## What landed in the 2026-10 sweep
+
+| md4x      | upstream                                                                      | note                                                                                   |
+| --------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `55f7401` | `47f8f4c`                                                                     | Plus md4x-only: fence highlight ranges, JSX value OOM (`MD_CTX.deferred_oom`).         |
+| `95512c9` | `1407182`, `2bd1364`                                                          | `test/prog-tests.py`, wired into `scripts/run-tests.ts`.                               |
+| `6367ab4` | `19ddb22`                                                                     | 30 s cap per output-checked pathological case; `pathological_budget` overrides it.     |
+| `253332e` | `ff481cc`                                                                     | Data file only; tables byte-identical.                                                 |
+| `1c71763` | `60965ab` (table half)                                                        | 8 000 random tables: 8 000/8 000 match md4c HEAD (was 4 899).                          |
+| `ba4c14a` | `e313f46` (type 6), `60e8065`, `ff1cd9f`, `be8a0fe`, `9fed560`                | Plus test imports for `2671f25`, `902b1bc`, `205b7f7`, `157e9fc`, and a `10fa4f4` pin. |
+| `7c3bc79` | `c6008fb`, `1ec0ff4`, `e2c6766`, `ae821cb`, `f5be4b7` (O(n²) half), `f353ad6` | Plus `e7d24b0` tests. `spec-footnotes` #36 re-baselined.                               |
+| `1769fff` | `5893c54`, `3da1937`, `d15aeb6`, `f895c2b`, `1645761`, `6240bca`, `775e87e`   | `f9e5eb2` replaced by a memoized tail scan. md4x-only two-delimiter rollback.          |
+| `0d71ed4` | —                                                                             | gh-parity baseline re-recorded (permissive 17/33, tables 18/23, footnotes 13/43).      |
+| `fc5930d` | `377cc53`                                                                     | Last `2016-2024` copyright line.                                                       |
+
+Blast radius: all 20 `.txt` suites, pathological 66/66, `zig build test` (ReleaseSafe + Debug),
+`zig build fuzz-zig`, and vitest 1289 passed / 3 skipped. Over `scripts/diff-corpus.sh` with the
+corpus pinned at `adc9733`, **9** hashes move: 5 for `seed-corpus/footnotes.md` (`f353ad6`: a
+footnote referenced from inside another footnote's body now resolves) and 4 for
+`seed-corpus/heal.md` (`[link](https://exam` now autolinks `https://exam`, as on GitHub).
+
+## Corrections from the 2026-10 sweep
+
+1. **`1ec0ff4`** flips from do-not-port to ported once `c6008fb` lands — see its entry. The
+   2026-08 ledger row is left as written (append-only).
+2. **Autolink-entity section:** GitHub keeps an entity in a bare URL literal, not decoded — fixed
+   in place.
+3. **Man page Open item** was stale: `ebab615` (2026-08-15) had already rewritten `md4x.1`.
+4. **Pathological timeout.** Both the `[mem]`/`[uni]` and `[blk]` reports found that md4x's
+   output-checked pathological cases had no timeout at all — the same defect the ledger had
+   charged to upstream's `6d168ef`. Both added one; they were merged in `6367ab4` / `ba4c14a`.
+5. **Trap:** `bun scripts/run-tests.ts` builds the JS artifacts and runs `zig build test`, but
+   does **not** rebuild `zig-out/bin/md4x`, which the `.txt` suites run. Run `zig build` first, or
+   a stale CLI reports spurious suite failures.

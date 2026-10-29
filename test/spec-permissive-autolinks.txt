@@ -5,10 +5,10 @@ Standard autolinks (as per CommonMark specification) have to be decorated with
 `<` and `>` so for example:
 
 ```````````````````````````````` example
-<mailto:john.doe@gmail.com>
+<mailto:john.doe@example.com>
 <https://example.com>
 .
-<p><a href="mailto:john.doe@gmail.com">mailto:john.doe@gmail.com</a>
+<p><a href="mailto:john.doe@example.com">mailto:john.doe@example.com</a>
 <a href="https://example.com">https://example.com</a></p>
 ````````````````````````````````
 
@@ -18,11 +18,11 @@ written without those marks. All three are unconditional.
 Example of permissive autolinks follows:
 
 ```````````````````````````````` example
-john.doe@gmail.com
+john.doe@example.com
 https://www.example.com
 www.example.com
 .
-<p><a href="mailto:john.doe@gmail.com">john.doe@gmail.com</a>
+<p><a href="mailto:john.doe@example.com">john.doe@example.com</a>
 <a href="https://www.example.com">https://www.example.com</a>
 <a href="http://www.example.com">www.example.com</a></p>
 ````````````````````````````````
@@ -32,18 +32,18 @@ strict rules apply to what characters may or may not form such autolinks.
 When a need arises to use a link which does not satisfy these restrictions,
 standard Markdown autolinks have to be used.
 
-First and formost, these autolinks have to be delimited from surrounded text,
+First and foremost, these autolinks have to be delimited from surrounded text,
 i.e. whitespace, beginning/end of line, or very limited punctuation must
 precede and follow respectively.
 
 Therefore these are not autolinks because `:` precedes or follows:
 
 ```````````````````````````````` example
-:john.doe@gmail.com
+:john.doe@example.com
 :https://www.example.com
 :www.example.com
 .
-<p>:john.doe@gmail.com
+<p>:john.doe@example.com
 :https://www.example.com
 :www.example.com</p>
 ````````````````````````````````
@@ -52,11 +52,11 @@ Allowed punctuation right before autolink includes only opening brackets `(`,
 `{` or `[`:
 
 ```````````````````````````````` example
-[john.doe@gmail.com
+[john.doe@example.com
 (https://www.example.com
 {www.example.com
 .
-<p>[<a href="mailto:john.doe@gmail.com">john.doe@gmail.com</a>
+<p>[<a href="mailto:john.doe@example.com">john.doe@example.com</a>
 (<a href="https://www.example.com">https://www.example.com</a>
 {<a href="http://www.example.com">www.example.com</a></p>
 ````````````````````````````````
@@ -64,11 +64,11 @@ Allowed punctuation right before autolink includes only opening brackets `(`,
 Correspondingly, the respective closing brackets may follow the autolinks.
 
 ```````````````````````````````` example
-john.doe@gmail.com]
+john.doe@example.com]
 https://www.example.com)
 www.example.com}
 .
-<p><a href="mailto:john.doe@gmail.com">john.doe@gmail.com</a>]
+<p><a href="mailto:john.doe@example.com">john.doe@example.com</a>]
 <a href="https://www.example.com">https://www.example.com</a>)
 <a href="http://www.example.com">www.example.com</a>}</p>
 ````````````````````````````````
@@ -107,8 +107,8 @@ john.doe@example.com*
 ## Permissive URL Autolinks
 
 Permissive URL autolinks are formed
-by mandatory URL scheme, mandatory host, optional path, optional query and
-optional fragment.
+by a mandatory URL scheme, mandatory host and optional URL tail (such as
+a port, path, query or fragment).
 
 The permissive URL autolinks recognize only `http://`, `https://` and `ftp://`
 as the scheme:
@@ -127,15 +127,57 @@ ssh://example.com
 ````````````````````````````````
 
 The host is a sequence made of alphanumerical characters, `.`, `-` and `_`.
-It has to include at least two components delimited with `.`, last component
-has to have at least two characters, and occurrence of `.`, `-` and `_` has to
-be immediately preceded and followed with a letter or digit.
+Any occurrence of `.`, `-` and `_` has to be immediately preceded and followed
+with a letter or digit. Normally the host has to include at least two
+components delimited with `.`, but because the scheme already makes the intent
+explicit, a single component is accepted too, as is common for development and
+intranet hosts:
 
-The host specification may optionally be followed with path. Path begins with
-character `/` and uses it also for delimiting path components. Every path
-component is made of alhanumerical characters and `.`, `-`, `_`. Once again,
-any occurrence of `.`, `-`, `_` has to be surrounded with alphanumerical
-character.
+```````````````````````````````` example
+http://localhost
+https://devbox/path
+.
+<p><a href="http://localhost">http://localhost</a>
+<a href="https://devbox/path">https://devbox/path</a></p>
+````````````````````````````````
+
+The host may be followed with a port number, i.e. `:` and one or more digits:
+
+```````````````````````````````` example
+http://localhost:3000
+https://example.com:8443/path
+http://127.0.0.1:8081/index.bundle?platform=ios
+.
+<p><a href="http://localhost:3000">http://localhost:3000</a>
+<a href="https://example.com:8443/path">https://example.com:8443/path</a>
+<a href="http://127.0.0.1:8081/index.bundle?platform=ios">http://127.0.0.1:8081/index.bundle?platform=ios</a></p>
+````````````````````````````````
+
+Only digits form a port. A `:` with nothing or something else after it is
+not part of the host:
+
+```````````````````````````````` example
+http://localhost:
+http://localhost:abc
+.
+<p><a href="http://localhost">http://localhost</a>:
+<a href="http://localhost">http://localhost</a>:abc</p>
+````````````````````````````````
+
+The usual delimiting rules still apply, so a port at the end of a sentence
+does not swallow the punctuation:
+
+```````````````````````````````` example
+The dev server runs at http://localhost:3000.
+.
+<p>The dev server runs at <a href="http://localhost:3000">http://localhost:3000</a>.</p>
+````````````````````````````````
+
+The host specification may optionally be followed with a URL tail beginning
+with `/`, `:`, `?` or `#`. The tail continues until whitespace, an ASCII control
+character, `<`, or resolved Markdown syntax other than an entity reference or
+a backslash escape. URI punctuation and Unicode characters may occur within
+the tail. The scan does not validate port digits.
 
 ```````````````````````````````` example
 https://example.com/images/branding/logo_272x92.png
@@ -143,10 +185,11 @@ https://example.com/images/branding/logo_272x92.png
 <p><a href="https://example.com/images/branding/logo_272x92.png">https://example.com/images/branding/logo_272x92.png</a></p>
 ````````````````````````````````
 
-Then optionally query may follow. The query is made of `?` and then with
-alhanumerical characters, `&`, `.`, `-`, `+`, `_`, `=`, `(` and `)`. Once again any
-of those non-alhanumerical characters has to be surrounded with alpha-numerical
-characters, and also brackets `(` have to be balanced `)`.
+Then optionally query may follow. Consecutive punctuation characters, percent
+escapes and redirect URLs are allowed in the query. Unmatched opening
+brackets may occur within the URL. Excess terminal closing brackets
+and terminal punctuation (`?`, `!`, `.`, `,`, `:`, `;`, `*`, `_`, `~`, `'`,
+`"`) are excluded from the link.
 
 ```````````````````````````````` example
 https://www.google.com/search?q=md4c+markdown
@@ -177,6 +220,218 @@ Anonymous FTP is available at ftp://foo.bar.baz.
 ````````````````````````````````
 
 
+### URL tail punctuation and Markdown boundaries
+
+The following examples cover continuous URL-tail scanning and its boundaries.
+
+URI punctuation remains part of paths, queries and fragments, including
+consecutive delimiters and redirect URLs.
+
+```````````````````````````````` example
+https://example.org/Help:Editing
+https://example.org/a::b
+https://example.org/a:/b
+https://example.org/a;b
+https://example.org/a@b
+https://example.org/?C=M;O=D
+https://example.org/a?x=a;;b
+https://example.org/a?x=a;+b
+https://example.org/a?next=https://example.com/b
+https://example.org/a?$filter=abc
+https://example.org/a?x=%20&y=1
+https://example.org/a#b%20c
+https://example.org/a#b/c
+.
+<p><a href="https://example.org/Help:Editing">https://example.org/Help:Editing</a>
+<a href="https://example.org/a::b">https://example.org/a::b</a>
+<a href="https://example.org/a:/b">https://example.org/a:/b</a>
+<a href="https://example.org/a;b">https://example.org/a;b</a>
+<a href="https://example.org/a@b">https://example.org/a@b</a>
+<a href="https://example.org/?C=M;O=D">https://example.org/?C=M;O=D</a>
+<a href="https://example.org/a?x=a;;b">https://example.org/a?x=a;;b</a>
+<a href="https://example.org/a?x=a;+b">https://example.org/a?x=a;+b</a>
+<a href="https://example.org/a?next=https://example.com/b">https://example.org/a?next=https://example.com/b</a>
+<a href="https://example.org/a?$filter=abc">https://example.org/a?$filter=abc</a>
+<a href="https://example.org/a?x=%20&amp;y=1">https://example.org/a?x=%20&amp;y=1</a>
+<a href="https://example.org/a#b%20c">https://example.org/a#b%20c</a>
+<a href="https://example.org/a#b/c">https://example.org/a#b/c</a></p>
+````````````````````````````````
+
+Unmatched opening parentheses belong to the URL, including the GFM
+`www.` example.
+
+```````````````````````````````` example
+https://example.org/a?x=(business
+www.google.com/search?q=Markup+(business
+.
+<p><a href="https://example.org/a?x=(business">https://example.org/a?x=(business</a>
+<a href="http://www.google.com/search?q=Markup+(business">www.google.com/search?q=Markup+(business</a></p>
+````````````````````````````````
+
+Only excess terminal closing parentheses are excluded.
+
+```````````````````````````````` example
+(https://example.org/a?x=(business)))
+https://example.org/a?x=(business)))),
+.
+<p>(<a href="https://example.org/a?x=(business)">https://example.org/a?x=(business)</a>))
+<a href="https://example.org/a?x=(business)">https://example.org/a?x=(business)</a>))),</p>
+````````````````````````````````
+
+Interior unmatched closing parentheses remain part of the URL.
+
+```````````````````````````````` example
+https://example.org/a)tail
+https://example.org/a))tail
+.
+<p><a href="https://example.org/a)tail">https://example.org/a)tail</a>
+<a href="https://example.org/a))tail">https://example.org/a))tail</a></p>
+````````````````````````````````
+
+Terminal sentence punctuation is trimmed. The terminal-semicolon rule
+continues to apply.
+
+```````````````````````````````` example
+https://example.org/a?x=%20?
+https://example.org/a?x=%20!
+https://example.org/a?x=%20.
+https://example.org/a?x=%20,
+https://example.org/a?x=%20:
+https://example.org/a?x=%20;
+https://example.org/a?x=%20*
+https://example.org/a?x=%20_
+https://example.org/a?x=%20~
+https://example.org/a?x=%20'
+https://example.org/a?x=%20"
+.
+<p><a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>?
+<a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>!
+<a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>.
+<a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>,
+<a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>:
+<a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>;
+<a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>*
+<a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>_
+<a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>~
+<a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>&#x27;
+<a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a>&quot;</p>
+````````````````````````````````
+
+Interior quote and bracket characters are retained and escaped by the
+HTML renderer.
+
+```````````````````````````````` example
+https://example.org/a"tail
+https://example.org/a>b
+https://example.org/a|b
+https://example.org/a[b]c
+https://example.org/a{b}c
+.
+<p><a href="https://example.org/a%22tail">https://example.org/a&quot;tail</a>
+<a href="https://example.org/a%3Eb">https://example.org/a&gt;b</a>
+<a href="https://example.org/a%7Cb">https://example.org/a|b</a>
+<a href="https://example.org/a%5Bb%5Dc">https://example.org/a[b]c</a>
+<a href="https://example.org/a%7Bb%7Dc">https://example.org/a{b}c</a></p>
+````````````````````````````````
+
+Excess closing square brackets and braces at the end are excluded from the
+URL the same way as excess closing parentheses, so the URL may be enclosed
+in them. (A whole `{...}` in running text is an expression MD4X passes
+through verbatim, see `spec-binding.txt`, so the braces here are not a pair.)
+
+```````````````````````````````` example
+[https://example.org/a?x=y]
+https://example.org/a?x=y}
+https://example.org/a[b]c]
+https://example.org/a{b}c}
+.
+<p>[<a href="https://example.org/a?x=y">https://example.org/a?x=y</a>]
+<a href="https://example.org/a?x=y">https://example.org/a?x=y</a>}
+<a href="https://example.org/a%5Bb%5Dc">https://example.org/a[b]c</a>]
+<a href="https://example.org/a%7Bb%7Dc">https://example.org/a{b}c</a>}</p>
+````````````````````````````````
+
+Entity references and backslash escapes are not Markdown spans but just a few
+characters of the URL, the same way as in standard autolinks: The link text
+keeps them verbatim and the entity references are resolved in the `href`.
+
+```````````````````````````````` example
+https://example.org/?a=b&amp;c=d
+https://example.org/a\_b
+https://example.org/a\(b\)
+.
+<p><a href="https://example.org/?a=b&amp;c=d">https://example.org/?a=b&amp;amp;c=d</a>
+<a href="https://example.org/a%5C_b">https://example.org/a\_b</a>
+<a href="https://example.org/a%5C(b%5C)">https://example.org/a\(b\)</a></p>
+````````````````````````````````
+
+A trailing entity reference is excluded as a whole, like other terminal
+punctuation, and so is a backslash-escaped terminal punctuation character.
+
+```````````````````````````````` example
+https://example.org/?a=b&amp;
+https://example.org/?a=b&amp;&amp;.
+https://example.org/a\.
+.
+<p><a href="https://example.org/?a=b">https://example.org/?a=b</a>&amp;
+<a href="https://example.org/?a=b">https://example.org/?a=b</a>&amp;&amp;.
+<a href="https://example.org/a">https://example.org/a</a>.</p>
+````````````````````````````````
+
+Unicode URL tails are supported. Unicode whitespace ends the link.
+
+```````````````````````````````` example
+https://example.org/café?q=naïve
+https://example.org/a tail
+https://example.org/a tail
+.
+<p><a href="https://example.org/caf%C3%A9?q=na%C3%AFve">https://example.org/café?q=naïve</a>
+<a href="https://example.org/a">https://example.org/a</a> tail
+<a href="https://example.org/a">https://example.org/a</a> tail</p>
+````````````````````````````````
+
+A less-than sign ends the tail before HTML or literal text.
+
+```````````````````````````````` example
+https://example.org/path<em>x</em>
+https://example.org/path<not-a-tag
+.
+<p><a href="https://example.org/path">https://example.org/path</a><em>x</em>
+<a href="https://example.org/path">https://example.org/path</a>&lt;not-a-tag</p>
+````````````````````````````````
+
+Resolved Markdown spans keep their boundaries. Code and explicit links
+continue to use their own parsing paths.
+
+```````````````````````````````` example
+**https://example.org/a?x=%20**
+*https://example.org/a?x=%20*
+~~https://example.org/a?x=%20~~
+`https://example.org/a?x=%20`
+[explicit](https://example.org/a?x=%20)
+https://example.org/a?x=%20`code`
+.
+<p><strong><a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a></strong>
+<em><a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a></em>
+<del><a href="https://example.org/a?x=%20">https://example.org/a?x=%20</a></del>
+<code>https://example.org/a?x=%20</code>
+<a href="https://example.org/a?x=%20">explicit</a>
+https://example.org/a?x=%20<code>code</code></p>
+````````````````````````````````
+
+E-mail rules are independent of URL-tail scanning.
+
+```````````````````````````````` example
+john.doe@example.org
+john.doe@example.org*
+john.doe@example.org:
+.
+<p><a href="mailto:john.doe@example.org">john.doe@example.org</a>
+john.doe@example.org*
+john.doe@example.org:</p>
+````````````````````````````````
+
+
 ## Permissive WWW Autolinks
 
 Permissive WWW autolinks are very similar
@@ -189,13 +444,26 @@ www.google.com/search?q=Markdown
 <p><a href="http://www.google.com/search?q=Markdown">www.google.com/search?q=Markdown</a></p>
 ````````````````````````````````
 
+Without a scheme there is nothing to make the intent explicit, so the host
+still has to have at least two components; a port is allowed as for URL
+autolinks:
+
+```````````````````````````````` example
+www.localhost
+
+www.example.com:8080/path
+.
+<p>www.localhost</p>
+<p><a href="http://www.example.com:8080/path">www.example.com:8080/path</a></p>
+````````````````````````````````
+
 
 ## Permissive E-mail Autolinks
 
 Permissive E-mail autolinks impose the
 following limitations to the e-mail addresses:
 
-1. The username (before the `@`) can only use alphanumerical characters and
+1. The user name (before the `@`) can only use alphanumerical characters and
    characters `.`, `-`, `_` and `+`. However every such non-alphanumerical
    character must be immediately preceded and followed by an alphanumerical
    character.

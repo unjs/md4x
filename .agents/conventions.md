@@ -106,8 +106,9 @@ abort code, not a flag).
 - **Mark flags are namespaced** in `types.MarkFlags` — one `const MarkFlags = types.MarkFlags;` alias
   per file, not fourteen per-flag aliases. Do not reintroduce loose `MD_MARK_*` consts, and do **not**
   make it a `packed struct(u8)`: the upper bits are deliberately overloaded per mark type (`0x20` is
-  `emph_oc` / `autolink` / `valid_permissive_autolink` / `has_nested_brackets` depending on
-  `mark.ch`; `0x40` is `emph_mod3_0`, `autolink_missing_mailto` **and** `footnote_ref` — the
+  `emph_oc` / `autolink` / `valid_permissive_autolink` / `has_nested_brackets` /
+  `dummy_bracket_consumed` depending on `mark.ch` — the last on the `'D'` dummy after a bracket
+  opener; `0x40` is `emph_mod3_0`, `autolink_missing_mailto` **and** `footnote_ref` — the
   last only ever set on a `'['`, which never carries either of the other two). The values are
   frozen.
 - **`MD_BLOCK.getType()` vs `typeIsRaw()`:** `getType()` decodes the stored byte with `@enumFromInt`

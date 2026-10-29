@@ -687,8 +687,10 @@ folded<a href="#fnref-1-1" class="footnote-backref">&#8617;</a> <a href="#fnref-
 </section>
 ````````````````````````````````
 
-Unusual but legal labels; `[^A b]` has whitespace so it is neither a definition
-nor a reference:
+Unusual but legal labels; `[^A b]` has whitespace so it is not a footnote
+definition — it is an ordinary link reference definition with the label `^A b`,
+and `[^A b]` with no footnote to match is an ordinary shortcut reference link to
+it (md4c ae821cb; GitHub renders it the same way):
 
 ```````````````````````````````` example
 Odd labels [^A b], [^ünï], [^*x*], [^1-2_3], [^], [^ ], [^a[b], [^a]b].
@@ -698,7 +700,7 @@ Odd labels [^A b], [^ünï], [^*x*], [^1-2_3], [^], [^ ], [^a[b], [^a]b].
 [^*x*]: stars
 [^1-2_3]: mixed
 .
-<p>Odd labels [^A b], <sup><a href="#fn-1" id="fnref-1-1">1</a></sup>, <sup><a href="#fn-2" id="fnref-2-1">2</a></sup>, <sup><a href="#fn-3" id="fnref-3-1">3</a></sup>, [^], [^ ], [^a[b], [^a]b].</p>
+<p>Odd labels <a href="spaced">^A b</a>, <sup><a href="#fn-1" id="fnref-1-1">1</a></sup>, <sup><a href="#fn-2" id="fnref-2-1">2</a></sup>, <sup><a href="#fn-3" id="fnref-3-1">3</a></sup>, [^], [^ ], [^a[b], [^a]b].</p>
 <section class="footnotes">
 <ol>
 <li id="fn-1">
@@ -709,6 +711,96 @@ stars<a href="#fnref-2-1" class="footnote-backref">&#8617;</a>
 </li>
 <li id="fn-3">
 mixed<a href="#fnref-3-1" class="footnote-backref">&#8617;</a>
+</li>
+</ol>
+</section>
+````````````````````````````````
+
+
+## A footnote-like bracket with no definition is an ordinary bracket
+
+With no definition to match, `[^x]` is an ordinary bracket pair whose text
+starts with the `^`, so it can still be an inline, full or collapsed reference
+link, and the spans around it stay balanced (md4c `ae821cb`; GitHub renders all
+four the same way — md4x has no superscript extension, so `^a^` stays text):
+
+```````````````````````````````` example
+[^x](https://example.test/path)
+.
+<p><a href="https://example.test/path">^x</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[^a^]()
+.
+<p><a href="">^a^</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+[^x][ref]
+
+[ref]: /u
+.
+<p><a href="/u">^x</a></p>
+````````````````````````````````
+
+```````````````````````````````` example
+*a [^x](/u*) b*
+.
+<p><em>a <a href="/u*">^x</a> b</em></p>
+````````````````````````````````
+
+The md4x `[text]{attrs}` span applies the same way; a defined reference still
+wins over the attributes:
+
+```````````````````````````````` example
+[^1]{.cls} and [^z]{.cls}
+
+[^1]: n
+.
+<p><sup><a href="#fn-1" id="fnref-1-1">1</a></sup>{.cls} and <span class="cls">^z</span></p>
+<section class="footnotes">
+<ol>
+<li id="fn-1">
+n<a href="#fnref-1-1" class="footnote-backref">&#8617;</a>
+</li>
+</ol>
+</section>
+````````````````````````````````
+
+
+## Reference labels are matched the way GitHub matches them
+
+A reference label may carry surrounding whitespace and is not capped at 75
+characters: GitHub resolves both, up to its 1000-byte label limit. md4c
+`f5be4b7` rejects both; md4x takes only its O(n²) fix (a label holding a
+bracket is rejected before the lookup hashes it):
+
+```````````````````````````````` example
+x[^ a] y[^a ]
+
+[^a]: note
+.
+<p>x<sup><a href="#fn-1" id="fnref-1-1">1</a></sup> y<sup><a href="#fn-1" id="fnref-1-2">1</a></sup></p>
+<section class="footnotes">
+<ol>
+<li id="fn-1">
+note<a href="#fnref-1-1" class="footnote-backref">&#8617;</a> <a href="#fnref-1-2" class="footnote-backref">&#8617;</a>
+</li>
+</ol>
+</section>
+````````````````````````````````
+
+```````````````````````````````` example
+x[^aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]
+
+[^aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]: note
+.
+<p>x<sup><a href="#fn-1" id="fnref-1-1">1</a></sup></p>
+<section class="footnotes">
+<ol>
+<li id="fn-1">
+note<a href="#fnref-1-1" class="footnote-backref">&#8617;</a>
 </li>
 </ol>
 </section>

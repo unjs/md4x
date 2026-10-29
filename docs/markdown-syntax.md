@@ -87,7 +87,11 @@ Text with a footnote[^1] and again[^1].
 - Definitions are emitted **at the very end of the document**, in order of
   **first reference**, not definition order. A definition that is never
   referenced is consumed and never emitted; a reference whose label has no
-  definition stays literal text. Duplicate labels: the first definition wins.
+  definition is an ordinary bracket pair (text starting with `^`), so it stays
+  literal text unless it forms a link — `[^x](/u)` is a link to `/u`, as on
+  GitHub. A reference first made from inside another footnote's body is
+  numbered and emitted after the ones before it. Duplicate labels: the first
+  definition wins.
 - The reference renders `<sup><a href="#fn-N" id="fnref-N-K">N</a></sup>`, and the
   definitions render inside `<section class="footnotes"><ol><li id="fn-N">…`, with
   one `↩` back-reference anchor per reference.
@@ -96,15 +100,22 @@ Interactions with the other MD4X extensions:
 
 - `[^1]{.cls}` — **footnote wins**, the `{...}` stays literal. The span is
   self-contained, so there is no content for inline attributes to attach to.
+  With no `[^1]:` definition it is an ordinary `[text]{attrs}` span.
 - A reference that lands inside a link **destination** is swallowed by the
   destination and never resolves.
 - Alerts (`[!TYPE]`) and components (`:name[…]`, `::name`) do not overlap `[^`.
 
 ## Extension: Permissive Autolinks
 
-- **URL**: `https://example.com`
-- **Email**: `john@example.com`
-- **WWW**: `www.example.com`
+- **URL**: `https://example.com` — `http`, `https` and `ftp` only; a single-label host
+  (`http://localhost`) and a numeric port (`:3000`) are accepted
+- **Email**: `john@example.com`, also with an explicit `mailto:` or `xmpp:` in front
+- **WWW**: `www.example.com` — the host needs at least two labels
+
+After the host, a path, query or fragment runs to the next whitespace, `<`, control
+character or Markdown syntax (an entity reference or backslash escape is part of the
+URL), then trailing `?!.,:;*_~'"`, a trailing entity and an excess closing `)`, `]` or
+`}` are left outside the link. `test/spec-permissive-autolinks.txt` has the full rules.
 
 ## Extension: LaTeX Math
 

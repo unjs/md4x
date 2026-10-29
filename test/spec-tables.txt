@@ -409,3 +409,103 @@ split on pipes, so there is no escape to undo.
 .
 <p><code>a\|b</code> and <span title="a\|b">x</span> and <x-equation>c\|d</x-equation></p>
 ````````````````````````````````
+
+
+### Empty cells between adjacent pipes
+
+Two pipes with nothing between them delimit an empty cell, and a longer run of
+pipes delimits several. md4c (and md4x before it) dropped every zero-width cell
+instead, shifting the rest of the row left — `| a || c |` came out as `a`, `c`,
+then an empty padding cell. GitHub keeps the columns where the author put them.
+Imported from md4c 60965ab (`test/spec-spoilers.txt`, the no-spoilers case);
+md4x has no spoilers, so every `||` inside a table row is two boundaries.
+
+```````````````````````````````` example
+| A | B | C | D | E |
+|---|---|---|---|---|
+| a     ||c||     e |
+.
+<table>
+<thead>
+<tr>
+<th>A</th>
+<th>B</th>
+<th>C</th>
+<th>D</th>
+<th>E</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>a</td>
+<td></td>
+<td>c</td>
+<td></td>
+<td>e</td>
+</tr>
+</tbody>
+</table>
+````````````````````````````````
+
+The row's own leading and trailing pipes are still optional, so an empty first
+or last cell needs its own pipe pair:
+
+```````````````````````````````` example
+| a | b | c |
+|---|---|---|
+|| y | z |
+| x | y ||
+| x ||| 
+.
+<table>
+<thead>
+<tr>
+<th>a</th>
+<th>b</th>
+<th>c</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td></td>
+<td>y</td>
+<td>z</td>
+</tr>
+<tr>
+<td>x</td>
+<td>y</td>
+<td></td>
+</tr>
+<tr>
+<td>x</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+````````````````````````````````
+
+The header row follows the same rule:
+
+```````````````````````````````` example
+|| y | z |
+|---|---|---|
+| a | b | c |
+.
+<table>
+<thead>
+<tr>
+<th></th>
+<th>y</th>
+<th>z</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>a</td>
+<td>b</td>
+<td>c</td>
+</tr>
+</tbody>
+</table>
+````````````````````````````````

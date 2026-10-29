@@ -3,9 +3,9 @@
   "branch": "master",
   "fork_point": "481fbfbdf72daab2912380d62bb5f2187d438408",
   "fork_point_date": "2024-02-25",
-  "last_reviewed": "c4be8625eb11725d604232b028df10c2ddf9b577",
-  "last_reviewed_date": "2026-08-06",
-  "reviewed_on": "2026-08-13",
+  "last_reviewed": "f9e5eb232b95b737373ae706648cb75bd259ed1a",
+  "last_reviewed_date": "2026-10-19",
+  "reviewed_on": "2026-10-29",
   "paths": ["src", "test", "md2html", "scripts"],
   "ledger": ".agents/upstream-sync.md"
 }
