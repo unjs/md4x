@@ -24,6 +24,11 @@ pathological = {
     "U+0000 in code span across lines":
             ("`\u0000\n`",
             re.compile(r"<p><code>.? </code></p>")),
+    # md4c a25ed43. md4x's line-end scan never had md4c's no-CR fast path,
+    # but the mixed form is what such a path would get wrong.
+    "CR and CR+LF line endings":
+            ("# h1\r\n\r\na\rb\r\n\r- x\r\n- y\r",
+            re.compile("^<h1>h1</h1>\r?\n<p>a\r?\nb</p>\r?\n<ul>\r?\n<li>x</li>\r?\n<li>y</li>\r?\n</ul>\r?\n$")),
     "U+FEFF (Unicode BOM)":
             ("\ufefffoo",
             re.compile("<p>foo</p>")),
@@ -114,6 +119,19 @@ pathological = {
     "broken thematic break":
             (("* " * 50000 + "a"),
             re.compile("<ul>\r?\n(<li>\r?\n<ul>\r?\n){49999}<li>a</li>\r?\n</ul>\r?\n(</li>\r?\n</ul>\r?\n){49999}")),
+    # md4c ff1cd9f / be8a0fe / 9fed560 (GHSA-582f-rcwc-x4mp). Each blank line
+    # used to re-walk every open list level, O(depth) per line. Timed (see
+    # pathological_budget below): the output is right either way, and the
+    # quadratic build took 7.5 s and 14.8 s here against ~0.04 s. The regex is
+    # anchored and split in two runs to stay under the 65535-repeat cap some
+    # Python builds impose: an unanchored partial count would be retried from
+    # every <li> and make the regex itself quadratic.
+    "many implicit nested blocks":
+            (("- " * 100000 + "x\n" + "\n" * 100000),
+            re.compile("^<ul>\r?\n(<li>\r?\n<ul>\r?\n){50000}(<li>\r?\n<ul>\r?\n){49999}<li>x</li>\r?\n")),
+    "many implicit nested blocks, alternating blank lines":
+            (("- " * 100000 + "x\n" + "\n  \n" * 100000),
+            re.compile("^<ul>\r?\n(<li>\r?\n<ul>\r?\n){50000}(<li>\r?\n<ul>\r?\n){49999}<li>x</li>\r?\n")),
     "nested invalid link references":
             (("[" * 50000 + "]" * 50000 + "\n\n[a]: /b"),
             re.compile(r"\[{50000}\]{50000}")),
@@ -389,6 +407,14 @@ def time_heal(program, inp, budget=None):
     return (best, 0, actual, err)
 
 
+# Cases above whose bug is time, not output: a hard cap in seconds, failing the
+# case when it is blown. Generous on purpose -- 50x the fixed build's time, and
+# still several times under the quadratic one.
+pathological_budget = {
+    "many implicit nested blocks": 2.0,
+    "many implicit nested blocks, alternating blank lines": 2.0,
+}
+
 whitespace_re = re.compile('/s+/')
 passed = 0
 errored = 0
@@ -412,12 +438,17 @@ for description in pathological:
         (inp, regex, default_options) = pathological[description]
         prog = Prog(cmdline=args.program, default_options=default_options)
 
+    budget = pathological_budget.get(description)
     start = timer()
     try:
-        [rc, actual, err] = prog.to_html(inp, timeout=PATHOLOGICAL_TIMEOUT)
+        [rc, actual, err] = prog.to_html(inp, timeout=budget or PATHOLOGICAL_TIMEOUT)
     except TimeoutExpired:
-        errored += 1
-        print('{:35} [TIMEOUT] killed after {:.0f} secs'.format(description, PATHOLOGICAL_TIMEOUT))
+        if budget is None:
+            errored += 1
+            print('{:35} [TIMEOUT] killed after {:.0f} secs'.format(description, PATHOLOGICAL_TIMEOUT))
+        else:
+            failed += 1
+            print('{:35} [FAILED] killed after the {:.3f} sec budget'.format(description, budget))
         continue
     end = timer()
     if rc != 0:

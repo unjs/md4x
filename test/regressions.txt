@@ -2556,3 +2556,435 @@ list:
 </ul>
 <p>foo</p>
 ````````````````````````````````
+
+
+## [Issue 247](https://github.com/mity/md4c/issues/247)
+
+Tabs in verbatim content are preserved after removing structural indentation;
+only the remainder of a partially consumed tab is expanded to spaces. md4x fixed
+this independently (unjs/md4x#23, § Issue 23 above); md4c landed its own fix in
+2671f25. These are md4c's examples. md4x's `<pre>` contents match md4c's
+byte-for-byte on all 17 and only md4x's newline after `<li>` differs, so the
+expectations are md4x's bytes, compared without normalization.
+
+```````````````````````````````` example [no-normalize]
+<!--
+→x
+-->
+```
+<!--
+→y
+-->
+```
+→z
+.
+<!--
+→x
+-->
+<pre><code>&lt;!--
+→y
+--&gt;
+</code></pre>
+<pre><code>z
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+```
+→→x
+ → y
+```
+.
+<pre><code>→→x
+ → y
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+~~~
+→
+ →→
+~~~
+.
+<pre><code>→
+ →→
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+  ```
+→→x
+  →y
+```
+.
+<pre><code>  →x
+→y
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+> ```
+> →→x
+> ```
+.
+<blockquote>
+<pre><code>→→x
+</code></pre>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+> ```
+>→→x
+> ```
+.
+<blockquote>
+<pre><code>  →x
+</code></pre>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+- ```
+  →x
+  ```
+.
+<ul>
+<li>
+<pre><code>→x
+</code></pre>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+- ```
+→→x
+  ```
+.
+<ul>
+<li>
+<pre><code>  →x
+</code></pre>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+1. ```
+→→x
+   ```
+.
+<ol>
+<li>
+<pre><code> →x
+</code></pre>
+</li>
+</ol>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+<pre>
+→x
+</pre>
+.
+<pre>
+→x
+</pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+> - <pre>
+>   →x
+>   </pre>
+.
+<blockquote>
+<ul>
+<li>
+<pre>
+→x
+</pre>
+</li>
+</ul>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+→→x
+    →y
+.
+<pre><code>→x
+→y
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+ →→x
+.
+<pre><code>→x
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+    x
+    →
+.
+<pre><code>x
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+    x
+    →
+    y
+.
+<pre><code>x
+→
+y
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+  ```
+    x
+```
+.
+<pre><code>  x
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example [no-normalize]
+→x
+.
+<pre><code>x
+</code></pre>
+````````````````````````````````
+
+
+## [Issue 414](https://github.com/mity/md4c/issues/414) — deliberately not ported
+
+md4c 10fa4f4 turns the line after a paragraph's leading link reference
+definitions into a thematic break when it reads as one. GitHub (cmark-gfm) does
+not: the setext underline finds a paragraph with no content left, so `---`
+stays paragraph text, and the definition still counts. md4x keeps GitHub's
+reading; see `.agents/upstream-sync.md`.
+
+```````````````````````````````` example
+[foo]:bar
+---
+.
+<p>---</p>
+````````````````````````````````
+
+```````````````````````````````` example
+[foo]:bar
+---
+baz
+
+[foo]
+.
+<p>---
+baz</p>
+<p><a href="bar">foo</a></p>
+````````````````````````````````
+
+
+## [Issue 435](https://github.com/mity/md4c/issues/435)
+
+Lower-case "<![cdata" does not make a valid HTML block starting condition
+(md4c 902b1bc; md4x already required a letter after `<!`, § Issue 23).
+
+```````````````````````````````` example
+<![cdata[ text ]]>
+.
+<p>&lt;![cdata[ text ]]&gt;</p>
+````````````````````````````````
+
+
+## HTML block tag-name boundaries
+
+From md4c e313f46. A longer type 6 name stays eligible when an earlier, shorter
+name in the same bucket matches only a prefix: `th` used to shadow `thead`,
+`head` `header`, `li` `link`, `tr` `track` and so on, which left those tags to
+type 7 — and type 7 cannot interrupt a paragraph.
+
+```````````````````````````````` example
+<prefix>
+
+# Heading
+.
+<prefix>
+<h1>Heading</h1>
+````````````````````````````````
+
+```````````````````````````````` example
+para
+<thead>
+*x*
+.
+<p>para</p>
+<thead>
+*x*
+````````````````````````````````
+
+```````````````````````````````` example
+para
+</thead>
+*x*
+.
+<p>para</p>
+</thead>
+*x*
+````````````````````````````````
+
+```````````````````````````````` example
+para
+<header>
+*x*
+.
+<p>para</p>
+<header>
+*x*
+````````````````````````````````
+
+```````````````````````````````` example
+para
+<link>
+*x*
+.
+<p>para</p>
+<link>
+*x*
+````````````````````````````````
+
+The other half of e313f46 is deliberately **not** ported: md4c refuses `<pre/>`
+(and `<script/>`, `<style/>`, `<textarea/>`) as an HTML block, following the
+letter of spec 4.6 start condition 7. cmark-gfm has no such exclusion and GitHub
+renders `<pre/>` on its own line as a type 7 block; md4x stays with GitHub.
+
+```````````````````````````````` example
+<pre/>
+*x*
+.
+<pre/>
+*x*
+````````````````````````````````
+
+
+## Nonempty list item followed by two blank lines
+
+From md4c 205b7f7, whose fix md4x already had (unjs/md4x#28,
+`md_top_block_is_empty_li`). Two leading blank lines put the content line at
+offset four; this must not make later indented content leave the item.
+
+```````````````````````````````` example
+
+
+- a
+
+
+  b
+.
+<ul>
+<li>
+<p>a</p>
+<p>b</p>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example
+-
+
+
+  b
+.
+<ul>
+<li></li>
+</ul>
+<p>b</p>
+````````````````````````````````
+
+```````````````````````````````` example
+-
+  [ref]: /url
+
+
+  b
+.
+<ul>
+<li>
+<p>b</p>
+</li>
+</ul>
+````````````````````````````````
+
+
+## Nested empty item after two blank lines
+
+From md4c 157e9fc. The inner item closes, while the following paragraph remains
+in the outer item.
+
+```````````````````````````````` example
+- -
+
+
+    b
+.
+<ul>
+<li>
+<ul>
+<li></li>
+</ul>
+<p>b</p>
+</li>
+</ul>
+````````````````````````````````
+
+
+## Empty item inside nested block quotes
+
+From md4c 60e8065. Closing the empty item must keep the enclosing block quote
+markers consumed: the line's indentation is the item's `contents_indent` given
+back, not `total_indent`, which also counts the columns of every `>`.
+
+```````````````````````````````` example
+> > > > -
+> > > >
+> > > >
+> > > >   b
+.
+<blockquote>
+<blockquote>
+<blockquote>
+<blockquote>
+<ul>
+<li></li>
+</ul>
+<p>b</p>
+</blockquote>
+</blockquote>
+</blockquote>
+</blockquote>
+````````````````````````````````
+
+The same with the block quote itself inside a list item:
+
+```````````````````````````````` example
+- a
+  > -
+  >
+  >
+  >   b
+.
+<ul>
+<li>a
+<blockquote>
+<ul>
+<li></li>
+</ul>
+<p>b</p>
+</blockquote>
+</li>
+</ul>
+````````````````````````````````

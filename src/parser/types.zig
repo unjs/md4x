@@ -484,6 +484,15 @@ pub const MD_CTX = struct {
     last_line_has_list_loosening_effect: bool = false,
     // Blank lines since the last non-blank one (md4c `consecutive_blank_lines`).
     consecutive_blank_lines: c_uint = 0,
+    // The run of containers the previous line, a blank one, walked through
+    // implicitly — `containers[beg..end]` are all lists (md4c
+    // `last_n_implicit_parents_{beg,end}`). A blank line starting anywhere in
+    // that run ends at `end` too, so md_analyze_line jumps there instead of
+    // re-walking every level: O(depth) per blank line was O(n^2) over `- ` * n
+    // followed by n blank lines. Only ever describes the line just analyzed;
+    // `beg == end` means no shortcut.
+    last_n_implicit_parents_beg: c_int = 0,
+    last_n_implicit_parents_end: c_int = 0,
     // Arena offset of the most recently pushed MD_BLOCK header, written by
     // md_start_new_block / md_push_container_bytes. The header is the arena's
     // top only while `last_block_off + @sizeOf(MD_BLOCK) == n_block_bytes`;
