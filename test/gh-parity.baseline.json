@@ -10,7 +10,7 @@
       "diverge": 3
     },
     "spec-tables.txt": {
-      "cases": 20,
+      "cases": 23,
       "diverge": 5
     },
     "spec-tasklists.txt": {
@@ -18,8 +18,8 @@
       "diverge": 8
     },
     "spec-footnotes.txt": {
-      "cases": 36,
-      "diverge": 27
+      "cases": 43,
+      "diverge": 30
     },
     "spec-alerts.txt": {
       "cases": 43,
@@ -37,8 +37,8 @@
   "causes": {
     "entity-escaping": 23,
     "sanitizer": 62,
-    "markup-shape": 64,
-    "unclassified": 28,
+    "markup-shape": 66,
+    "unclassified": 29,
     "unicode-punct": 2,
     "scheme-allowlist": 7,
     "autolink-rules": 6,
@@ -794,7 +794,22 @@
     {
       "suite": "spec-footnotes.txt",
       "n": 36,
+      "cause": "markup-shape"
+    },
+    {
+      "suite": "spec-footnotes.txt",
+      "n": 41,
       "cause": "unclassified"
+    },
+    {
+      "suite": "spec-footnotes.txt",
+      "n": 42,
+      "cause": "unclassified"
+    },
+    {
+      "suite": "spec-footnotes.txt",
+      "n": 43,
+      "cause": "markup-shape"
     },
     {
       "suite": "spec-alerts.txt",
