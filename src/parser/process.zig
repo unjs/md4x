@@ -169,18 +169,31 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.BlockType, beg: OFF, end:
         ctx.table_cell_boundaries_tail = -1;
         return -1;
     }
+    // pipe_offs[] holds where each cell begins; a cell ends one byte before the
+    // next entry (on its closing pipe). The row's own leading and trailing
+    // pipes are optional, so the row start / end only open or close a cell
+    // when no pipe sits there. Every other pair of adjacent entries is a cell,
+    // empty or not: `| a || c |` is three cells, as on GitHub. (md4c used to
+    // drop every zero-width cell instead, which also made the outer pipes
+    // vanish; ports the table half of md4c 60965ab.)
     var j: c_int = 0;
-    pipe_offs[@intCast(j)] = beg;
-    j += 1;
+    var last_pipe_end: OFF = beg;
+    if (ctx.table_cell_boundaries_head < 0 or ctx.marks.items[@intCast(ctx.table_cell_boundaries_head)].beg > beg) {
+        pipe_offs[@intCast(j)] = beg;
+        j += 1;
+    }
     {
         var i: c_int = ctx.table_cell_boundaries_head;
         while (i >= 0) : (i = ctx.marks.items[@intCast(i)].next) {
-            pipe_offs[@intCast(j)] = ctx.marks.items[@intCast(i)].end;
+            last_pipe_end = ctx.marks.items[@intCast(i)].end;
+            pipe_offs[@intCast(j)] = last_pipe_end;
             j += 1;
         }
     }
-    pipe_offs[@intCast(j)] = end + 1;
-    j += 1;
+    if (ctx.table_cell_boundaries_head < 0 or last_pipe_end < end) {
+        pipe_offs[@intCast(j)] = end + 1;
+        j += 1;
+    }
 
     // Process cells.
     ret = mdEnterBlock(ctx, &.{ .tr = {} });
@@ -194,15 +207,13 @@ pub fn md_process_table_row(ctx: *MD_CTX, cell_type: c.BlockType, beg: OFF, end:
     {
         var i: c_int = 0;
         while (i < j - 1 and k < col_count) : (i += 1) {
-            if (pipe_offs[@intCast(i)] < pipe_offs[@intCast(i + 1)] - 1) {
-                ret = md_process_table_cell(ctx, cell_type, align_arr[@intCast(k)], pipe_offs[@intCast(i)], pipe_offs[@intCast(i + 1)] - 1);
-                k += 1;
-                if (ret < 0) {
-                    util.free_array_a(OFF, ctx.alloc, pipe_offs, @intCast(n));
-                    ctx.table_cell_boundaries_head = -1;
-                    ctx.table_cell_boundaries_tail = -1;
-                    return ret;
-                }
+            ret = md_process_table_cell(ctx, cell_type, align_arr[@intCast(k)], pipe_offs[@intCast(i)], pipe_offs[@intCast(i + 1)] - 1);
+            k += 1;
+            if (ret < 0) {
+                util.free_array_a(OFF, ctx.alloc, pipe_offs, @intCast(n));
+                ctx.table_cell_boundaries_head = -1;
+                ctx.table_cell_boundaries_tail = -1;
+                return ret;
             }
         }
     }
